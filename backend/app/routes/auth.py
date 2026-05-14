@@ -6,36 +6,29 @@ from app.models.company import Company
 from app.utils import get_current_user
 import logging
 
+from app.utils.constants import STATUS_INACTIVE
+from app.utils.validators import safe_get_json, validate_password, validate_email
+from app.utils.db_utils import safe_commit
+
 logger = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__)
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
-    try:
-        # Try to get JSON data
-        data = request.get_json()
+    data, error = safe_get_json(request)
+    if error:
+        return error
         
-        # If data is None, try to get it from form data
-        if data is None:
-            data = {
-                'email': request.form.get('email'),
-                'password': request.form.get('password')
-            }
-        
-        # Check if data is a string (malformed JSON)
-        if isinstance(data, str):
-            return jsonify({'error': 'Invalid JSON format in request'}), 400
-        
-        if not data or not data.get('email') or not data.get('password'):
-            return jsonify({'error': 'Email and password are required'}), 400
-            
-    except Exception as e:
-        return jsonify({'error': f'Request parsing error: {str(e)}'}), 400
+    if not data or not data.get('email') or not data.get('password'):
+        return jsonify({'error': 'Email and password are required'}), 400
     
     # Find user by email
     user = User.query.filter_by(email=data['email']).first()
     
-    if not user or not check_password_hash(user.password_hash, str(data['password'])):
+    if not user or getattr(user, 'status', 1) == STATUS_INACTIVE:
+        return jsonify({'error': 'Account inactive or not found'}), 401
+        
+    if not check_password_hash(user.password_hash, str(data['password'])):
         return jsonify({'error': 'Invalid credentials'}), 401
     
     # Get company information
@@ -81,7 +74,10 @@ def update_profile():
     if not user:
         return jsonify({'error': 'User not found'}), 404
     
-    data = request.get_json()
+    data, error = safe_get_json(request)
+    if error:
+        return error
+        
     if not data:
         return jsonify({'error': 'No data provided'}), 400
     
@@ -89,32 +85,38 @@ def update_profile():
     if 'name' in data:
         user.name = data['name']
     if 'email' in data:
+        email, error = validate_email(data['email'])
+        if error:
+            return error
+            
         # Check if email is already taken by another user
         existing_user = User.query.filter_by(
-            email=data['email'], 
+            email=email, 
             company_id=user.company_id
         ).first()
         if existing_user and existing_user.id != user.id:
             return jsonify({'error': 'Email already in use'}), 400
-        user.email = data['email']
+        user.email = email
     
     from app import db
-    db.session.commit()
     
     company = Company.query.get(user.company_id)
-    
-    return jsonify({
+    success_tuple = (jsonify({
         'id': user.id,
         'name': user.name,
         'email': user.email,
         'company_id': user.company_id,
         'company_name': company.company_name if company else None
-    }), 200
+    }), 200)
+    
+    return safe_commit(success_tuple, 'Internal server error during profile update', logger=logger)
 
 @auth_bp.route('/forgot-password', methods=['POST'])
 def forgot_password():
     """Initiate password reset process"""
-    data = request.get_json()
+    data, error = safe_get_json(request)
+    if error:
+        return error
 
     if not data or not data.get('email'):
         return jsonify({'error': 'Email is required'}), 400
@@ -125,19 +127,27 @@ def forgot_password():
     if user:
         from app import db
         reset_token = user.generate_reset_token(expires_in_minutes=30)
-        db.session.commit()
-
-        # In production: send reset_token via email instead of returning it.
-        # For development, we log it server-side only.
-        logger.info(f"Password reset requested for user {user.id} (email: {user.email}). Token stored in DB.")
-
+        
         # Only expose the token in debug / development mode (NOT in production).
         from flask import current_app
         if current_app.debug:
-            return jsonify({
+            success_tuple = (jsonify({
                 'message': 'Password reset instructions sent to your email',
                 'reset_token': reset_token  # Development only — remove in production
-            }), 200
+            }), 200)
+        else:
+            success_tuple = (jsonify({
+                'message': 'If that email is registered, you will receive reset instructions shortly.'
+            }), 200)
+            
+        result = safe_commit(success_tuple, 'Internal server error during token generation', logger=logger)
+        
+        # In production: send reset_token via email instead of returning it.
+        # For development, we log it server-side only.
+        logger.info(f"Password reset requested for user {user.id} (email: {user.email}). Token stored in DB.")
+        
+        if current_app.debug:
+            return result
 
     return jsonify({
         'message': 'If that email is registered, you will receive reset instructions shortly.'
@@ -147,14 +157,16 @@ def forgot_password():
 @auth_bp.route('/reset-password', methods=['POST'])
 def reset_password():
     """Reset password with token"""
-    data = request.get_json()
+    data, error = safe_get_json(request)
+    if error:
+        return error
 
     if not data or not data.get('token') or not data.get('new_password'):
         return jsonify({'error': 'token and new_password are required'}), 400
 
-    # Enforce minimum password length
-    if len(data['new_password']) < 8:
-        return jsonify({'error': 'Password must be at least 8 characters long'}), 400
+    pwd_error = validate_password(data['new_password'])
+    if pwd_error:
+        return pwd_error
 
     # Look up the token in the database
     user = User.query.filter_by(password_reset_token=data['token']).first()
@@ -164,10 +176,11 @@ def reset_password():
     from app import db
     user.password_hash = generate_password_hash(data['new_password'])
     user.clear_reset_token()
-    db.session.commit()
-
-    logger.info(f"Password reset successfully for user {user.id}")
-    return jsonify({'message': 'Password reset successfully'}), 200
+    
+    result = safe_commit((jsonify({'message': 'Password reset successfully'}), 200), 'Internal server error during password reset', logger=logger)
+    if result[1] == 200:
+        logger.info(f"Password reset successfully for user {user.id}")
+    return result
 
 @auth_bp.route('/change-password', methods=['POST'])
 @jwt_required()
@@ -177,7 +190,9 @@ def change_password():
     if not user:
         return jsonify({'error': 'User not found'}), 404
     
-    data = request.get_json()
+    data, error = safe_get_json(request)
+    if error:
+        return error
     
     if not data or not data.get('current_password') or not data.get('new_password'):
         return jsonify({'error': 'Current password and new password are required'}), 400
@@ -185,12 +200,13 @@ def change_password():
     # Verify current password
     if not check_password_hash(user.password_hash, data['current_password']):
         return jsonify({'error': 'Current password is incorrect'}), 400
+        
+    pwd_error = validate_password(data['new_password'])
+    if pwd_error:
+        return pwd_error
     
     # Update password
     user.password_hash = generate_password_hash(data['new_password'])
     from app import db
-    db.session.commit()
     
-    return jsonify({
-        'message': 'Password changed successfully'
-    }), 200
+    return safe_commit((jsonify({'message': 'Password changed successfully'}), 200), 'Internal server error during password change', logger=logger)

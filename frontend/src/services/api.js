@@ -102,6 +102,11 @@ api.interceptors.response.use(
 // Debug mode (set to false in production)
 window.DEBUG_API = false;
 
+// Reusable API error handler
+export const handleApiError = (error) => {
+  return error.response?.data?.error || error.message || 'An unexpected error occurred';
+};
+
 // Auth API
 export const authAPI = {
   login: (credentials) => api.post('/auth/login', credentials),

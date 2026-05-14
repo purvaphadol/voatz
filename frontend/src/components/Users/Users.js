@@ -10,9 +10,7 @@ import {
   DialogContent,
   DialogActions,
   Alert,
-  Chip,
-  IconButton,
-  Tooltip,
+ Chip,
   CircularProgress,
 } from '@mui/material';
 import {
@@ -27,9 +25,8 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  Visibility as ViewIcon,
 } from '@mui/icons-material';
-import { usersAPI, departmentsAPI } from '../../services/api';
+import { usersAPI, departmentsAPI, handleApiError } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
@@ -38,7 +35,7 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
     <GridToolbarFilterButton />
     <GridToolbarExport />
     {hasCreatePermission && (
-      <Button startIcon={<AddIcon />} onClick={onAdd}>
+      <Button startIcon={<AddIcon />} onClick={onAdd} sx={{ ml: 2 }}>
         Add User
       </Button>
     )}
@@ -60,6 +57,14 @@ const Users = () => {
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Pagination & Search
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalRows, setTotalRows] = useState(0);
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   const canView = hasPermission('Users', 'view');
   const canCreate = hasPermission('Users', 'create');
@@ -73,19 +78,36 @@ const Users = () => {
   console.log('👥 [Users] canUpdate:', canUpdate);
   console.log('👥 [Users] canDelete:', canDelete);
 
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   useEffect(() => {
     loadUsers();
+  }, [page, pageSize, debouncedSearch]);
+
+  useEffect(() => {
     loadDepartments();
   }, []);
 
   const loadUsers = async () => {
     try {
       setLoading(true);
-      const response = await usersAPI.getAll();
+      const params = {
+        page: page + 1, // backend is 1-indexed
+        per_page: pageSize,
+        search: debouncedSearch || undefined
+      };
+      const response = await usersAPI.getAll(params);
       setUsers(response.data.data || []);
+      setTotalRows(response.data.total || 0);
     } catch (error) {
       console.error('Error loading users:', error);
-      setError('Failed to load users');
+      setError(handleApiError(error));
     } finally {
       setLoading(false);
     }
@@ -129,7 +151,7 @@ const Users = () => {
         setSuccess('User deleted successfully');
         loadUsers();
       } catch (error) {
-        setError('Failed to delete user');
+        setError(handleApiError(error));
       }
     }
   };
@@ -155,8 +177,29 @@ const Users = () => {
       setError('Invalid email address format');
       return;
     }
+    
+    if (!editingUser && !cleanedData.password) {
+      setError('Password is required');
+      return;
+    }
+    
+    if (cleanedData.password) {
+      if (cleanedData.password.length < 8) {
+        setError('Password must be at least 8 characters long');
+        return;
+      }
+      if (!/[a-zA-Z]/.test(cleanedData.password)) {
+        setError('Password must contain at least one letter');
+        return;
+      }
+      if (!/[0-9]/.test(cleanedData.password)) {
+        setError('Password must contain at least one number');
+        return;
+      }
+    }
 
     try {
+      setIsSubmitting(true);
       if (editingUser) {
         await usersAPI.update(editingUser.id, cleanedData);
         setSuccess('User updated successfully');
@@ -167,7 +210,9 @@ const Users = () => {
       setDialogOpen(false);
       loadUsers();
     } catch (error) {
-      setError((error.response && error.response.data && error.response.data.error) || 'Operation failed');
+      setError(handleApiError(error));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -223,16 +268,6 @@ const Users = () => {
       getActions: (params) => {
         const actions = [];
         
-        if (canView) {
-          actions.push(
-            <GridActionsCellItem
-              icon={<ViewIcon />}
-              label="View"
-              onClick={() => handleEdit(params.row)}
-            />
-          );
-        }
-        
         if (canUpdate) {
           actions.push(
             <GridActionsCellItem
@@ -277,13 +312,29 @@ const Users = () => {
           {success}
         </Alert>
       )}
+      
+      <Box sx={{ mb: 2 }}>
+        <TextField
+          label="Search Users"
+          variant="outlined"
+          size="small"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Search by name or email..."
+        />
+      </Box>
 
       <Paper sx={{ height: 600, width: '100%' }}>
         <DataGrid
           rows={users}
           columns={columns}
-          pageSize={10}
-          rowsPerPageOptions={[5, 10, 25]}
+          paginationMode="server"
+          rowCount={totalRows}
+          page={page}
+          onPageChange={(newPage) => setPage(newPage)}
+          pageSize={pageSize}
+          onPageSizeChange={(newPageSize) => setPageSize(newPageSize)}
+          rowsPerPageOptions={[5, 10, 25, 50, 100]}
           checkboxSelection
           disableSelectionOnClick
           loading={loading}
@@ -355,9 +406,9 @@ const Users = () => {
             </TextField>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button type="submit" variant="contained">
-              {editingUser ? 'Update' : 'Create'}
+            <Button onClick={() => setDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
+            <Button type="submit" variant="contained" disabled={isSubmitting}>
+              {isSubmitting ? <CircularProgress size={24} /> : (editingUser ? 'Update' : 'Create')}
             </Button>
           </DialogActions>
         </form>

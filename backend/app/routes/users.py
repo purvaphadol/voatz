@@ -8,31 +8,19 @@ from app.models.company import Company
 from app.models.role import Role
 from app.utils import get_current_company_id, require_company_context, require_permission
 from app.utils.audit import audit_action, set_audit_fields
+from app.models.department import Department
+from sqlalchemy.orm import joinedload
 from sqlalchemy import or_
 from datetime import datetime
 
-def validate_user_input(data, is_create=False):
-    if not data:
-        return None, (jsonify({'error': 'Data is required'}), 400)
-        
-    if is_create and (not data.get('name') or not data.get('email') or not data.get('password')):
-        return None, (jsonify({'error': 'Name, email, and password are required'}), 400)
-        
-    cleaned_data = {}
-    
-    if 'name' in data and data['name'] is not None:
-        name = str(data['name']).strip()
-        if not name:
-            return None, (jsonify({'error': 'Name cannot be empty'}), 400)
-        cleaned_data['name'] = name
-        
-    if 'email' in data and data['email'] is not None:
-        email = str(data['email']).strip().lower()
-        if not email:
-            return None, (jsonify({'error': 'Email cannot be empty'}), 400)
-        cleaned_data['email'] = email
-        
-    return cleaned_data, None
+from app.utils.validators import (
+    validate_user_input,
+    validate_password,
+    validate_department,
+    parse_pagination
+)
+from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE
+from app.utils.db_utils import safe_commit
 
 users_bp = Blueprint('users', __name__)
 
@@ -41,13 +29,18 @@ users_bp = Blueprint('users', __name__)
 def list_users():
     company_id = get_current_company_id()
     search = request.args.get('search')
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 10))
+    
+    page, per_page, error = parse_pagination(request)
+    if error:
+        return error[0], error[1]
 
-    query = User.query.join(Company).filter(
+    query = User.query.join(Company).options(
+        joinedload(User.company), 
+        joinedload(User.department)
+    ).filter(
         User.company_id == company_id, 
-        User.status != 0,
-        Company.status != 0
+        User.status != STATUS_INACTIVE,
+        Company.status != STATUS_INACTIVE
     ).order_by(User.updated_at.desc(), User.created_at.desc())
     if search:
         query = query.filter(or_(User.name.ilike(f'%{search}%'), User.email.ilike(f'%{search}%')))
@@ -83,6 +76,14 @@ def create_user():
     cleaned_data, error = validate_user_input(data, is_create=True)
     if error:
         return error[0], error[1]
+        
+    pwd_error = validate_password(data.get('password'))
+    if pwd_error:
+        return pwd_error
+        
+    dept_id, dept_error = validate_department(data.get('department_id'), company_id)
+    if dept_error:
+        return dept_error[0], dept_error[1]
     
     email = cleaned_data['email']
     name = cleaned_data['name']
@@ -96,16 +97,18 @@ def create_user():
     user.email = email
     user.password_hash = generate_password_hash(data['password'])
     user.company_id = company_id
-    if 'department_id' in data:
-        dept_id = data['department_id']
-        user.department_id = dept_id if dept_id else None
+    user.department_id = dept_id
     
     set_audit_fields(user, is_create=True)
     
-    db.session.add(user)
-    db.session.commit()
-    
-    return jsonify({'message': 'User created', 'user_id': user.id}), 201
+    try:
+        db.session.add(user)
+        return safe_commit((jsonify({'message': 'User created', 'user_id': user.id}), 201), 'Internal server error during user creation')
+    except Exception as e:
+        db.session.rollback()
+        from flask import current_app
+        current_app.logger.error(f"Error preparing user creation: {str(e)}")
+        return jsonify({'error': 'Internal server error during user creation'}), 500
 
 @users_bp.route('/<int:user_id>', methods=['GET'])
 @require_permission('Users', 'view')
@@ -114,8 +117,8 @@ def get_user(user_id):
     user = User.query.join(Company).filter(
         User.id == user_id, 
         User.company_id == company_id,
-        User.status != 0,
-        Company.status != 0
+        User.status != STATUS_INACTIVE,
+        Company.status != STATUS_INACTIVE
     ).first_or_404()
     
     return jsonify({
@@ -136,12 +139,22 @@ def get_user(user_id):
 @audit_action('update_user', module='Users', description='Updated a user', get_target_id=lambda *args, **kwargs: kwargs.get('user_id'))
 def update_user(user_id):
     company_id = get_current_company_id()
-    user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != 0).first_or_404()
+    user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
     data = request.get_json()
     
     cleaned_data, error = validate_user_input(data, is_create=False)
     if error:
         return error[0], error[1]
+        
+    if data.get('password'):
+        pwd_error = validate_password(data.get('password'))
+        if pwd_error:
+            return pwd_error
+            
+    if 'department_id' in data:
+        dept_id, dept_error = validate_department(data.get('department_id'), company_id)
+        if dept_error:
+            return dept_error[0], dept_error[1]
     
     if 'name' in cleaned_data:
         user.name = cleaned_data['name']
@@ -153,16 +166,16 @@ def update_user(user_id):
         if existing_user and existing_user.id != user_id:
             return jsonify({'error': 'Email already exists in this company'}), 400
         user.email = email
+        
     if data.get('password'):
         user.password_hash = generate_password_hash(data['password'])
+        
     if 'department_id' in data:
-        dept_id = data['department_id']
-        user.department_id = dept_id if dept_id else None
+        user.department_id = dept_id
         
     set_audit_fields(user, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'User updated'}), 200
+    return safe_commit((jsonify({'message': 'User updated'}), 200), 'Internal server error during user update')
 
 @users_bp.route('/<int:user_id>', methods=['DELETE'])
 @require_permission('Users', 'delete')
@@ -174,7 +187,7 @@ def delete_user(user_id):
         return jsonify({"error": "You cannot delete your own account"}), 403
 
     company_id = get_current_company_id()
-    user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != 0).first_or_404()
+    user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
     
     # Check if Super Admin
     super_admin_role = Role.query.filter_by(role_name='Super Admin').first()
@@ -187,11 +200,10 @@ def delete_user(user_id):
     # UserRoleMapping.query.filter_by(user_id=user_id).delete()
     
     # Soft delete instead of hard delete
-    user.status = 0
+    user.status = STATUS_INACTIVE
     set_audit_fields(user, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'User deleted'}), 200
+    return safe_commit((jsonify({'message': 'User deleted'}), 200), 'Internal server error during user deletion')
 
 @users_bp.route('/profile', methods=['GET'])
 @jwt_required()
@@ -204,7 +216,7 @@ def get_current_user_profile():
     user_id = get_jwt_identity()
     user = User.query.get_or_404(user_id)
     
-    if getattr(user, 'status', 1) == 0:
+    if getattr(user, 'status', STATUS_ACTIVE) == STATUS_INACTIVE:
         return jsonify({'error': 'User inactive'}), 403
     
     # Get voter profile if exists
@@ -265,7 +277,7 @@ def update_current_user_profile():
     user_id = get_jwt_identity()
     user = User.query.get_or_404(user_id)
     
-    if getattr(user, 'status', 1) == 0:
+    if getattr(user, 'status', STATUS_ACTIVE) == STATUS_INACTIVE:
         return jsonify({'error': 'User inactive'}), 403
         
     data = request.get_json()
@@ -297,5 +309,4 @@ def update_current_user_profile():
         if voter_data.get('date_of_birth'):
             voter.date_of_birth = datetime.strptime(voter_data['date_of_birth'], '%Y-%m-%d').date()
     
-    db.session.commit()
-    return jsonify({'message': 'Profile updated successfully'})
+    return safe_commit((jsonify({'message': 'Profile updated successfully'}), 200), 'Internal server error during profile update')

@@ -8,10 +8,15 @@ class User(db.Model, TimestampAuditMixin):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
-    email = db.Column(db.String(100), unique=True, nullable=False)
+    email = db.Column(db.String(100), nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
     department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+
+    # Constraints
+    __table_args__ = (
+        db.UniqueConstraint('email', 'company_id', name='uq_user_email_company'),
+    )
 
     # Password reset fields
     password_reset_token = db.Column(db.String(64), nullable=True, index=True)
