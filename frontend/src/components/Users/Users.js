@@ -139,12 +139,29 @@ const Users = () => {
     setError('');
     setSuccess('');
 
+    const cleanedData = {
+      ...formData,
+      name: formData.name.trim(),
+      email: formData.email.trim().toLowerCase(),
+    };
+
+    if (!cleanedData.name || !cleanedData.email) {
+      setError('Name and email cannot be empty');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanedData.email)) {
+      setError('Invalid email address format');
+      return;
+    }
+
     try {
       if (editingUser) {
-        await usersAPI.update(editingUser.id, formData);
+        await usersAPI.update(editingUser.id, cleanedData);
         setSuccess('User updated successfully');
       } else {
-        await usersAPI.create(formData);
+        await usersAPI.create(cleanedData);
         setSuccess('User created successfully');
       }
       setDialogOpen(false);
@@ -348,5 +365,6 @@ const Users = () => {
     </Box>
   );
 };
+
 
 export default Users; 

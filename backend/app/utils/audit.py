@@ -6,6 +6,19 @@ from functools import wraps
 import json
 from datetime import datetime
 
+def set_audit_fields(obj, is_create=False):
+    """Auto-fill created_by and updated_by fields using JWT identity."""
+    try:
+        from app.utils import get_current_user
+        user = get_current_user()
+        if user:
+            if is_create and hasattr(obj, 'created_by'):
+                obj.created_by = user.id
+            if hasattr(obj, 'updated_by'):
+                obj.updated_by = user.id
+    except Exception:
+        pass
+
 def log_activity(action, module=None, target_type=None, target_id=None, 
                 description=None, success=True, error_message=None, metadata=None):
     """Log an activity to the audit trail"""

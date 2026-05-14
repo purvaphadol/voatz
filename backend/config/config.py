@@ -23,7 +23,7 @@ class Config:
         raise ValueError("JWT_SECRET_KEY environment variable is required")
     
     # JWT Configuration - More secure settings
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=int(os.getenv("JWT_EXPIRY_HOURS", "2")))  # Default 2 hours
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=int(os.getenv("JWT_EXPIRY_HOURS", "24")))  # Default 2 hours
     JWT_ALGORITHM = "HS256"
     JWT_DECODE_AUDIENCE = None
     JWT_ENCODE_AUDIENCE = None

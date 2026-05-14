@@ -9,4 +9,4 @@ class TimestampAuditMixin:
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_by = db.Column(db.Integer, nullable=True)
     updated_by = db.Column(db.Integer, nullable=True)
-    status = db.Column(db.Integer, default=1)
+    status = db.Column(db.Integer, default=1, nullable=False)

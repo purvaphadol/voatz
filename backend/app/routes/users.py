@@ -5,9 +5,34 @@ from app import db
 from app.models.user import User
 from app.models.user_role import UserRoleMapping
 from app.models.company import Company
+from app.models.role import Role
 from app.utils import get_current_company_id, require_company_context, require_permission
+from app.utils.audit import audit_action, set_audit_fields
 from sqlalchemy import or_
 from datetime import datetime
+
+def validate_user_input(data, is_create=False):
+    if not data:
+        return None, (jsonify({'error': 'Data is required'}), 400)
+        
+    if is_create and (not data.get('name') or not data.get('email') or not data.get('password')):
+        return None, (jsonify({'error': 'Name, email, and password are required'}), 400)
+        
+    cleaned_data = {}
+    
+    if 'name' in data and data['name'] is not None:
+        name = str(data['name']).strip()
+        if not name:
+            return None, (jsonify({'error': 'Name cannot be empty'}), 400)
+        cleaned_data['name'] = name
+        
+    if 'email' in data and data['email'] is not None:
+        email = str(data['email']).strip().lower()
+        if not email:
+            return None, (jsonify({'error': 'Email cannot be empty'}), 400)
+        cleaned_data['email'] = email
+        
+    return cleaned_data, None
 
 users_bp = Blueprint('users', __name__)
 
@@ -19,7 +44,11 @@ def list_users():
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 10))
 
-    query = User.query.join(Company).filter(User.company_id == company_id)
+    query = User.query.join(Company).filter(
+        User.company_id == company_id, 
+        User.status != 0,
+        Company.status != 0
+    ).order_by(User.updated_at.desc(), User.created_at.desc())
     if search:
         query = query.filter(or_(User.name.ilike(f'%{search}%'), User.email.ilike(f'%{search}%')))
 
@@ -33,6 +62,8 @@ def list_users():
             'email': u.email, 
             'company_id': u.company_id,
             'company_name': u.company.company_name,
+            'department_id': u.department_id,
+            'department_name': u.department.department_name if u.department else None,
             'created_at': u.created_at.isoformat() if u.created_at else None,
             'updated_at': u.updated_at.isoformat() if u.updated_at else None,
             'status': u.status if hasattr(u, 'status') else 1
@@ -44,22 +75,33 @@ def list_users():
 
 @users_bp.route('/', methods=['POST'])
 @require_permission('Users', 'create')
+@audit_action('create_user', module='Users', description='Created a new user')
 def create_user():
     company_id = get_current_company_id()
     data = request.get_json()
     
-    if not data or not data.get('name') or not data.get('email') or not data.get('password'):
-        return jsonify({'error': 'Name, email, and password are required'}), 400
+    cleaned_data, error = validate_user_input(data, is_create=True)
+    if error:
+        return error[0], error[1]
+    
+    email = cleaned_data['email']
+    name = cleaned_data['name']
     
     # Check if email already exists within the company
-    if User.query.filter_by(email=data['email'], company_id=company_id).first():
+    if User.query.filter_by(email=email, company_id=company_id).first():
         return jsonify({'error': 'Email already exists in this company'}), 400
     
     user = User()
-    user.name = data['name']
-    user.email = data['email']
+    user.name = name
+    user.email = email
     user.password_hash = generate_password_hash(data['password'])
     user.company_id = company_id
+    if 'department_id' in data:
+        dept_id = data['department_id']
+        user.department_id = dept_id if dept_id else None
+    
+    set_audit_fields(user, is_create=True)
+    
     db.session.add(user)
     db.session.commit()
     
@@ -71,7 +113,9 @@ def get_user(user_id):
     company_id = get_current_company_id()
     user = User.query.join(Company).filter(
         User.id == user_id, 
-        User.company_id == company_id
+        User.company_id == company_id,
+        User.status != 0,
+        Company.status != 0
     ).first_or_404()
     
     return jsonify({
@@ -80,6 +124,8 @@ def get_user(user_id):
         'email': user.email,
         'company_id': user.company_id,
         'company_name': user.company.company_name,
+        'department_id': user.department_id,
+        'department_name': user.department.department_name if user.department else None,
         'created_at': user.created_at.isoformat() if user.created_at else None,
         'updated_at': user.updated_at.isoformat() if user.updated_at else None,
         'status': user.status if hasattr(user, 'status') else 1
@@ -87,35 +133,63 @@ def get_user(user_id):
 
 @users_bp.route('/<int:user_id>', methods=['PUT'])
 @require_permission('Users', 'update')
+@audit_action('update_user', module='Users', description='Updated a user', get_target_id=lambda *args, **kwargs: kwargs.get('user_id'))
 def update_user(user_id):
     company_id = get_current_company_id()
-    user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
+    user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != 0).first_or_404()
     data = request.get_json()
     
-    if data.get('name'):
-        user.name = data['name']
-    if data.get('email'):
+    cleaned_data, error = validate_user_input(data, is_create=False)
+    if error:
+        return error[0], error[1]
+    
+    if 'name' in cleaned_data:
+        user.name = cleaned_data['name']
+        
+    if 'email' in cleaned_data:
+        email = cleaned_data['email']
         # Check if email already exists within the company (excluding current user)
-        existing_user = User.query.filter_by(email=data['email'], company_id=company_id).first()
+        existing_user = User.query.filter_by(email=email, company_id=company_id).first()
         if existing_user and existing_user.id != user_id:
             return jsonify({'error': 'Email already exists in this company'}), 400
-        user.email = data['email']
+        user.email = email
     if data.get('password'):
         user.password_hash = generate_password_hash(data['password'])
+    if 'department_id' in data:
+        dept_id = data['department_id']
+        user.department_id = dept_id if dept_id else None
+        
+    set_audit_fields(user, is_create=False)
     
     db.session.commit()
     return jsonify({'message': 'User updated'}), 200
 
 @users_bp.route('/<int:user_id>', methods=['DELETE'])
 @require_permission('Users', 'delete')
+@audit_action('delete_user', module='Users', description='Deleted a user', get_target_id=lambda *args, **kwargs: kwargs.get('user_id'))
 def delete_user(user_id):
+    from flask_jwt_extended import get_jwt_identity
+    
+    if str(user_id) == str(get_jwt_identity()):
+        return jsonify({"error": "You cannot delete your own account"}), 403
+
     company_id = get_current_company_id()
-    user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
+    user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != 0).first_or_404()
     
-    # Delete related user role mappings first
-    UserRoleMapping.query.filter_by(user_id=user_id).delete()
+    # Check if Super Admin
+    super_admin_role = Role.query.filter_by(role_name='Super Admin').first()
+    if super_admin_role:
+        is_super_admin = UserRoleMapping.query.filter_by(user_id=user_id, role_id=super_admin_role.id).first()
+        if is_super_admin:
+            return jsonify({"error": "Super Admin cannot be deleted"}), 403
     
-    db.session.delete(user)
+    # Do NOT delete related user role mappings physically for now
+    # UserRoleMapping.query.filter_by(user_id=user_id).delete()
+    
+    # Soft delete instead of hard delete
+    user.status = 0
+    set_audit_fields(user, is_create=False)
+    
     db.session.commit()
     return jsonify({'message': 'User deleted'}), 200
 
@@ -129,6 +203,9 @@ def get_current_user_profile():
     
     user_id = get_jwt_identity()
     user = User.query.get_or_404(user_id)
+    
+    if getattr(user, 'status', 1) == 0:
+        return jsonify({'error': 'User inactive'}), 403
     
     # Get voter profile if exists
     voter = Voter.query.filter_by(user_id=user_id).first()
@@ -147,6 +224,8 @@ def get_current_user_profile():
         'email': user.email,
         'company_id': user.company_id,
         'company_name': user.company.company_name if user.company else None,
+        'department_id': user.department_id,
+        'department_name': user.department.department_name if getattr(user, 'department', None) else None,
         'created_at': user.created_at.isoformat() if user.created_at else None,
         'status': getattr(user, 'status', 1),
         'voting_stats': {
@@ -185,17 +264,27 @@ def update_current_user_profile():
     
     user_id = get_jwt_identity()
     user = User.query.get_or_404(user_id)
+    
+    if getattr(user, 'status', 1) == 0:
+        return jsonify({'error': 'User inactive'}), 403
+        
     data = request.get_json()
     
+    cleaned_data, error = validate_user_input(data, is_create=False)
+    if error:
+        return error[0], error[1]
+    
     # Update user information
-    if data.get('name'):
-        user.name = data['name']
-    if data.get('email'):
+    if 'name' in cleaned_data:
+        user.name = cleaned_data['name']
+        
+    if 'email' in cleaned_data:
+        email = cleaned_data['email']
         # Check if email already exists (excluding current user)
-        existing_user = User.query.filter_by(email=data['email'], company_id=user.company_id).first()
+        existing_user = User.query.filter_by(email=email, company_id=user.company_id).first()
         if existing_user and existing_user.id != user_id:
             return jsonify({'error': 'Email already exists'}), 400
-        user.email = data['email']
+        user.email = email
     
     # Update voter information if exists
     voter = Voter.query.filter_by(user_id=user_id).first()

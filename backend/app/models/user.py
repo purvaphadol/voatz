@@ -11,6 +11,7 @@ class User(db.Model, TimestampAuditMixin):
     email = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
 
     # Password reset fields
     password_reset_token = db.Column(db.String(64), nullable=True, index=True)
@@ -18,6 +19,7 @@ class User(db.Model, TimestampAuditMixin):
 
     # Relationships
     company = db.relationship('Company', backref='users')
+    department = db.relationship('Department', backref='users')
 
     def generate_reset_token(self, expires_in_minutes: int = 30) -> str:
         """Generate a secure password reset token valid for `expires_in_minutes`."""
