@@ -1,0 +1,78 @@
+name: voatz_mobile
+description: "Secure mobile voting application for Voatz platform"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.1.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Core Flutter packages
+  cupertino_icons: ^1.0.2
+  
+  # State Management
+  provider: ^6.0.5
+  flutter_riverpod: ^2.4.9
+  
+  # HTTP & API
+  dio: ^5.3.2
+  http: ^1.1.0
+  retrofit: ^4.0.3
+  json_annotation: ^4.8.1
+  pretty_dio_logger: ^1.3.1
+  
+  # Authentication & Security
+  local_auth: ^2.1.6
+  crypto: ^3.0.3
+  encrypt: ^5.0.1
+  flutter_secure_storage: ^9.0.0
+  
+  # UI & UX
+  flutter_screenutil: ^5.9.0
+  lottie: ^2.7.0
+  shimmer: ^3.0.0
+  flutter_svg: ^2.0.9
+  cached_network_image: ^3.3.0
+  fl_chart: ^0.65.0
+  
+  # Camera & QR
+  mobile_scanner: ^5.0.0
+  camera: ^0.10.5
+  qr_flutter: ^4.1.0
+  
+  # Utilities
+  connectivity_plus: ^5.0.1
+  device_info_plus: ^9.1.0
+  package_info_plus: ^4.2.0
+  permission_handler: ^11.0.1
+  shared_preferences: ^2.2.2
+  
+  # Date & Time
+  intl: ^0.18.1
+  
+  # Navigation
+  go_router: ^12.1.1
+  
+  # Icons
+  iconsax: ^0.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+  
+  # Code generation
+  build_runner: ^2.4.7
+  retrofit_generator: ^8.0.4
+  json_serializable: ^6.7.1
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/animations/ 

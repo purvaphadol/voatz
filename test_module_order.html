@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Module Order Test</title>
+</head>
+<body>
+    <h1>Module Order Test</h1>
+    <div id="result"></div>
+
+    <script>
+        // Test the menu API
+        fetch('http://localhost:5000/api/menu/sidebar', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                // You'll need to add a valid token here
+                'Authorization': 'Bearer YOUR_TOKEN_HERE'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Menu API Response:', data);
+            
+            if (data.menu) {
+                const resultDiv = document.getElementById('result');
+                let html = '<h2>Modules in Order:</h2><ol>';
+                
+                data.menu.forEach(module => {
+                    html += `<li><strong>${module.module}</strong> (Order: ${module.order_index || 'N/A'}, Route: /${module.route})</li>`;
+                });
+                
+                html += '</ol>';
+                resultDiv.innerHTML = html;
+            } else {
+                document.getElementById('result').innerHTML = '<p>Error: ' + JSON.stringify(data) + '</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            document.getElementById('result').innerHTML = '<p>Error: ' + error.message + '</p>';
+        });
+    </script>
+</body>
+</html> 

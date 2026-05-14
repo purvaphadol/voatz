@@ -1,0 +1,1126 @@
+{
+	"info": {
+		"_postman_id": "flask-access-control-api",
+		"name": "Flask Multi-Tenant Access Control API",
+		"description": "Complete API collection for Flask Multi-Tenant Access Control System with role-based permissions, dynamic menus, and audit trails",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"{{user_email}}\",\n    \"password\": \"{{user_password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "login"]
+						}
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('jwt_token', response.access_token);",
+									"    pm.environment.set('user_id', response.user.id);",
+									"    pm.environment.set('company_id', response.user.company_id);",
+									"    pm.environment.set('company_name', response.user.company_name);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/health",
+							"host": ["{{base_url}}"],
+							"path": ["api", "health"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Companies",
+			"item": [
+				{
+					"name": "List Companies",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/companies/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "companies", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Company",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"company_name\": \"New Company Name\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/companies/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "companies", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Company",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"company_name\": \"Updated Company Name\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/companies/{{company_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "companies", "{{company_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Company",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/companies/{{company_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "companies", "{{company_id}}"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "List Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/users/?page=1&per_page=10&search=",
+							"host": ["{{base_url}}"],
+							"path": ["api", "users", ""],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "10"
+								},
+								{
+									"key": "search",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"New User\",\n    \"email\": \"newuser@example.com\",\n    \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/users/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "users", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "users", "{{user_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update User",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Updated User Name\",\n    \"email\": \"updated@example.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "users", "{{user_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete User",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "users", "{{user_id}}"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Departments",
+			"item": [
+				{
+					"name": "List Departments",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/departments/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "departments", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Department",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"department_name\": \"New Department\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/departments/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "departments", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Department",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/departments/{{department_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "departments", "{{department_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Department",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"department_name\": \"Updated Department Name\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/departments/{{department_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "departments", "{{department_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Department",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/departments/{{department_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "departments", "{{department_id}}"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Roles",
+			"item": [
+				{
+					"name": "List Roles",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/roles/?page=1&per_page=10&search=",
+							"host": ["{{base_url}}"],
+							"path": ["api", "roles", ""],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "10"
+								},
+								{
+									"key": "search",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Role",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"role_name\": \"New Role\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/roles/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "roles", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Role",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/roles/{{role_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "roles", "{{role_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Role",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"role_name\": \"Updated Role Name\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/roles/{{role_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "roles", "{{role_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Role",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/roles/{{role_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "roles", "{{role_id}}"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Modules",
+			"item": [
+				{
+					"name": "List Modules",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/modules/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "modules", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Module",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"module_name\": \"New Module\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/modules/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "modules", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Module",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/modules/{{module_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "modules", "{{module_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Module",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"module_name\": \"Updated Module Name\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/modules/{{module_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "modules", "{{module_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Module",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/modules/{{module_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "modules", "{{module_id}}"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "User Roles",
+			"item": [
+				{
+					"name": "Get User Roles",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/user-roles/user/{{user_id}}/roles",
+							"host": ["{{base_url}}"],
+							"path": ["api", "user-roles", "user", "{{user_id}}", "roles"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Assign Role to User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"role_id\": 1,\n    \"department_id\": 1,\n    \"status\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/user-roles/user/{{user_id}}/roles",
+							"host": ["{{base_url}}"],
+							"path": ["api", "user-roles", "user", "{{user_id}}", "roles"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update User Role",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"status\": 0,\n    \"department_id\": 2\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/user-roles/user-role/{{mapping_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "user-roles", "user-role", "{{mapping_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Role from User",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/user-roles/user-role/{{mapping_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "user-roles", "user-role", "{{mapping_id}}"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Permissions",
+			"item": [
+				{
+					"name": "Get User Permissions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/permissions/user/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "permissions", "user", "{{user_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Role Mappings",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/permissions/user/{{user_id}}/roles",
+							"host": ["{{base_url}}"],
+							"path": ["api", "permissions", "user", "{{user_id}}", "roles"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Modules with Actions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/permissions/modules",
+							"host": ["{{base_url}}"],
+							"path": ["api", "permissions", "modules"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Assign Role Permission",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"role_id\": 1,\n    \"module_id\": 1,\n    \"action_id\": 1,\n    \"company_id\": {{company_id}}\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/permissions/role",
+							"host": ["{{base_url}}"],
+							"path": ["api", "permissions", "role"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Assign User Permission",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_id\": {{user_id}},\n    \"role_id\": 1,\n    \"module_id\": 1,\n    \"action_id\": 1,\n    \"permission_type\": 1,\n    \"company_id\": {{company_id}}\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/permissions/user",
+							"host": ["{{base_url}}"],
+							"path": ["api", "permissions", "user"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Menu System",
+			"item": [
+				{
+					"name": "Get Sidebar Menu",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/menu/sidebar",
+							"host": ["{{base_url}}"],
+							"path": ["api", "menu", "sidebar"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Permissions for Frontend",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/menu/permissions",
+							"host": ["{{base_url}}"],
+							"path": ["api", "menu", "permissions"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Navigation Items",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/menu/navigation",
+							"host": ["{{base_url}}"],
+							"path": ["api", "menu", "navigation"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Audit System",
+			"item": [
+				{
+					"name": "Get Audit Logs",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/audit/logs?page=1&per_page=50&days=30&user_id=&action=&module=&success=",
+							"host": ["{{base_url}}"],
+							"path": ["api", "audit", "logs"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "50"
+								},
+								{
+									"key": "days",
+									"value": "30"
+								},
+								{
+									"key": "user_id",
+									"value": ""
+								},
+								{
+									"key": "action",
+									"value": ""
+								},
+								{
+									"key": "module",
+									"value": ""
+								},
+								{
+									"key": "success",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Audit Summary",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/audit/summary?days=30",
+							"host": ["{{base_url}}"],
+							"path": ["api", "audit", "summary"],
+							"query": [
+								{
+									"key": "days",
+									"value": "30"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Audit Logs",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/audit/user/{{user_id}}?limit=50&action=&success=",
+							"host": ["{{base_url}}"],
+							"path": ["api", "audit", "user", "{{user_id}}"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								},
+								{
+									"key": "action",
+									"value": ""
+								},
+								{
+									"key": "success",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Export Audit Logs",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/audit/export?days=30",
+							"host": ["{{base_url}}"],
+							"path": ["api", "audit", "export"],
+							"query": [
+								{
+									"key": "days",
+									"value": "30"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Audit Statistics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/audit/stats?days=30",
+							"host": ["{{base_url}}"],
+							"path": ["api", "audit", "stats"],
+							"query": [
+								{
+									"key": "days",
+									"value": "30"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{jwt_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:5000",
+			"description": "Base URL for the Flask API"
+		},
+		{
+			"key": "jwt_token",
+			"value": "",
+			"description": "JWT access token obtained from login"
+		},
+		{
+			"key": "user_id",
+			"value": "",
+			"description": "Current user ID"
+		},
+		{
+			"key": "company_id",
+			"value": "",
+			"description": "Current company ID"
+		},
+		{
+			"key": "user_email",
+			"value": "admin@techcorp.com",
+			"description": "Default login email"
+		},
+		{
+			"key": "user_password",
+			"value": "admin123",
+			"description": "Default login password"
+		},
+		{
+			"key": "role_id",
+			"value": "1",
+			"description": "Sample role ID for testing"
+		},
+		{
+			"key": "department_id",
+			"value": "1",
+			"description": "Sample department ID for testing"
+		},
+		{
+			"key": "module_id",
+			"value": "1",
+			"description": "Sample module ID for testing"
+		},
+		{
+			"key": "mapping_id",
+			"value": "1",
+			"description": "Sample mapping ID for testing"
+		},
+		{
+			"key": "company_name",
+			"value": "",
+			"description": "Current company name"
+		}
+	]
+}
