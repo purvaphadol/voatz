@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -109,6 +109,18 @@ const Login = () => {
                 onChange={handleChange}
                 disabled={loading}
               />
+              <Box sx={{ textAlign: 'right', mt: 0.5 }}>
+                <Link
+                  to="/forgot-password"
+                  style={{
+                    color: '#1976d2',
+                    fontSize: '0.875rem',
+                    textDecoration: 'none',
+                  }}
+                >
+                  Forgot Password?
+                </Link>
+              </Box>
               <Button
                 type="submit"
                 fullWidth
