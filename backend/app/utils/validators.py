@@ -37,20 +37,20 @@ def validate_email(email):
 
 def validate_password(password):
     if not password:
-        return jsonify({'error': 'Password is required'}), 400
+        return (jsonify({'error': 'Password is required'}), 400)
         
     password = str(password).strip()
     if not password:
-        return jsonify({'error': 'Password cannot be entirely whitespace'}), 400
+        return (jsonify({'error': 'Password cannot be entirely whitespace'}), 400)
         
     if len(password) < MIN_PASSWORD_LENGTH:
-        return jsonify({'error': f'Password must be at least {MIN_PASSWORD_LENGTH} characters long'}), 400
+        return (jsonify({'error': f'Password must be at least {MIN_PASSWORD_LENGTH} characters long'}), 400)
         
     if not any(char.isalpha() for char in password):
-        return jsonify({'error': 'Password must contain at least one letter'}), 400
+        return (jsonify({'error': 'Password must contain at least one letter'}), 400)
         
     if not any(char.isdigit() for char in password):
-        return jsonify({'error': 'Password must contain at least one number'}), 400
+        return (jsonify({'error': 'Password must contain at least one number'}), 400)
         
     return None
 

@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash
 from app import db
 from app.models.user import User
@@ -56,7 +56,7 @@ def list_users():
             'department_name': u.department.department_name if u.department else None,
             'created_at': u.created_at.isoformat() if u.created_at else None,
             'updated_at': u.updated_at.isoformat() if u.updated_at else None,
-            'status': u.status if hasattr(u, 'status') else 1
+            'status': u.status
         } for u in users],
         'total': pagination.total,
         'page': pagination.page,
@@ -76,7 +76,7 @@ def create_user():
         
     pwd_error = validate_password(data.get('password'))
     if pwd_error:
-        return pwd_error
+        return pwd_error[0], pwd_error[1]
         
     dept_id, dept_error = validate_department(data.get('department_id'), company_id)
     if dept_error:
@@ -96,16 +96,12 @@ def create_user():
     user.company_id = company_id
     user.department_id = dept_id
     
+    db.session.add(user)
     set_audit_fields(user, is_create=True)
-    
-    try:
-        db.session.add(user)
-        return safe_commit((jsonify({'message': 'User created', 'user_id': user.id}), 201), 'Internal server error during user creation')
-    except Exception as e:
-        db.session.rollback()
-        from flask import current_app
-        current_app.logger.error(f"Error preparing user creation: {str(e)}")
-        return jsonify({'error': 'Internal server error during user creation'}), 500
+    return safe_commit(
+        (jsonify({'message': 'User created', 'user_id': user.id}), 201),
+        'Internal server error during user creation'
+    )
 
 @users_bp.route('/<int:user_id>', methods=['GET'])
 @require_permission('Users', 'view')
@@ -128,7 +124,7 @@ def get_user(user_id):
         'department_name': user.department.department_name if user.department else None,
         'created_at': user.created_at.isoformat() if user.created_at else None,
         'updated_at': user.updated_at.isoformat() if user.updated_at else None,
-        'status': user.status if hasattr(user, 'status') else 1
+        'status': user.status
     })
 
 @users_bp.route('/<int:user_id>', methods=['PUT'])
@@ -146,7 +142,7 @@ def update_user(user_id):
     if data.get('password'):
         pwd_error = validate_password(data.get('password'))
         if pwd_error:
-            return pwd_error
+            return pwd_error[0], pwd_error[1]
             
     if 'department_id' in data:
         dept_id, dept_error = validate_department(data.get('department_id'), company_id)
@@ -178,20 +174,27 @@ def update_user(user_id):
 @require_permission('Users', 'delete')
 @audit_action('delete_user', module='Users', description='Deleted a user', get_target_id=lambda *args, **kwargs: kwargs.get('user_id'))
 def delete_user(user_id):
-    from flask_jwt_extended import get_jwt_identity
-    
-    if str(user_id) == str(get_jwt_identity()):
+    # Self-delete guard — before any DB queries
+    current_user_id = int(get_jwt_identity())
+    if current_user_id == user_id:
         return jsonify({"error": "You cannot delete your own account"}), 403
 
     company_id = get_current_company_id()
     user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
     
-    # Check if Super Admin
-    super_admin_role = Role.query.filter_by(role_name='Super Admin').first()
+    # Check if target user has Super Admin role
+    super_admin_role = Role.query.filter(
+        Role.role_name.ilike('super admin'),
+        Role.company_id == company_id
+    ).first()
+
     if super_admin_role:
-        is_super_admin = UserRoleMapping.query.filter_by(user_id=user_id, role_id=super_admin_role.id).first()
+        is_super_admin = UserRoleMapping.query.filter_by(
+            user_id=user_id, 
+            role_id=super_admin_role.id
+        ).first()
         if is_super_admin:
-            return jsonify({"error": "Super Admin cannot be deleted"}), 403
+            return jsonify({"error": "Super Admin users cannot be deleted"}), 403
     
     # Do NOT delete related user role mappings physically for now
     # UserRoleMapping.query.filter_by(user_id=user_id).delete()
