@@ -3,6 +3,7 @@ from app import db
 from app.models.role import Role
 from app.models.department import Department
 from app.utils import get_current_company_id, require_company_context
+from app.utils.query_helpers import get_active_roles_query
 
 roles_bp = Blueprint('roles', __name__)
 
@@ -15,7 +16,7 @@ def list_roles():
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 10))
 
-    query = Role.query.join(Department).filter(Role.company_id == company_id)
+    query = get_active_roles_query(company_id).join(Department)
     
     if search:
         query = query.filter(Role.role_name.ilike(f'%{search}%'))

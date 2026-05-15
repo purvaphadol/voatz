@@ -3,6 +3,7 @@ from app import db
 from app.models.department import Department
 from app.models.company import Company
 from app.utils import get_current_company_id, require_company_context
+from app.utils.query_helpers import get_active_departments_query
 
 departments_bp = Blueprint('departments', __name__)
 
@@ -10,7 +11,7 @@ departments_bp = Blueprint('departments', __name__)
 @require_company_context
 def list_departments():
     company_id = get_current_company_id()
-    departments = Department.query.join(Company).filter(Department.company_id == company_id).all()
+    departments = get_active_departments_query(company_id).join(Company).all()
     
     # Build department data with description if available
     dept_data = []

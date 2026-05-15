@@ -84,15 +84,14 @@ const Dashboard = () => {
       const [usersRes, rolesRes, departmentsRes, auditRes] = results;
 
       setStats({
-        users: usersRes.status === 'fulfilled' ? (usersRes.value.data.pagination && usersRes.value.data.pagination.total) || 0 : 0,
-        roles: rolesRes.status === 'fulfilled' ? (rolesRes.value.data.pagination && rolesRes.value.data.pagination.total) || 0 : 0,
-        departments: departmentsRes.status === 'fulfilled' ? (departmentsRes.value.data.pagination && departmentsRes.value.data.pagination.total) || 0 : 0,
-        auditLogs: auditRes && auditRes.status === 'fulfilled' ? (auditRes.value.data.pagination && auditRes.value.data.pagination.total) || 0 : 0,
+        users: usersRes.status === 'fulfilled' ? (usersRes.value.data?.total || 0) : 0,
+        roles: rolesRes.status === 'fulfilled' ? (rolesRes.value.data?.total || 0) : 0,
+        departments: departmentsRes.status === 'fulfilled' ? (departmentsRes.value.data?.total || 0) : 0,
+        auditLogs: auditRes && auditRes.status === 'fulfilled' ? (auditRes.value.data?.pagination?.total || 0) : 0,
       });
 
-      // Set recent activities if audit logs were loaded successfully
       if (auditRes && auditRes.status === 'fulfilled') {
-        setRecentActivities(auditRes.value.data.logs || []);
+        setRecentActivities(auditRes.value.data?.logs || []);
       }
     } catch (error) {
       console.error('Error loading dashboard data:', error);

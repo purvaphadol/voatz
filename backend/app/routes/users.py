@@ -21,6 +21,7 @@ from app.utils.validators import (
 )
 from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE
 from app.utils.db_utils import safe_commit
+from app.utils.query_helpers import get_active_users_query
 
 users_bp = Blueprint('users', __name__)
 
@@ -34,14 +35,10 @@ def list_users():
     if error:
         return error[0], error[1]
 
-    query = User.query.join(Company).options(
+    query = get_active_users_query(company_id).join(Company).options(
         joinedload(User.company), 
         joinedload(User.department)
-    ).filter(
-        User.company_id == company_id, 
-        User.status != STATUS_INACTIVE,
-        Company.status != STATUS_INACTIVE
-    ).order_by(User.updated_at.desc(), User.created_at.desc())
+    ).filter(Company.status != STATUS_INACTIVE).order_by(User.updated_at.desc(), User.created_at.desc())
     if search:
         query = query.filter(or_(User.name.ilike(f'%{search}%'), User.email.ilike(f'%{search}%')))
 
