@@ -1,10 +1,15 @@
 from flask import Blueprint, request, jsonify
+from sqlalchemy import or_
 from app import db
 from app.models.user_role import UserRoleMapping
 from app.models.user import User
 from app.models.role import Role
 from app.models.department import Department
-from app.utils import get_current_company_id, require_company_context, require_permission
+from app.utils import get_current_company_id, require_permission
+from app.utils.db_utils import safe_commit
+from app.utils.audit import audit_action, set_audit_fields
+from app.utils.validators import parse_pagination
+from app.utils.constants import STATUS_INACTIVE
 
 user_roles_bp = Blueprint('user_roles', __name__)
 
@@ -13,12 +18,11 @@ user_roles_bp = Blueprint('user_roles', __name__)
 def list_user_roles():
     """Get all user-role mappings for the current company"""
     company_id = get_current_company_id()
-    
-    # Get pagination parameters
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 10))
-    
-    # Query user role mappings with joins
+
+    page, per_page, error = parse_pagination(request)
+    if error:
+        return error
+
     query = db.session.query(
         UserRoleMapping,
         User.name.label('user_name'),
@@ -32,13 +36,43 @@ def list_user_roles():
     ).join(
         Department, UserRoleMapping.department_id == Department.id
     ).filter(
-        UserRoleMapping.company_id == company_id
+        UserRoleMapping.company_id == company_id,
+        UserRoleMapping.status != STATUS_INACTIVE,
+        User.status != STATUS_INACTIVE,
+        Role.status != STATUS_INACTIVE
     )
-    
-    # Apply pagination
+
+    # Apply search and filter params
+    search = request.args.get('search', '').strip()
+    filter_user_id = request.args.get('user_id')
+    filter_role_id = request.args.get('role_id')
+    filter_department_id = request.args.get('department_id')
+
+    if search:
+        query = query.filter(
+            or_(User.name.ilike(f'%{search}%'), User.email.ilike(f'%{search}%'))
+        )
+    if filter_user_id:
+        try:
+            query = query.filter(UserRoleMapping.user_id == int(filter_user_id))
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid user_id parameter'}), 400
+    if filter_role_id:
+        try:
+            query = query.filter(UserRoleMapping.role_id == int(filter_role_id))
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid role_id parameter'}), 400
+    if filter_department_id:
+        try:
+            query = query.filter(UserRoleMapping.department_id == int(filter_department_id))
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid department_id parameter'}), 400
+
+    query = query.order_by(UserRoleMapping.updated_at.desc(), UserRoleMapping.created_at.desc())
+
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     user_roles = pagination.items
-    
+
     return jsonify({
         'data': [{
             'id': ur.UserRoleMapping.id,
@@ -61,10 +95,8 @@ def list_user_roles():
 @require_permission('UserRoles', 'view')
 def get_user_roles(user_id):
     company_id = get_current_company_id()
-    
-    # Verify user belongs to the company
     user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
-    
+
     user_roles = db.session.query(
         UserRoleMapping,
         Role.role_name,
@@ -75,9 +107,12 @@ def get_user_roles(user_id):
         Department, UserRoleMapping.department_id == Department.id
     ).filter(
         UserRoleMapping.user_id == user_id,
-        UserRoleMapping.company_id == company_id
+        UserRoleMapping.company_id == company_id,
+        UserRoleMapping.status != STATUS_INACTIVE,
+        User.status != STATUS_INACTIVE,
+        Role.status != STATUS_INACTIVE
     ).all()
-    
+
     return jsonify([{
         'id': ur.UserRoleMapping.id,
         'role_id': ur.UserRoleMapping.role_id,
@@ -89,86 +124,94 @@ def get_user_roles(user_id):
 
 @user_roles_bp.route('/user/<int:user_id>/roles', methods=['POST'])
 @require_permission('UserRoles', 'create')
+@audit_action('assign_role', module='UserRoles', description='Assigned role to user')
 def assign_role_to_user(user_id):
     company_id = get_current_company_id()
     data = request.get_json()
-    
+
     if not data or not data.get('role_id') or not data.get('department_id'):
         return jsonify({'error': 'Role ID and Department ID are required'}), 400
-    
-    # Verify user belongs to the company
+
     user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
-    
-    # Verify role belongs to the company
+
     role = Role.query.filter_by(id=data['role_id'], company_id=company_id).first()
     if not role:
         return jsonify({'error': 'Role not found in this company'}), 404
-    
-    # Verify department belongs to the company
+
+    if role.role_name.lower() == 'super admin':
+        return jsonify({'error': 'Super Admin role cannot be assigned via API'}), 403
+
     department = Department.query.filter_by(id=data['department_id'], company_id=company_id).first()
     if not department:
         return jsonify({'error': 'Department not found in this company'}), 404
-    
-    # Check if mapping already exists
+
     existing_mapping = UserRoleMapping.query.filter_by(
         user_id=user_id,
         role_id=data['role_id'],
         department_id=data['department_id'],
         company_id=company_id
-    ).first()
-    
+    ).filter(UserRoleMapping.status != STATUS_INACTIVE).first()
+
     if existing_mapping:
         return jsonify({'error': 'User already has this role in this department'}), 400
-    
-    # Create new mapping
+
     user_role = UserRoleMapping()
     user_role.user_id = user_id
     user_role.role_id = data['role_id']
     user_role.department_id = data['department_id']
     user_role.company_id = company_id
     user_role.status = data.get('status', 1)
-    
-    
+
+    set_audit_fields(user_role, is_create=True)
     db.session.add(user_role)
-    db.session.commit()
-    
-    return jsonify({'message': 'Role assigned to user successfully'}), 201
+    return safe_commit(
+        (jsonify({'message': 'Role assigned to user successfully'}), 201),
+        'Internal server error during role assignment'
+    )
 
 @user_roles_bp.route('/user-role/<int:mapping_id>', methods=['DELETE'])
 @require_permission('UserRoles', 'delete')
+@audit_action('remove_role', module='UserRoles', description='Removed role from user',
+              get_target_id=lambda *a, **kw: kw.get('mapping_id'))
 def remove_role_from_user(mapping_id):
     company_id = get_current_company_id()
-    
+
     user_role = UserRoleMapping.query.filter_by(
         id=mapping_id,
         company_id=company_id
     ).first_or_404()
-    
-    db.session.delete(user_role)
-    db.session.commit()
-    
-    return jsonify({'message': 'Role removed from user successfully'}), 200
+
+    user_role.status = STATUS_INACTIVE
+    set_audit_fields(user_role, is_create=False)
+    return safe_commit(
+        (jsonify({'message': 'Role removed from user successfully'}), 200),
+        'Internal server error during role removal'
+    )
 
 @user_roles_bp.route('/user-role/<int:mapping_id>', methods=['PUT'])
 @require_permission('UserRoles', 'update')
+@audit_action('update_user_role', module='UserRoles', description='Updated user role',
+              get_target_id=lambda *a, **kw: kw.get('mapping_id'))
 def update_user_role(mapping_id):
     company_id = get_current_company_id()
     data = request.get_json()
-    
+
     user_role = UserRoleMapping.query.filter_by(
         id=mapping_id,
         company_id=company_id
     ).first_or_404()
-    
+
     if data.get('status') is not None:
         user_role.status = data['status']
-    
+
     if data.get('department_id'):
-        # Verify department belongs to the company
         department = Department.query.filter_by(id=data['department_id'], company_id=company_id).first()
         if not department:
             return jsonify({'error': 'Department not found in this company'}), 404
         user_role.department_id = data['department_id']
-    
-    db.session.commit()
-    return jsonify({'message': 'User role updated successfully'}), 200 
+
+    set_audit_fields(user_role, is_create=False)
+    return safe_commit(
+        (jsonify({'message': 'User role updated successfully'}), 200),
+        'Internal server error during user role update'
+    )

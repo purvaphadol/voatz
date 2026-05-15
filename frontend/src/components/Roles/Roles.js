@@ -69,10 +69,15 @@ const Roles = () => {
 
   useEffect(() => {
     if (canView) {
-      loadRoles();
       loadDepartments();
     }
   }, [canView]);
+
+  useEffect(() => {
+    if (canView) {
+      loadRoles();
+    }
+  }, [canView, selectedDepartment]);
 
   const loadRoles = async () => {
     try {
@@ -124,7 +129,10 @@ const Roles = () => {
         setSuccess('Role deleted successfully');
         loadRoles();
       } catch (error) {
-        setError('Failed to delete role');
+        setError(
+          (error.response && error.response.data && error.response.data.error)
+          || 'Failed to delete role'
+        );
       }
     }
   };
@@ -246,8 +254,6 @@ const Roles = () => {
             label="Filter by Department"
             onChange={(e) => {
               setSelectedDepartment(e.target.value);
-              // Reload roles when department filter changes
-              setTimeout(() => loadRoles(), 100);
             }}
           >
             <MenuItem value="">All Departments</MenuItem>

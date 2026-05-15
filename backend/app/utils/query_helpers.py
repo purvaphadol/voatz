@@ -34,3 +34,37 @@ def get_active_departments_query(company_id):
         Department.company_id == company_id,
         Department.status == STATUS_ACTIVE
     )
+
+def get_active_user_role_mappings(user_id, company_id):
+    """
+    Returns active UserRoleMapping rows for a user, joined with Role to
+    exclude mappings pointing to soft-deleted roles.
+    Use this everywhere role_ids need to be derived for permission checks.
+    """
+    from app import db
+    from app.models.user_role import UserRoleMapping
+    from app.models.role import Role
+    return db.session.query(UserRoleMapping).join(
+        Role, UserRoleMapping.role_id == Role.id
+    ).filter(
+        UserRoleMapping.user_id == user_id,
+        UserRoleMapping.company_id == company_id,
+        UserRoleMapping.status != STATUS_INACTIVE,
+        Role.status != STATUS_INACTIVE
+    ).all()
+
+def get_active_role_permissions(role_ids, company_id):
+    """
+    Returns active RolePermissionMapping rows for a list of role_ids.
+    Excludes soft-deleted permission rows.
+    """
+    from app import db
+    from app.models.role_permission import RolePermissionMapping
+    if not role_ids:
+        return []
+    return RolePermissionMapping.query.filter(
+        RolePermissionMapping.role_id.in_(role_ids),
+        RolePermissionMapping.company_id == company_id,
+        RolePermissionMapping.status != STATUS_INACTIVE
+    ).all()
+

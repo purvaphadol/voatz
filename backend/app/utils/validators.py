@@ -110,3 +110,53 @@ def parse_pagination(request):
         return None, None, (jsonify({'error': 'Invalid per_page parameter'}), 400)
         
     return page, per_page, None
+
+
+def validate_role_name(role_name):
+    """Sanitize and validate a role name. Returns (cleaned_name, error_tuple_or_None)."""
+    if role_name is None:
+        return None, (jsonify({'error': 'Role name is required'}), 400)
+    name = str(role_name).strip()
+    if not name:
+        return None, (jsonify({'error': 'Role name cannot be empty'}), 400)
+    if len(name) > 100:
+        return None, (jsonify({'error': 'Role name cannot exceed 100 characters'}), 400)
+    return name, None
+
+
+def validate_role_input(data, is_create=False):
+    """Validate role create/update payload. Returns (cleaned_data, error_tuple_or_None)."""
+    if not data:
+        return None, (jsonify({'error': 'Request data is required'}), 400)
+    cleaned = {}
+    if is_create:
+        if not data.get('department_id'):
+            return None, (jsonify({'error': 'department_id is required'}), 400)
+        role_name, err = validate_role_name(data.get('role_name'))
+        if err:
+            return None, err
+        cleaned['role_name'] = role_name
+    else:
+        if data.get('role_name') is not None:
+            role_name, err = validate_role_name(data.get('role_name'))
+            if err:
+                return None, err
+            cleaned['role_name'] = role_name
+    if 'description' in data:
+        cleaned['description'] = str(data['description']).strip() if data['description'] else ''
+    if 'department_id' in data and data['department_id']:
+        try:
+            cleaned['department_id'] = int(data['department_id'])
+        except (ValueError, TypeError):
+            return None, (jsonify({'error': 'Invalid department_id format'}), 400)
+    return cleaned, None
+
+
+def validate_department_active(department):
+    """Check a Department object is active. Returns error_tuple or None."""
+    from app.utils.constants import STATUS_INACTIVE
+    if not department:
+        return (jsonify({'error': 'Invalid department for this company'}), 400)
+    if getattr(department, 'status', 1) == STATUS_INACTIVE:
+        return (jsonify({'error': 'Department is inactive'}), 400)
+    return None

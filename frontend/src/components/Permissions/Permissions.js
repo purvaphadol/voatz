@@ -62,7 +62,7 @@ const Permissions = () => {
   const [rolePermissions, setRolePermissions] = useState({});
   const [userPermissions, setUserPermissions] = useState({});
   const [permissionSources, setPermissionSources] = useState({});
-  const [userOverrides, setUserOverrides] = useState({});
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -131,8 +131,7 @@ const Permissions = () => {
       // Store the sources information for display
       setPermissionSources(response.data.sources || {});
       
-      // Reset user overrides when loading new user
-      setUserOverrides({});
+
     } catch (error) {
       console.error('Error loading user permissions:', error);
       setError('Failed to load user permissions');
@@ -190,12 +189,6 @@ const Permissions = () => {
   const handleUserPermissionChange = (moduleId, actionId, checked) => {
     const moduleKey = String(moduleId);
     const actionKey = String(actionId);
-    
-    // Get the current effective permission and source
-    const currentPermission = userPermissions[moduleKey] && userPermissions[moduleKey][actionKey] === true;
-    const currentSource = permissionSources[moduleKey] && permissionSources[moduleKey][actionKey];
-    
-    // Update the display permissions
     setUserPermissions(prev => ({
       ...prev,
       [moduleKey]: {
@@ -203,76 +196,6 @@ const Permissions = () => {
         [actionKey]: checked
       }
     }));
-    
-    // Track user-specific overrides
-    if (currentSource === 'role') {
-      // User is changing a role permission - create an override
-      if (checked !== true) { // Role permission is true, user wants false -> DENY override
-        setUserOverrides(prev => ({
-          ...prev,
-          [moduleKey]: {
-            ...prev[moduleKey],
-            [actionKey]: false
-          }
-        }));
-      } else {
-        // User wants to keep role permission as-is, remove any existing override
-        setUserOverrides(prev => {
-          const newOverrides = { ...prev };
-          if (newOverrides[moduleKey]) {
-            delete newOverrides[moduleKey][actionKey];
-            if (Object.keys(newOverrides[moduleKey]).length === 0) {
-              delete newOverrides[moduleKey];
-            }
-          }
-          return newOverrides;
-        });
-      }
-    } else if (currentSource === 'user-override') {
-      // User is changing an existing override
-      if (checked) {
-        // User wants to grant permission -> ALLOW override
-        setUserOverrides(prev => ({
-          ...prev,
-          [moduleKey]: {
-            ...prev[moduleKey],
-            [actionKey]: true
-          }
-        }));
-      } else {
-        // User wants to deny permission -> DENY override
-        setUserOverrides(prev => ({
-          ...prev,
-          [moduleKey]: {
-            ...prev[moduleKey],
-            [actionKey]: false
-          }
-        }));
-      }
-    } else if (currentSource === 'none') {
-      // User is adding permission where none existed -> ALLOW override
-      if (checked) {
-        setUserOverrides(prev => ({
-          ...prev,
-          [moduleKey]: {
-            ...prev[moduleKey],
-            [actionKey]: true
-          }
-        }));
-      } else {
-        // User unchecked a 'none' permission, remove any override
-        setUserOverrides(prev => {
-          const newOverrides = { ...prev };
-          if (newOverrides[moduleKey]) {
-            delete newOverrides[moduleKey][actionKey];
-            if (Object.keys(newOverrides[moduleKey]).length === 0) {
-              delete newOverrides[moduleKey];
-            }
-          }
-          return newOverrides;
-        });
-      }
-    }
   };
 
   const saveRolePermissions = async () => {
@@ -297,8 +220,8 @@ const Permissions = () => {
 
     try {
       setLoading(true);
-      // Send only the user-specific overrides, not the complete permissions
-      await permissionsAPI.updateUserPermissions(selectedUser, userOverrides);
+      // Send the complete permission state so backend can diff against existing overrides
+      await permissionsAPI.updateUserPermissions(selectedUser, userPermissions);
       setSuccess('User permissions updated successfully');
       
       // Reload user permissions to get the updated state
@@ -735,33 +658,7 @@ const Permissions = () => {
                     </Box>
                   </Paper>
                   
-                  {/* Show pending user overrides */}
-                  {Object.keys(userOverrides).length > 0 && (
-                    <Paper sx={{ p: 2, mb: 2, backgroundColor: 'warning.light' }}>
-                      <Typography variant="h6" gutterBottom>
-                        Pending User Overrides ({Object.keys(userOverrides).reduce((count, moduleId) => count + Object.keys(userOverrides[moduleId]).length, 0)})
-                      </Typography>
-                      <Typography variant="body2" sx={{ mb: 1 }}>
-                        These changes will be applied when you click "Save User Permissions":
-                      </Typography>
-                      {Object.entries(userOverrides).map(([moduleId, actions]) =>
-                        Object.entries(actions).map(([actionId, granted]) => {
-                          const module = moduleActions.find(m => m.id === parseInt(moduleId));
-                          const action = module?.actions?.find(a => a.id === parseInt(actionId));
-                          return (
-                            <Chip
-                              key={`${moduleId}-${actionId}`}
-                              label={`${module?.module_name || `Module ${moduleId}`} → ${action?.action_name || `Action ${actionId}`}: ${granted ? 'ALLOW' : 'DENY'}`}
-                              color={granted ? 'success' : 'error'}
-                              size="small"
-                              sx={{ mr: 1, mb: 1 }}
-                            />
-                          );
-                        })
-                      )}
-                    </Paper>
-                  )}
-                  
+
                   <PermissionMatrix
                     permissions={userPermissions}
                     onPermissionChange={handleUserPermissionChange}

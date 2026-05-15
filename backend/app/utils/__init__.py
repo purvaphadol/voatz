@@ -7,6 +7,7 @@ from app.models.module import Module
 from app.models.module_action import ModuleAction
 from functools import wraps
 from flask import jsonify
+from app import db
 import logging
 
 # Set up logging
@@ -83,21 +84,17 @@ def check_user_permission(module_name, action_name):
             return False
         
         # Check user's roles and their permissions
-        user_roles = UserRoleMapping.query.filter_by(
-            user_id=user.id,
-            company_id=company_id,
-            status=1  # Active roles only
-        ).all()
+        from app.utils.query_helpers import get_active_user_role_mappings, get_active_role_permissions
+        active_mappings = get_active_user_role_mappings(user.id, company_id)
+        role_ids = [ur.role_id for ur in active_mappings]
         
-        role_ids = [ur.role_id for ur in user_roles]
-        
-        # Check if any role has this permission
-        role_permission = RolePermissionMapping.query.filter(
-            RolePermissionMapping.role_id.in_(role_ids),
-            RolePermissionMapping.module_id == module.id,
-            RolePermissionMapping.action_id == action.id,
-            RolePermissionMapping.company_id == company_id
-        ).first()
+        # Check against active role permissions for this specific module+action
+        active_role_perms = get_active_role_permissions(role_ids, company_id)
+        role_permission = next(
+            (rp for rp in active_role_perms
+             if rp.module_id == module.id and rp.action_id == action.id),
+            None
+        )
         
         if role_permission:
             # Check for user-specific overrides
@@ -176,40 +173,32 @@ def require_permission(module_name, action_name):
 
 def get_user_permissions_summary():
     """Get comprehensive permissions summary for current user"""
+    from app.utils.query_helpers import get_active_user_role_mappings, get_active_role_permissions
     user = get_current_user()
     if not user:
         return {}
-    
+
     company_id = user.company_id
-    
-    # Get user roles
-    user_roles = UserRoleMapping.query.filter_by(
-        user_id=user.id,
-        company_id=company_id,
-        status=1
+
+    active_mappings = get_active_user_role_mappings(user.id, company_id)
+    role_ids = [ur.role_id for ur in active_mappings]
+    role_permissions = get_active_role_permissions(role_ids, company_id)
+
+    user_permissions = UserPermissionMapping.query.filter(
+        UserPermissionMapping.user_id == user.id,
+        UserPermissionMapping.company_id == company_id,
+        UserPermissionMapping.status != 0
     ).all()
-    
-    role_ids = [ur.role_id for ur in user_roles]
-    
-    # Get role permissions
-    role_permissions = RolePermissionMapping.query.filter(
-        RolePermissionMapping.role_id.in_(role_ids),
-        RolePermissionMapping.company_id == company_id
-    ).all()
-    
-    # Get user-specific permissions
-    user_permissions = UserPermissionMapping.query.filter_by(
-        user_id=user.id,
-        company_id=company_id
-    ).all()
-    
-    # Build permission map
+
+    # Pre-load modules and actions
+    modules_map = {m.id: m for m in Module.query.filter_by(company_id=company_id).all()}
+    actions_map = {a.id: a for a in ModuleAction.query.filter_by(company_id=company_id).all()}
+
     permissions = {}
-    
-    # Add role permissions
+
     for rp in role_permissions:
-        module = Module.query.get(rp.module_id)
-        action = ModuleAction.query.get(rp.action_id)
+        module = modules_map.get(rp.module_id)
+        action = actions_map.get(rp.action_id)
         if module and action:
             if module.module_name not in permissions:
                 permissions[module.module_name] = []
@@ -218,27 +207,22 @@ def get_user_permissions_summary():
                 'source': 'role',
                 'url': action.action_url
             })
-    
-    # Apply user-specific overrides
+
     for up in user_permissions:
-        module = Module.query.get(up.module_id)
-        action = ModuleAction.query.get(up.action_id)
+        module = modules_map.get(up.module_id)
+        action = actions_map.get(up.action_id)
         if module and action:
             if module.module_name not in permissions:
                 permissions[module.module_name] = []
-            
-            # Remove existing role permission if being overridden
             permissions[module.module_name] = [
-                p for p in permissions[module.module_name] 
+                p for p in permissions[module.module_name]
                 if p['action'] != action.action_name
             ]
-            
-            # Add user permission if it's an allow
             if up.permission_type == 1:
                 permissions[module.module_name].append({
                     'action': action.action_name,
                     'source': 'user-allow',
                     'url': action.action_url
                 })
-    
+
     return permissions

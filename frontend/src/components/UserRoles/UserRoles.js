@@ -74,20 +74,32 @@ const UserRoles = () => {
   const [filteredRoles, setFilteredRoles] = useState([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [filterDepartment, setFilterDepartment] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   const canView = hasPermission('UserRoles', 'view');
   const canCreate = hasPermission('UserRoles', 'create');
   const canDelete = hasPermission('UserRoles', 'delete');
 
   useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchInput), 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
     loadData();
-  }, []);
+  }, [debouncedSearch, filterDepartment]);
 
   const loadData = async () => {
     try {
       setLoading(true);
+      const params = {};
+      if (debouncedSearch) params.search = debouncedSearch;
+      if (filterDepartment) params.department_id = filterDepartment;
+
       const [userRolesRes, usersRes, rolesRes, departmentsRes] = await Promise.allSettled([
-        userRolesAPI.getAll(),
+        userRolesAPI.getAll(params),
         usersAPI.getAll(),
         rolesAPI.getAll(),
         departmentsAPI.getAll(),
@@ -204,7 +216,10 @@ const UserRoles = () => {
         // Refresh permissions since role unassignments affect user permissions
         await refreshPermissions();
       } catch (error) {
-        setError('Failed to unassign role');
+        setError(
+          (error.response && error.response.data && error.response.data.error)
+          || 'Failed to unassign role'
+        );
       }
     }
   };
@@ -323,6 +338,30 @@ const UserRoles = () => {
         </Alert>
       )}
 
+      <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+        <TextField
+          label="Search by name"
+          placeholder="Search by user name..."
+          size="small"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          sx={{ minWidth: 220 }}
+        />
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel>Filter by Department</InputLabel>
+          <Select
+            value={filterDepartment}
+            label="Filter by Department"
+            onChange={(e) => setFilterDepartment(e.target.value)}
+          >
+            <MenuItem value="">All</MenuItem>
+            {departments.map(d => (
+              <MenuItem key={d.id} value={d.id}>{d.department_name}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Box>
+
       <Grid container spacing={3}>
         <Grid item xs={12} md={8}>
           <Paper sx={{ height: 600, width: '100%' }}>
@@ -392,7 +431,7 @@ const UserRoles = () => {
                               <IconButton
                                 edge="end"
                                 size="small"
-                                onClick={() => handleUnassignRole(selectedUser, roleAssignment.role_id)}
+                                onClick={() => handleUnassignRole(roleAssignment.id)}
                               >
                                 <DeleteIcon fontSize="small" />
                               </IconButton>

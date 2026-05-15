@@ -1,6 +1,7 @@
 from app import db
+from app.models.base import TimestampAuditMixin
 
-class RolePermissionMapping(db.Model):
+class RolePermissionMapping(db.Model, TimestampAuditMixin):
     id = db.Column(db.Integer, primary_key=True)
     role_id = db.Column(db.Integer, db.ForeignKey('roles.id'))
     module_id = db.Column(db.Integer, db.ForeignKey('modules.id'))
