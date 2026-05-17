@@ -71,12 +71,7 @@ const Users = () => {
   const canUpdate = hasPermission('Users', 'update');
   const canDelete = hasPermission('Users', 'delete');
 
-  // Debug logging
-  console.log('👥 [Users] Permission check results:');
-  console.log('👥 [Users] canView:', canView);
-  console.log('👥 [Users] canCreate:', canCreate);
-  console.log('👥 [Users] canUpdate:', canUpdate);
-  console.log('👥 [Users] canDelete:', canDelete);
+
 
   // Debounce search
   useEffect(() => {

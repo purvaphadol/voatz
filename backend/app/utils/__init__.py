@@ -39,6 +39,41 @@ def get_current_company_id():
     user = get_current_user()
     return user.company_id if user else None
 
+def is_current_user_super_admin():
+    """
+    Returns True if the currently authenticated user has the Super Admin role.
+    Super Admin is identified by a role named 'super admin' (case-insensitive).
+    Returns False if user not found, no company context, or not Super Admin.
+    """
+    try:
+        from app.models.role import Role
+        from app.models.user_role import UserRoleMapping
+        
+        user = get_current_user()
+        if not user or not user.company_id:
+            return False
+        
+        super_admin_role = Role.query.filter(
+            Role.role_name.ilike('super admin'),
+            Role.company_id == user.company_id,
+            Role.status != 0
+        ).first()
+        
+        if not super_admin_role:
+            return False
+        
+        mapping = UserRoleMapping.query.filter_by(
+            user_id=user.id,
+            role_id=super_admin_role.id,
+            status=1
+        ).first()
+        
+        return mapping is not None
+        
+    except Exception as e:
+        logger.error(f"Error in is_current_user_super_admin: {str(e)}")
+        return False
+
 def require_company_context(f):
     """Decorator to ensure the user has a valid company context"""
     @wraps(f)

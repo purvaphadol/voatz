@@ -116,7 +116,7 @@ def validate_role_name(role_name):
     """Sanitize and validate a role name. Returns (cleaned_name, error_tuple_or_None)."""
     if role_name is None:
         return None, (jsonify({'error': 'Role name is required'}), 400)
-    name = str(role_name).strip()
+    name = str(role_name).strip().title()
     if not name:
         return None, (jsonify({'error': 'Role name cannot be empty'}), 400)
     if len(name) > 100:
@@ -160,3 +160,39 @@ def validate_department_active(department):
     if getattr(department, 'status', 1) == STATUS_INACTIVE:
         return (jsonify({'error': 'Department is inactive'}), 400)
     return None
+
+
+def validate_department_name(name):
+    """Sanitize and validate a department name.
+    Returns (cleaned_name, error_tuple_or_None)."""
+    if name is None:
+        return None, (jsonify({'error': 'Department name is required'}), 400)
+    cleaned = str(name).strip().title()
+    if not cleaned:
+        return None, (jsonify({'error': 'Department name cannot be empty'}), 400)
+    if len(cleaned) > 100:
+        return None, (jsonify({'error': 'Department name cannot exceed 100 characters'}), 400)
+    return cleaned, None
+
+
+def validate_department_input(data, is_create=False):
+    """Validate department create/update payload.
+    Returns (cleaned_data, error_tuple_or_None)."""
+    if not data:
+        return None, (jsonify({'error': 'Request data is required'}), 400)
+    cleaned = {}
+    if is_create:
+        name, err = validate_department_name(data.get('department_name'))
+        if err:
+            return None, err
+        cleaned['department_name'] = name
+    else:
+        if data.get('department_name') is not None:
+            name, err = validate_department_name(data.get('department_name'))
+            if err:
+                return None, err
+            cleaned['department_name'] = name
+    if 'description' in data:
+        cleaned['description'] = str(data['description']).strip() \
+            if data['description'] else ''
+    return cleaned, None

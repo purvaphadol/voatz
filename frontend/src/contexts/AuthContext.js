@@ -18,26 +18,41 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for existing token on app load
-    const savedToken = Cookies.get('access_token');
-    const savedUser = Cookies.get('user');
-    
-    if (savedToken && savedUser) {
-      try {
-        setToken(savedToken);
-        setUser(JSON.parse(savedUser));
-      } catch (error) {
-        console.error('Error parsing saved user data:', error);
-        logout();
+    const initAuth = async () => {
+      // Check for existing token on app load
+      const savedToken = Cookies.get('access_token');
+      const savedUser = Cookies.get('user');
+      
+      if (savedToken && savedUser) {
+        try {
+          setToken(savedToken);
+          let parsedUser = JSON.parse(savedUser);
+          
+          if (!Array.isArray(parsedUser.roles)) {
+            const response = await authAPI.getProfile();
+            parsedUser = response.data;
+            if (!Array.isArray(parsedUser.roles)) parsedUser.roles = [];
+            Cookies.set('user', JSON.stringify(parsedUser), { expires: 1 });
+          }
+          
+          setUser(parsedUser);
+        } catch (error) {
+          console.error('Error parsing saved user data or fetching profile:', error);
+          logout();
+        }
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    };
+
+    initAuth();
   }, []);
 
   const login = async (email, password) => {
     try {
       const response = await authAPI.login({ email, password });
       const { access_token, user: userData } = response.data;
+      
+      if (!Array.isArray(userData.roles)) userData.roles = [];
       
       setToken(access_token);
       setUser(userData);

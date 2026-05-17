@@ -33,6 +33,7 @@ import {
 } from '@mui/icons-material';
 import { departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -49,6 +50,11 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
 
 const Departments = () => {
   const { hasPermission } = usePermissions();
+  const { user } = useAuth();
+  // Check if user has Super Admin role based on roles array from AuthContext user object
+  const isSuperAdmin = user?.roles?.some(
+    r => r.role_name?.toLowerCase() === 'super admin'
+  ) || false;
   const [departments, setDepartments] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,11 +63,15 @@ const Departments = () => {
   const [viewMode, setViewMode] = useState(false);
   const [formData, setFormData] = useState({
     department_name: '',
-    company_id: '',
     description: '',
+    company_id: '',
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [filterCompany, setFilterCompany] = useState('');
 
   const canView = hasPermission('Departments', 'view');
   const canCreate = hasPermission('Departments', 'create');
@@ -69,16 +79,29 @@ const Departments = () => {
   const canDelete = hasPermission('Departments', 'delete');
 
   useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchInput), 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
     if (canView) {
-      loadDepartments();
       loadCompanies();
     }
   }, [canView]);
 
+  useEffect(() => {
+    if (canView) {
+      loadDepartments();
+    }
+  }, [canView, debouncedSearch, filterCompany]);
+
   const loadDepartments = async () => {
     try {
       setLoading(true);
-      const response = await departmentsAPI.getAll();
+      const params = {};
+      if (debouncedSearch) params.search = debouncedSearch;
+      if (isSuperAdmin && filterCompany) params.company_id = filterCompany;
+      const response = await departmentsAPI.getAll(params);
       setDepartments(response.data.data || []);
     } catch (error) {
       console.error('Error loading departments:', error);
@@ -91,7 +114,7 @@ const Departments = () => {
   const loadCompanies = async () => {
     try {
       const response = await companiesAPI.getAll();
-      setCompanies(response.data.data || []);
+      setCompanies((response.data.data || []).filter(c => c.status === 1));
     } catch (error) {
       console.error('Error loading companies:', error);
     }
@@ -102,8 +125,8 @@ const Departments = () => {
     setViewMode(false);
     setFormData({
       department_name: '',
-      company_id: '',
       description: '',
+      company_id: '',
     });
     setDialogOpen(true);
   };
@@ -137,7 +160,10 @@ const Departments = () => {
         setSuccess('Department deleted successfully');
         loadDepartments();
       } catch (error) {
-        setError('Failed to delete department');
+        setError(
+          (error.response && error.response.data && error.response.data.error)
+          || 'Failed to delete department'
+        );
       }
     }
   };
@@ -153,17 +179,30 @@ const Departments = () => {
     }
 
     try {
+      setIsSubmitting(true);
       if (editingDepartment) {
-        await departmentsAPI.update(editingDepartment.id, formData);
+        await departmentsAPI.update(editingDepartment.id, {
+          department_name: formData.department_name,
+          description: formData.description,
+        });
         setSuccess('Department updated successfully');
       } else {
-        await departmentsAPI.create(formData);
+        const createPayload = {
+          department_name: formData.department_name,
+          description: formData.description,
+        };
+        if (isSuperAdmin && formData.company_id) {
+          createPayload.company_id = formData.company_id;
+        }
+        await departmentsAPI.create(createPayload);
         setSuccess('Department created successfully');
       }
       setDialogOpen(false);
       loadDepartments();
     } catch (error) {
       setError((error.response && error.response.data && error.response.data.error) || 'Operation failed');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -277,6 +316,37 @@ const Departments = () => {
         </Alert>
       )}
 
+      <Box sx={{ mb: 2 }}>
+        <TextField
+          label="Search departments"
+          size="small"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Search by department name..."
+          sx={{ minWidth: 250 }}
+        />
+      </Box>
+
+      {isSuperAdmin && (
+        <Box sx={{ mb: 2 }}>
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel>Filter by Company</InputLabel>
+            <Select
+              value={filterCompany}
+              label="Filter by Company"
+              onChange={(e) => setFilterCompany(e.target.value)}
+            >
+              <MenuItem value="">All Companies</MenuItem>
+              {companies.map(c => (
+                <MenuItem key={c.id} value={c.id}>
+                  {c.company_name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+      )}
+
       <Paper sx={{ height: 600, width: '100%' }}>
         <DataGrid
           rows={departments}
@@ -286,7 +356,7 @@ const Departments = () => {
           rowsPerPageOptions={[5, 10, 25]}
           disableSelectionOnClick
           components={{
-            Toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />
+            Toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />,
           }}
         />
       </Paper>
@@ -312,24 +382,64 @@ const Departments = () => {
               sx={{ mb: 2 }}
             />
 
-            <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
-              <InputLabel>Company</InputLabel>
-              <Select
-                value={formData.company_id}
-                onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}
-                label="Company"
-                disabled={viewMode}
-              >
-                <MenuItem value="">
-                  <em>Select Company</em>
-                </MenuItem>
-                {companies.map((company) => (
-                  <MenuItem key={company.id} value={company.id}>
-                    {company.company_name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            {/* Company field — picker for Super Admin, read-only for others */}
+            {!editingDepartment && !viewMode && (
+              isSuperAdmin ? (
+                <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
+                  <InputLabel>Company *</InputLabel>
+                  <Select
+                    value={formData.company_id || ''}
+                    onChange={(e) => setFormData({
+                      ...formData, company_id: e.target.value
+                    })}
+                    label="Company *"
+                    required
+                  >
+                    <MenuItem value="">
+                      <em>Select Company</em>
+                    </MenuItem>
+                    {companies.map(c => (
+                      <MenuItem key={c.id} value={c.id}>
+                        {c.company_name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              ) : (
+                <Box sx={{ mb: 2, p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Company
+                  </Typography>
+                  <Typography variant="body2" fontWeight="medium">
+                    {departments[0]?.company_name || 'Your current company'}
+                  </Typography>
+                </Box>
+              )
+            )}
+
+            {/* Edit/View mode — always show disabled company */}
+            {(editingDepartment || viewMode) && (
+              <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
+                <InputLabel>Company</InputLabel>
+                <Select
+                  value={formData.company_id || ''}
+                  label="Company"
+                  disabled
+                >
+                  {companies.map(c => (
+                    <MenuItem key={c.id} value={c.id}>
+                      {c.company_name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+            {editingDepartment && !viewMode && (
+              <Typography variant="caption" color="text.secondary"
+                sx={{ mt: -1, mb: 1, display: 'block' }}>
+                Company cannot be changed after creation.
+              </Typography>
+            )}
 
             <TextField
               margin="dense"
@@ -348,8 +458,10 @@ const Departments = () => {
               {viewMode ? 'Close' : 'Cancel'}
             </Button>
             {!viewMode && (
-              <Button type="submit" variant="contained">
-                {editingDepartment ? 'Update' : 'Create'}
+              <Button type="submit" variant="contained" disabled={isSubmitting}>
+                {isSubmitting
+                  ? 'Saving...'
+                  : editingDepartment ? 'Update' : 'Create'}
               </Button>
             )}
           </DialogActions>
@@ -359,4 +471,4 @@ const Departments = () => {
   );
 };
 
-export default Departments; 
+export default Departments;

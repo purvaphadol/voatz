@@ -30,9 +30,10 @@ def get_active_departments_query(company_id):
     Returns a SQLAlchemy query for all active departments in a given company.
     A department is considered active if its status is STATUS_ACTIVE.
     """
-    return Department.query.filter(
+    return Department.query.join(Company).filter(
         Department.company_id == company_id,
-        Department.status == STATUS_ACTIVE
+        Department.status == STATUS_ACTIVE,
+        Company.status == STATUS_ACTIVE
     )
 
 def get_active_user_role_mappings(user_id, company_id):

@@ -3,6 +3,8 @@ from flask_jwt_extended import create_access_token, jwt_required
 from werkzeug.security import check_password_hash, generate_password_hash
 from app.models.user import User
 from app.models.company import Company
+from app.models.role import Role
+from app.models.user_role import UserRoleMapping
 from app.utils import get_current_user
 import logging
 
@@ -34,6 +36,18 @@ def login():
     # Get company information
     company = Company.query.get(user.company_id)
     
+    # Fetch active roles
+    from app import db
+    active_roles = db.session.query(Role).join(
+        UserRoleMapping, UserRoleMapping.role_id == Role.id
+    ).filter(
+        UserRoleMapping.user_id == user.id,
+        UserRoleMapping.company_id == user.company_id,
+        UserRoleMapping.status == 1,
+        Role.status != 0
+    ).all()
+    roles_list = [{'id': role.id, 'role_name': role.role_name} for role in active_roles]
+    
     # Create access token with string identity
     access_token = create_access_token(identity=str(user.id))
     
@@ -44,7 +58,8 @@ def login():
             'name': user.name,
             'email': user.email,
             'company_id': user.company_id,
-            'company_name': company.company_name if company else None
+            'company_name': company.company_name if company else None,
+            'roles': roles_list
         }
     }), 200
 
@@ -58,12 +73,25 @@ def get_profile():
     
     company = Company.query.get(user.company_id)
     
+    # Fetch active roles
+    from app import db
+    active_roles = db.session.query(Role).join(
+        UserRoleMapping, UserRoleMapping.role_id == Role.id
+    ).filter(
+        UserRoleMapping.user_id == user.id,
+        UserRoleMapping.company_id == user.company_id,
+        UserRoleMapping.status == 1,
+        Role.status != 0
+    ).all()
+    roles_list = [{'id': role.id, 'role_name': role.role_name} for role in active_roles]
+    
     return jsonify({
         'id': user.id,
         'name': user.name,
         'email': user.email,
         'company_id': user.company_id,
-        'company_name': company.company_name if company else None
+        'company_name': company.company_name if company else None,
+        'roles': roles_list
     }), 200
 
 @auth_bp.route('/profile', methods=['PUT'])

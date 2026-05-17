@@ -10,8 +10,3 @@ class Department(db.Model, TimestampAuditMixin):
     
     # Relationships
     company = db.relationship('Company', backref='departments')
-    
-    # Unique constraint: department name should be unique within a company
-    __table_args__ = (
-        db.UniqueConstraint('department_name', 'company_id', name='unique_department_per_company'),
-    )
