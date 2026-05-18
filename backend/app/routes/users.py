@@ -6,7 +6,7 @@ from app.models.user import User
 from app.models.user_role import UserRoleMapping
 from app.models.company import Company
 from app.models.role import Role
-from app.utils import get_current_company_id, require_company_context, require_permission
+from app.utils import get_current_company_id, require_company_context, require_permission, is_current_user_super_admin
 from app.utils.audit import audit_action, set_audit_fields
 from app.models.department import Department
 from sqlalchemy.orm import joinedload
@@ -67,8 +67,22 @@ def list_users():
 @require_permission('Users', 'create')
 @audit_action('create_user', module='Users', description='Created a new user')
 def create_user():
-    company_id = get_current_company_id()
     data = request.get_json()
+    
+    if is_current_user_super_admin():
+        company_id = data.get('company_id')
+        if not company_id:
+            return jsonify({'error': 'company_id is required for Super Admin'}), 400
+        try:
+            company_id = int(company_id)
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid company_id format'}), 400
+            
+        company = Company.query.filter_by(id=company_id).filter(Company.status != STATUS_INACTIVE).first()
+        if not company:
+            return jsonify({'error': 'Company not found or inactive'}), 404
+    else:
+        company_id = get_current_company_id()
     
     cleaned_data, error = validate_user_input(data, is_create=True)
     if error:

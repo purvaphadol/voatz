@@ -26,8 +26,9 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
 } from '@mui/icons-material';
-import { usersAPI, departmentsAPI, handleApiError } from '../../services/api';
+import { usersAPI, departmentsAPI, companiesAPI, handleApiError } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -44,8 +45,14 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
 
 const Users = () => {
   const { hasPermission } = usePermissions();
+  const { user } = useAuth();
+  const isSuperAdmin = user?.roles?.some(
+    r => r.role_name?.toLowerCase() === 'super admin'
+  ) || false;
+
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -54,6 +61,7 @@ const Users = () => {
     email: '',
     password: '',
     department_id: '',
+    company_id: '',
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -86,8 +94,14 @@ const Users = () => {
   }, [page, pageSize, debouncedSearch]);
 
   useEffect(() => {
-    loadDepartments();
-  }, []);
+    if (isSuperAdmin) loadCompanies();
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      loadDepartments();
+    }
+  }, [isSuperAdmin]);
 
   const loadUsers = async () => {
     try {
@@ -108,12 +122,22 @@ const Users = () => {
     }
   };
 
-  const loadDepartments = async () => {
+  const loadDepartments = async (companyId) => {
     try {
-      const response = await departmentsAPI.getAll();
+      const params = companyId ? { company_id: companyId } : {};
+      const response = await departmentsAPI.getAll(params);
       setDepartments(response.data.data || []);
     } catch (error) {
       console.error('Error loading departments:', error);
+    }
+  };
+
+  const loadCompanies = async () => {
+    try {
+      const response = await companiesAPI.getAll();
+      setCompanies((response.data.data || []).filter(c => c.status === 1));
+    } catch (error) {
+      console.error('Error loading companies:', error);
     }
   };
 
@@ -124,6 +148,7 @@ const Users = () => {
       email: '',
       password: '',
       department_id: '',
+      company_id: '',
     });
     setDialogOpen(true);
   };
@@ -162,6 +187,11 @@ const Users = () => {
       email: formData.email.trim().toLowerCase(),
     };
 
+    if (isSuperAdmin && !editingUser && !formData.company_id) {
+      setError('Please select a company');
+      return;
+    }
+
     if (!cleanedData.name || !cleanedData.email) {
       setError('Name and email cannot be empty');
       return;
@@ -195,11 +225,17 @@ const Users = () => {
 
     try {
       setIsSubmitting(true);
+      
+      const payload = { ...cleanedData };
+      if (!isSuperAdmin || editingUser) {
+        delete payload.company_id;
+      }
+      
       if (editingUser) {
-        await usersAPI.update(editingUser.id, cleanedData);
+        await usersAPI.update(editingUser.id, payload);
         setSuccess('User updated successfully');
       } else {
-        await usersAPI.create(cleanedData);
+        await usersAPI.create(payload);
         setSuccess('User created successfully');
       }
       setDialogOpen(false);
@@ -379,6 +415,55 @@ const Users = () => {
               required={!editingUser}
               sx={{ mb: 2 }}
             />
+            {!editingUser ? (
+              isSuperAdmin ? (
+                <TextField
+                  margin="dense"
+                  label="Company *"
+                  select
+                  fullWidth
+                  variant="outlined"
+                  value={formData.company_id}
+                  onChange={(e) => {
+                    const selectedCompanyId = e.target.value;
+                    setFormData({ ...formData, company_id: selectedCompanyId, department_id: '' });
+                    if (selectedCompanyId) {
+                      loadDepartments(selectedCompanyId);
+                    }
+                  }}
+                  SelectProps={{
+                    native: true,
+                  }}
+                  sx={{ mb: 2 }}
+                >
+                  <option value="">Select Company</option>
+                  {companies.map((comp) => (
+                    <option key={comp.id} value={comp.id}>
+                      {comp.company_name}
+                    </option>
+                  ))}
+                </TextField>
+              ) : (
+                <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                  <Typography variant="caption" color="textSecondary" display="block">
+                    Company
+                  </Typography>
+                  <Typography variant="body2">
+                    {departments[0]?.company_name || user?.company_name || 'N/A'}
+                  </Typography>
+                </Box>
+              )
+            ) : (
+              <TextField
+                margin="dense"
+                label="Company"
+                fullWidth
+                variant="outlined"
+                value={editingUser.company_name || ''}
+                disabled
+                sx={{ mb: 2 }}
+              />
+            )}
             <TextField
               margin="dense"
               label="Department"
