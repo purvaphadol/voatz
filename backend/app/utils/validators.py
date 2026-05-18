@@ -196,3 +196,75 @@ def validate_department_input(data, is_create=False):
         cleaned['description'] = str(data['description']).strip() \
             if data['description'] else ''
     return cleaned, None
+
+
+def validate_company_input(data, is_create=False):
+    if not data:
+        return None, (jsonify({'error': 'Data is required'}), 400)
+        
+    cleaned = {}
+    
+    # Handle company_name
+    if is_create and not data.get('company_name'):
+        return None, (jsonify({'error': 'Company name is required'}), 400)
+        
+    if 'company_name' in data and data['company_name'] is not None:
+        name = str(data['company_name']).strip().title()
+        if not name:
+            return None, (jsonify({'error': 'Company name cannot be empty'}), 400)
+        if len(name) > 100:
+            return None, (jsonify({'error': 'Company name cannot exceed 100 characters'}), 400)
+        cleaned['company_name'] = name
+    elif is_create:
+        return None, (jsonify({'error': 'Company name cannot be empty'}), 400)
+        
+    # Handle email
+    if 'email' in data:
+        email = data['email']
+        if email and str(email).strip():
+            valid_email, err = validate_email(email)
+            if err:
+                return None, err
+            cleaned['email'] = valid_email
+        else:
+            cleaned['email'] = None
+
+    # Handle phone
+    if 'phone' in data:
+        phone = data['phone']
+        if phone and str(phone).strip():
+            phone_val = str(phone).strip()
+            if len(phone_val) > 20:
+                return None, (jsonify({'error': 'Phone cannot exceed 20 characters'}), 400)
+            cleaned['phone'] = phone_val
+        else:
+            cleaned['phone'] = None
+
+    # Handle website
+    if 'website' in data:
+        website = data['website']
+        if website and str(website).strip():
+            website_val = str(website).strip()
+            if len(website_val) > 200:
+                return None, (jsonify({'error': 'Website cannot exceed 200 characters'}), 400)
+            cleaned['website'] = website_val
+        else:
+            cleaned['website'] = None
+
+    # Handle description
+    if 'description' in data:
+        desc = data['description']
+        if desc and str(desc).strip():
+            cleaned['description'] = str(desc).strip()
+        else:
+            cleaned['description'] = None
+
+    # Handle address
+    if 'address' in data:
+        addr = data['address']
+        if addr and str(addr).strip():
+            cleaned['address'] = str(addr).strip()
+        else:
+            cleaned['address'] = None
+
+    return cleaned, None

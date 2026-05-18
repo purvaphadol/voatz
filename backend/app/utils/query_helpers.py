@@ -69,3 +69,15 @@ def get_active_role_permissions(role_ids, company_id):
         RolePermissionMapping.status != STATUS_INACTIVE
     ).all()
 
+
+def get_active_companies_query():
+    """
+    Returns a SQLAlchemy query for all active companies.
+    A company is considered active if its status is STATUS_ACTIVE.
+    """
+    from app.models.company import Company
+    from app.utils.constants import STATUS_ACTIVE
+    return Company.query.filter(
+        Company.status == STATUS_ACTIVE
+    )
+
