@@ -204,7 +204,7 @@ const Companies = () => {
       width: 150,
       getActions: (params) => {
         const actions = [];
-        
+
         if (canView) {
           actions.push(
             <GridActionsCellItem
@@ -214,7 +214,7 @@ const Companies = () => {
             />
           );
         }
-        
+
         if (canUpdate) {
           actions.push(
             <GridActionsCellItem
@@ -224,7 +224,7 @@ const Companies = () => {
             />
           );
         }
-        
+
         if (canDelete) {
           actions.push(
             <GridActionsCellItem
@@ -234,7 +234,7 @@ const Companies = () => {
             />
           );
         }
-        
+
         return actions;
       },
     },
@@ -255,13 +255,13 @@ const Companies = () => {
       <Typography variant="h4" gutterBottom>
         Companies Management
       </Typography>
-      
+
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
           {error}
         </Alert>
       )}
-      
+
       {success && (
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
           {success}
@@ -289,7 +289,7 @@ const Companies = () => {
         <form onSubmit={handleSubmit}>
           <DialogContent>
             {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-            
+
             <TextField
               autoFocus
               margin="dense"
