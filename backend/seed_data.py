@@ -4,7 +4,11 @@ from werkzeug.security import generate_password_hash
 from datetime import datetime
 
 # DB config (note: %40 is URL encoded '@')
-DATABASE_URI = "postgresql://flask_user:REDACTED@localhost/voatz"
+import os
+from dotenv import load_dotenv
+load_dotenv()
+DATABASE_URI = os.environ["DATABASE_URL"]  # reads from backend/.env automatically
+
 engine = create_engine(DATABASE_URI)
 metadata = MetaData()
 metadata.reflect(bind=engine)

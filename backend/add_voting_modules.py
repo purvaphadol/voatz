@@ -3,7 +3,11 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 
 # DB config
-DATABASE_URI = "postgresql://flask_user:REDACTED@localhost/voatz"
+import os
+from dotenv import load_dotenv
+load_dotenv()
+DATABASE_URI = os.environ["DATABASE_URL"]  # no fallback — fails loud if not set
+
 engine = create_engine(DATABASE_URI)
 metadata = MetaData()
 metadata.reflect(bind=engine)
