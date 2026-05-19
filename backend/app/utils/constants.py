@@ -1,6 +1,7 @@
 # User and Entity Statuses
 STATUS_ACTIVE = 1
 STATUS_INACTIVE = 0
+STATUS_DEACTIVATED = 9
 
 # Pagination Defaults
 DEFAULT_PAGE = 1

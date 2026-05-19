@@ -75,7 +75,7 @@ const Modules = () => {
     route_name: '',
     description: '',
     icon: '',
-    is_active: true,
+    status: 1,
     order_index: 0,
   });
   const [actionFormData, setActionFormData] = useState({
@@ -129,7 +129,7 @@ const Modules = () => {
       route_name: '',
       description: '',
       icon: '',
-      is_active: true,
+      status: 1,
       order_index: 0,
     });
     setDialogOpen(true);
@@ -143,7 +143,7 @@ const Modules = () => {
       route_name: module.route_name || '',
       description: module.description || '',
       icon: module.icon || '',
-      is_active: module.is_active !== undefined ? module.is_active : (module.status === 1),
+      status: module.status,
       order_index: module.order_index || 0,
     });
     setDialogOpen(true);
@@ -157,7 +157,7 @@ const Modules = () => {
       route_name: module.route_name || '',
       description: module.description || '',
       icon: module.icon || '',
-      is_active: module.is_active !== undefined ? module.is_active : (module.status === 1),
+      status: module.status,
       order_index: module.order_index || 0,
     });
     setDialogOpen(true);
@@ -176,7 +176,7 @@ const Modules = () => {
         setSuccess('Module deleted successfully');
         loadModules();
       } catch (error) {
-        setError('Failed to delete module');
+        setError(error.response?.data?.error || 'Failed to delete module');
       }
     }
   };
@@ -193,10 +193,7 @@ const Modules = () => {
 
     try {
       const submitData = {
-        ...formData,
-        // Keep both for compatibility
-        is_active: formData.is_active,
-        status: formData.is_active ? 1 : 0,
+        ...formData
       };
 
       if (editingModule) {
@@ -257,7 +254,7 @@ const Modules = () => {
       setEditingAction(null);
       loadModuleActions(selectedModule.id);
     } catch (error) {
-      setError('Failed to save action');
+      setError(error.response?.data?.error || 'Failed to save action');
     }
   };
 
@@ -277,7 +274,7 @@ const Modules = () => {
         setSuccess('Action deleted successfully');
         loadModuleActions(selectedModule.id);
       } catch (error) {
-        setError('Failed to delete action');
+        setError(error.response?.data?.error || 'Failed to delete action');
       }
     }
   };
@@ -545,8 +542,8 @@ const Modules = () => {
             <FormControlLabel
               control={
                 <Switch
-                  checked={formData.is_active}
-                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                  checked={formData.status === 1}
+                  onChange={(e) => setFormData({ ...formData, status: e.target.checked ? 1 : 9 })}
                   disabled={viewMode}
                 />
               }

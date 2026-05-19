@@ -81,3 +81,29 @@ def get_active_companies_query():
         Company.status == STATUS_ACTIVE
     )
 
+
+def get_active_modules_query(company_id):
+    """
+    Returns a SQLAlchemy query for all active modules in a given company.
+    A module is considered active if its status is STATUS_ACTIVE.
+    """
+    from app.models.module import Module
+    from app.utils.constants import STATUS_ACTIVE
+    return Module.query.filter(
+        Module.company_id == company_id,
+        Module.status == STATUS_ACTIVE
+    ).order_by(Module.order_index.asc(), Module.module_name.asc())
+
+
+def get_active_module_actions_query(module_id, company_id):
+    """
+    Returns a SQLAlchemy query for all active module actions for a specific module.
+    An action is considered active if its status is STATUS_ACTIVE.
+    """
+    from app.models.module_action import ModuleAction
+    from app.utils.constants import STATUS_ACTIVE
+    return ModuleAction.query.filter(
+        ModuleAction.module_id == module_id,
+        ModuleAction.company_id == company_id,
+        ModuleAction.status == STATUS_ACTIVE
+    )

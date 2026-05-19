@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required
 from app.utils import get_current_user, get_user_permissions_summary, require_company_context, get_current_company_id
 from app.models.module import Module
+from app.utils.constants import STATUS_ACTIVE
 
 menu_bp = Blueprint('menu', __name__)
 
@@ -13,7 +14,7 @@ def get_user_sidebar():
     company_id = get_current_company_id()
     
     # Get only active modules with their display routes, ordered by order_index
-    modules = Module.query.filter_by(company_id=company_id, is_active=True).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
+    modules = Module.query.filter_by(company_id=company_id).filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
     module_routes = {module.module_name: module.display_route for module in modules}
     module_orders = {module.module_name: module.order_index for module in modules}
     

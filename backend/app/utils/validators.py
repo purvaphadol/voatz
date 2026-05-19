@@ -268,3 +268,109 @@ def validate_company_input(data, is_create=False):
             cleaned['address'] = None
 
     return cleaned, None
+
+
+def validate_module_input(data, is_create=False):
+    if not data:
+        return None, (jsonify({'error': 'Data is required'}), 400)
+        
+    cleaned = {}
+    
+    if is_create:
+        if not data.get('module_name') or not str(data['module_name']).strip():
+            return None, (jsonify({'error': 'Module name is required'}), 400)
+            
+    if 'module_name' in data and data['module_name'] is not None:
+        name = str(data['module_name']).strip()
+        if not name and is_create:
+            return None, (jsonify({'error': 'Module name cannot be empty'}), 400)
+        elif name:
+            name = name.title()
+            if len(name) > 100:
+                return None, (jsonify({'error': 'Module name cannot exceed 100 characters'}), 400)
+            cleaned['module_name'] = name
+
+    if 'route_name' in data:
+        if data['route_name'] and str(data['route_name']).strip():
+            route = str(data['route_name']).strip().lower()
+            if len(route) > 100:
+                return None, (jsonify({'error': 'Route name cannot exceed 100 characters'}), 400)
+            cleaned['route_name'] = route
+        else:
+            cleaned['route_name'] = None
+            
+    if 'description' in data:
+        if data['description'] and str(data['description']).strip():
+            cleaned['description'] = str(data['description']).strip()
+        else:
+            cleaned['description'] = None
+            
+    if 'icon' in data:
+        if data['icon'] and str(data['icon']).strip():
+            icon = str(data['icon']).strip()
+            if len(icon) > 100:
+                return None, (jsonify({'error': 'Icon cannot exceed 100 characters'}), 400)
+            cleaned['icon'] = icon
+        else:
+            cleaned['icon'] = None
+            
+    if 'order_index' in data and data['order_index'] is not None:
+        try:
+            order_index = int(data['order_index'])
+            if order_index < 0:
+                return None, (jsonify({'error': 'Order index must be >= 0'}), 400)
+            cleaned['order_index'] = order_index
+        except (ValueError, TypeError):
+            return None, (jsonify({'error': 'Invalid order_index format'}), 400)
+            
+    if 'status' in data and data['status'] is not None:
+        try:
+            status = int(data['status'])
+            if status not in (0, 1, 9):
+                return None, (jsonify({'error': 'Invalid status'}), 400)
+            cleaned['status'] = status
+        except (ValueError, TypeError):
+            return None, (jsonify({'error': 'Invalid status format'}), 400)
+            
+    return cleaned, None
+
+
+def validate_module_action_input(data, is_create=False):
+    if not data:
+        return None, (jsonify({'error': 'Data is required'}), 400)
+        
+    cleaned = {}
+    
+    if is_create:
+        if not data.get('action_name') or not str(data['action_name']).strip():
+            return None, (jsonify({'error': 'Action name is required'}), 400)
+        if not data.get('action_url') or not str(data['action_url']).strip():
+            return None, (jsonify({'error': 'Action URL is required'}), 400)
+            
+    if 'action_name' in data and data['action_name'] is not None:
+        name = str(data['action_name']).strip()
+        if not name:
+            return None, (jsonify({'error': 'Action name cannot be empty'}), 400)
+        name = name.lower()
+        if len(name) > 100:
+            return None, (jsonify({'error': 'Action name cannot exceed 100 characters'}), 400)
+        cleaned['action_name'] = name
+        
+    if 'action_url' in data and data['action_url'] is not None:
+        url = str(data['action_url']).strip()
+        if not url:
+            return None, (jsonify({'error': 'Action URL cannot be empty'}), 400)
+        if len(url) > 255:
+            return None, (jsonify({'error': 'Action URL cannot exceed 255 characters'}), 400)
+        cleaned['action_url'] = url
+        
+    if 'status' in data and data['status'] is not None:
+        try:
+            status = int(data['status'])
+            if status not in (0, 1, 9):
+                return None, (jsonify({'error': 'Invalid status'}), 400)
+            cleaned['status'] = status
+        except (ValueError, TypeError):
+            return None, (jsonify({'error': 'Invalid status format'}), 400)
+            
+    return cleaned, None
