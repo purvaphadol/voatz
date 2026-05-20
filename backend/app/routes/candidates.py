@@ -7,7 +7,7 @@ from app.models.election import Election
 from app.models.vote import Vote
 from app.utils import get_current_company_id, require_permission, get_current_user
 from sqlalchemy import or_
-from datetime import datetime
+from datetime import datetime, timezone
 from werkzeug.utils import secure_filename
 import secrets
 import string
@@ -334,7 +334,7 @@ def update_candidate(candidate_id):
         candidate.key_issues = data['key_issues']
     
     candidate.updated_by = current_user.id if current_user else None
-    candidate.updated_at = datetime.utcnow()
+    candidate.updated_at = datetime.now(timezone.utc)
     
     logger.info(f"🔍 Committing changes to database for candidate {candidate_id}")
     db.session.commit()
@@ -364,7 +364,7 @@ def delete_candidate(candidate_id):
     
     # Soft delete by updating status
     candidate.is_active = False
-    candidate.updated_at = datetime.utcnow()
+    candidate.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Candidate deleted successfully'}), 200
@@ -385,11 +385,11 @@ def withdraw_candidate(candidate_id):
     reason = data.get('reason', 'Candidate withdrawal') if data else 'Candidate withdrawal'
     
     candidate.is_withdrawn = True
-    candidate.withdrawal_date = datetime.utcnow()
+    candidate.withdrawal_date = datetime.now(timezone.utc)
     candidate.withdrawal_reason = reason
     candidate.is_active = False
     candidate.updated_by = current_user.id if current_user else None
-    candidate.updated_at = datetime.utcnow()
+    candidate.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Candidate withdrawn successfully'}), 200
@@ -414,7 +414,7 @@ def reinstate_candidate(candidate_id):
     candidate.withdrawal_reason = None
     candidate.is_active = True
     candidate.updated_by = current_user.id if current_user else None
-    candidate.updated_at = datetime.utcnow()
+    candidate.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Candidate reinstated successfully'}), 200

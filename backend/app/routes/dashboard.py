@@ -6,7 +6,7 @@ from app.models.vote import Vote
 from app.models.ballot import Ballot
 from app.models.voter_registration import VoterRegistration
 from app.utils import get_current_company_id, require_permission
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_, or_
 
 dashboard_bp = Blueprint('dashboard', __name__)
@@ -17,7 +17,7 @@ def get_dashboard():
     """Get general dashboard data for mobile app"""
     try:
         company_id = get_current_company_id()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         # Get active elections
         active_elections = Election.query.filter(
@@ -102,7 +102,7 @@ def get_dashboard_stats():
     """Get comprehensive dashboard statistics"""
     try:
         company_id = get_current_company_id()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         # Election statistics
         total_elections = Election.query.filter_by(company_id=company_id).count()
@@ -300,7 +300,7 @@ def get_mobile_dashboard():
         total_elections = Election.query.filter_by(company_id=company_id).count()
         active_elections = Election.query.filter_by(company_id=company_id, is_active=True).count()
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         upcoming_elections = Election.query.filter_by(company_id=company_id).filter(
             Election.start_date > now
         ).count()

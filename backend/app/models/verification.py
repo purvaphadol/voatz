@@ -1,6 +1,6 @@
 from app import db
 from app.models.base import TimestampAuditMixin
-from datetime import datetime
+from datetime import datetime, timezone
 
 class Verification(db.Model, TimestampAuditMixin):
     __tablename__ = 'verifications'
@@ -43,7 +43,7 @@ class Verification(db.Model, TimestampAuditMixin):
     confidence_level = db.Column(db.String(20), nullable=True)  # low, medium, high, very_high
     
     # Timing information
-    initiated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    initiated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     verified_at = db.Column(db.DateTime, nullable=True)
     expires_at = db.Column(db.DateTime, nullable=True)
     
@@ -105,7 +105,7 @@ class Verification(db.Model, TimestampAuditMixin):
         """Check if verification has expired"""
         if not self.expires_at:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
     
     @property
     def is_pending(self):
@@ -117,7 +117,7 @@ class Verification(db.Model, TimestampAuditMixin):
         """Get age of verification in days"""
         if not self.verified_at:
             return None
-        return (datetime.utcnow() - self.verified_at).days
+        return (datetime.now(timezone.utc) - self.verified_at).days
     
     def generate_verification_id(self):
         """Generate unique verification ID"""
@@ -133,7 +133,7 @@ class Verification(db.Model, TimestampAuditMixin):
             self.audit_trail = []
         
         event = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'event_type': event_type,
             'description': description,
             'additional_data': additional_data or {}
@@ -143,7 +143,7 @@ class Verification(db.Model, TimestampAuditMixin):
     def mark_verified(self, verified_by_user_id=None, notes=None):
         """Mark verification as verified"""
         self.status = 'verified'
-        self.verified_at = datetime.utcnow()
+        self.verified_at = datetime.now(timezone.utc)
         self.verified_by = verified_by_user_id
         if notes:
             self.verification_notes = notes

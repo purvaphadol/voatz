@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify
-from datetime import datetime
+from datetime import datetime, timezone
 
 health_bp = Blueprint('health', __name__)
 
@@ -8,7 +8,7 @@ def health_check():
     """Health check endpoint for monitoring and load balancers"""
     return jsonify({
         'status': 'ok',
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'service': 'flask-access-control-backend'
     }), 200
 
@@ -19,7 +19,7 @@ def detailed_health_check():
     
     health_status = {
         'status': 'ok',
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'service': 'flask-access-control-backend',
         'checks': {}
     }

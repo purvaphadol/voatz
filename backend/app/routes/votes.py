@@ -9,7 +9,7 @@ from app.models.candidate import Candidate
 from app.models.voter_registration import VoterRegistration
 from app.utils import get_current_company_id, require_permission, get_current_user
 from sqlalchemy import or_, and_
-from datetime import datetime
+from datetime import datetime, timezone
 import secrets
 import string
 import json
@@ -190,7 +190,7 @@ def cast_vote():
 
     # Set timestamps FIRST (needed for hash generation)
     vote.vote_start_time = datetime.fromisoformat(data['vote_start_time'].replace('Z', '+00:00')) if data.get('vote_start_time') else None
-    vote.vote_cast_time = datetime.utcnow()
+    vote.vote_cast_time = datetime.now(timezone.utc)
 
     # Set verification status
     vote.biometric_verified = data.get('biometric_verified', False)
@@ -337,11 +337,11 @@ def verify_vote(vote_id):
     if vote.is_verified:
         vote.vote_status = 'verified'
         vote.processing_status = 'processed'
-        vote.vote_processing_time = datetime.utcnow()
+        vote.vote_processing_time = datetime.now(timezone.utc)
         vote.add_audit_event('vote_verified', 'Vote fully verified and processed')
     
     vote.updated_by = current_user.id if current_user else None
-    vote.updated_at = datetime.utcnow()
+    vote.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': f'Vote {verification_type} verification updated successfully'}), 200
@@ -365,7 +365,7 @@ def count_vote(vote_id):
     vote.is_counted = True
     vote.vote_status = 'counted'
     vote.processing_status = 'processed'
-    vote.vote_processing_time = datetime.utcnow()
+    vote.vote_processing_time = datetime.now(timezone.utc)
     
     # Update candidate vote counts
     for candidate_id in vote.get_selected_candidates():
@@ -386,7 +386,7 @@ def count_vote(vote_id):
     vote.add_audit_event('vote_counted', 'Vote included in final tally')
     
     vote.updated_by = current_user.id if current_user else None
-    vote.updated_at = datetime.utcnow()
+    vote.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Vote counted successfully'}), 200
@@ -413,13 +413,13 @@ def flag_vote(vote_id):
         'flag_type': 'manual',
         'reason': reason,
         'flagged_by': current_user.id if current_user else None,
-        'flagged_at': datetime.utcnow().isoformat()
+        'flagged_at': datetime.now(timezone.utc).isoformat()
     })
     
     vote.add_audit_event('vote_flagged', f'Vote flagged for review: {reason}')
     
     vote.updated_by = current_user.id if current_user else None
-    vote.updated_at = datetime.utcnow()
+    vote.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Vote flagged successfully'}), 200
@@ -517,11 +517,11 @@ def bulk_verify_votes():
         if vote.is_verified:
             vote.vote_status = 'verified'
             vote.processing_status = 'processed'
-            vote.vote_processing_time = datetime.utcnow()
+            vote.vote_processing_time = datetime.now(timezone.utc)
         
         vote.add_audit_event('bulk_verified', f'Bulk {verification_type} verification')
         vote.updated_by = current_user.id if current_user else None
-        vote.updated_at = datetime.utcnow()
+        vote.updated_at = datetime.now(timezone.utc)
         updated_count += 1
     
     db.session.commit()

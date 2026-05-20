@@ -7,7 +7,7 @@ from app.models.election import Election
 from app.models.user import User
 from app.utils import get_current_company_id, require_permission, get_current_user
 from sqlalchemy import or_
-from datetime import datetime
+from datetime import datetime, timezone
 import secrets
 import string
 
@@ -129,7 +129,7 @@ def create_voter_registration():
         return jsonify({'error': 'Voter is already registered for this election'}), 400
     
     # Check registration deadline
-    if election.registration_deadline and datetime.utcnow() > election.registration_deadline:
+    if election.registration_deadline and datetime.now(timezone.utc) > election.registration_deadline:
         return jsonify({'error': 'Registration deadline has passed'}), 400
     
     # Generate unique registration ID
@@ -144,7 +144,7 @@ def create_voter_registration():
     registration.election_id = data['election_id']
     registration.registration_id = registration_id
     registration.registration_type = data.get('registration_type', 'standard')
-    registration.registered_at = datetime.utcnow()
+    registration.registered_at = datetime.now(timezone.utc)
     
     # Set initial verification requirements
     registration.required_verification_level = data.get('required_verification_level', 'standard')
@@ -311,7 +311,7 @@ def update_voter_registration(registration_id):
     registration.add_audit_event('registration_updated', 'Voter registration updated')
     
     registration.updated_by = current_user.id if current_user else None
-    registration.updated_at = datetime.utcnow()
+    registration.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Voter registration updated successfully'}), 200
