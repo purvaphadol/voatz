@@ -7,7 +7,7 @@ from app.models.user import User
 from app.models.company import Company
 from app.utils import get_current_company_id, require_permission, get_current_user
 from sqlalchemy import or_
-from datetime import datetime
+from datetime import datetime, timezone
 import secrets
 import string
 
@@ -201,7 +201,7 @@ def update_voter(voter_id):
         voter.registered_device_id = data['registered_device_id']
     
     voter.updated_by = current_user.id if current_user else None
-    voter.updated_at = datetime.utcnow()
+    voter.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Voter updated successfully'}), 200
@@ -215,7 +215,7 @@ def delete_voter(voter_id):
     
     # Soft delete by updating status
     voter.status = 0
-    voter.updated_at = datetime.utcnow()
+    voter.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Voter deleted successfully'}), 200
@@ -232,15 +232,15 @@ def verify_voter(voter_id):
     verification_type = data.get('verification_type')  # phone, identity, biometric
     
     if verification_type == 'phone':
-        voter.phone_verified_at = datetime.utcnow()
+        voter.phone_verified_at = datetime.now(timezone.utc)
         if voter.verification_level == 'none':
             voter.verification_level = 'phone'
     elif verification_type == 'identity':
-        voter.identity_verified_at = datetime.utcnow()
+        voter.identity_verified_at = datetime.now(timezone.utc)
         if voter.verification_level in ['none', 'phone']:
             voter.verification_level = 'identity'
     elif verification_type == 'biometric':
-        voter.biometric_verified_at = datetime.utcnow()
+        voter.biometric_verified_at = datetime.now(timezone.utc)
         voter.verification_level = 'full'
     
     # Update overall verification status
@@ -252,7 +252,7 @@ def verify_voter(voter_id):
             voter.verification_level = 'standard'
     
     voter.updated_by = current_user.id if current_user else None
-    voter.updated_at = datetime.utcnow()
+    voter.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': f'Voter {verification_type} verification updated successfully'}), 200

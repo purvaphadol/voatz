@@ -1,6 +1,6 @@
 from app import db
 from app.models.base import TimestampAuditMixin
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 
@@ -51,7 +51,7 @@ class Vote(db.Model, TimestampAuditMixin):
     
     # Timing information
     vote_start_time = db.Column(db.DateTime, nullable=True)  # When voter started voting
-    vote_cast_time = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)  # When vote was submitted
+    vote_cast_time = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))  # When vote was submitted
     vote_processing_time = db.Column(db.DateTime, nullable=True)  # When vote was processed
     
     # Vote status and processing
@@ -149,7 +149,7 @@ class Vote(db.Model, TimestampAuditMixin):
             self.audit_trail = []
         
         event = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'event_type': event_type,
             'description': description,
             'additional_data': additional_data or {}

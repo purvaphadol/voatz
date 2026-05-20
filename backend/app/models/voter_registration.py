@@ -1,6 +1,6 @@
 from app import db
 from app.models.base import TimestampAuditMixin
-from datetime import datetime
+from datetime import datetime, timezone
 
 class VoterRegistration(db.Model, TimestampAuditMixin):
     __tablename__ = 'voter_registrations'
@@ -18,7 +18,7 @@ class VoterRegistration(db.Model, TimestampAuditMixin):
     registration_type = db.Column(db.String(50), default='standard')  # standard, overseas, military, early, absentee
     
     # Registration timing
-    registered_at = db.Column(db.DateTime, default=datetime.utcnow)
+    registered_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     approved_at = db.Column(db.DateTime, nullable=True)
     rejected_at = db.Column(db.DateTime, nullable=True)
     expires_at = db.Column(db.DateTime, nullable=True)
@@ -123,7 +123,7 @@ class VoterRegistration(db.Model, TimestampAuditMixin):
         """Check if registration has expired"""
         if not self.expires_at:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
     
     @property
     def is_eligible_to_vote(self):
@@ -159,7 +159,7 @@ class VoterRegistration(db.Model, TimestampAuditMixin):
             self.audit_trail = []
         
         event = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'event_type': event_type,
             'description': description,
             'additional_data': additional_data or {}
@@ -169,7 +169,7 @@ class VoterRegistration(db.Model, TimestampAuditMixin):
     def approve_registration(self, approved_by_user_id, notes=None):
         """Approve the voter registration"""
         self.status = 'approved'
-        self.approved_at = datetime.utcnow()
+        self.approved_at = datetime.now(timezone.utc)
         self.processed_by = approved_by_user_id
         if notes:
             self.approval_notes = notes
@@ -178,7 +178,7 @@ class VoterRegistration(db.Model, TimestampAuditMixin):
     def reject_registration(self, rejected_by_user_id, reason):
         """Reject the voter registration"""
         self.status = 'rejected'
-        self.rejected_at = datetime.utcnow()
+        self.rejected_at = datetime.now(timezone.utc)
         self.processed_by = rejected_by_user_id
         self.rejection_reason = reason
         self.add_audit_event('rejected', f'Registration rejected: {reason}')

@@ -8,7 +8,7 @@ from app.models.voter_registration import VoterRegistration
 from app.models.vote import Vote
 from app.utils import get_current_company_id, require_permission, get_current_user
 from sqlalchemy import or_, and_
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import secrets
 import string
 
@@ -47,7 +47,7 @@ def list_elections():
             query = query.filter(Election.status == status)
     
     if is_active is not None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if is_active.lower() == 'true':
             query = query.filter(and_(
                 Election.start_date <= now,
@@ -303,7 +303,7 @@ def update_election(election_id):
         election.status = data['status']
     
     election.updated_by = current_user.id if current_user else None
-    election.updated_at = datetime.utcnow()
+    election.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Election updated successfully'}), 200
@@ -326,7 +326,7 @@ def delete_election(election_id):
     
     # Soft delete by updating status
     election.status = 'cancelled'
-    election.updated_at = datetime.utcnow()
+    election.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Election deleted successfully'}), 200
@@ -349,13 +349,13 @@ def activate_election(election_id):
         return jsonify({'error': 'Election must have at least one active ballot'}), 400
     
     # Check dates
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if election.start_date <= now and election.end_date <= now:
         return jsonify({'error': 'Election dates are in the past'}), 400
     
     election.status = 'active'
     election.updated_by = current_user.id if current_user else None
-    election.updated_at = datetime.utcnow()
+    election.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Election activated successfully'}), 200
@@ -373,14 +373,14 @@ def publish_results(election_id):
         return jsonify({'error': 'Only completed or active elections can have results published'}), 400
     
     # Check if voting period has ended
-    if election.end_date > datetime.utcnow():
+    if election.end_date > datetime.now(timezone.utc):
         return jsonify({'error': 'Cannot publish results before voting period ends'}), 400
     
     election.results_published = True
-    election.results_published_at = datetime.utcnow()
+    election.results_published_at = datetime.now(timezone.utc)
     election.status = 'completed'
     election.updated_by = current_user.id if current_user else None
-    election.updated_at = datetime.utcnow()
+    election.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Election results published successfully'}), 200
@@ -413,7 +413,7 @@ def change_election_status(election_id):
     # Allow status change (this bypasses the normal update restrictions)
     election.status = new_status
     election.updated_by = current_user.id if current_user else None
-    election.updated_at = datetime.utcnow()
+    election.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': f'Election status changed to {new_status} successfully'}), 200

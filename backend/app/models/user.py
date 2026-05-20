@@ -1,6 +1,6 @@
 from app import db
 from app.models.base import TimestampAuditMixin
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import secrets
 import string
 
@@ -30,7 +30,7 @@ class User(db.Model, TimestampAuditMixin):
         """Generate a secure password reset token valid for `expires_in_minutes`."""
         token = secrets.token_urlsafe(32)
         self.password_reset_token = token
-        self.password_reset_expires_at = datetime.utcnow() + timedelta(minutes=expires_in_minutes)
+        self.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
         return token
 
     def verify_reset_token(self, token: str) -> bool:
@@ -39,7 +39,7 @@ class User(db.Model, TimestampAuditMixin):
             return False
         if self.password_reset_token != token:
             return False
-        return datetime.utcnow() < self.password_reset_expires_at
+        return datetime.now(timezone.utc) < self.password_reset_expires_at
 
     def clear_reset_token(self):
         """Invalidate the reset token after use."""

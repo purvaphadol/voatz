@@ -7,7 +7,7 @@ from app.models.candidate import Candidate
 from app.models.vote import Vote
 from app.utils import get_current_company_id, require_permission, get_current_user
 from sqlalchemy import or_
-from datetime import datetime
+from datetime import datetime, timezone
 import secrets
 import string
 
@@ -286,7 +286,7 @@ def update_ballot(ballot_id):
         ballot.is_published = data['is_published']
     
     ballot.updated_by = current_user.id if current_user else None
-    ballot.updated_at = datetime.utcnow()
+    ballot.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Ballot updated successfully'}), 200
@@ -309,7 +309,7 @@ def delete_ballot(ballot_id):
     
     # Soft delete by updating status
     ballot.is_active = False
-    ballot.updated_at = datetime.utcnow()
+    ballot.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Ballot deleted successfully'}), 200
@@ -333,7 +333,7 @@ def publish_ballot(ballot_id):
     
     ballot.is_published = True
     ballot.updated_by = current_user.id if current_user else None
-    ballot.updated_at = datetime.utcnow()
+    ballot.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Ballot published successfully'}), 200
@@ -352,7 +352,7 @@ def unpublish_ballot(ballot_id):
     
     ballot.is_published = False
     ballot.updated_by = current_user.id if current_user else None
-    ballot.updated_at = datetime.utcnow()
+    ballot.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Ballot unpublished successfully'}), 200
@@ -411,7 +411,7 @@ def reorder_ballot_candidates(ballot_id):
         if candidate:
             candidate.order_index = index
             candidate.updated_by = current_user.id if current_user else None
-            candidate.updated_at = datetime.utcnow()
+            candidate.updated_at = datetime.now(timezone.utc)
     
     db.session.commit()
     return jsonify({'message': 'Candidates reordered successfully'}), 200

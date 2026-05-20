@@ -1,6 +1,6 @@
 from app import db
 from app.models.base import TimestampAuditMixin
-from datetime import datetime
+from datetime import datetime, timezone
 
 class Election(db.Model, TimestampAuditMixin):
     __tablename__ = 'elections'
@@ -75,7 +75,7 @@ class Election(db.Model, TimestampAuditMixin):
     @property
     def is_active(self):
         """Check if election is currently active for voting"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return (self.status == 'active' and 
                 self.start_date <= now <= self.end_date)
     
@@ -84,14 +84,14 @@ class Election(db.Model, TimestampAuditMixin):
         """Check if early voting is currently active"""
         if not self.allow_early_voting or not self.early_voting_start or not self.early_voting_end:
             return False
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return (self.status == 'active' and 
                 self.early_voting_start <= now <= self.early_voting_end)
     
     @property
     def voting_window_status(self):
         """Get current voting window status"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if now < self.start_date:
             return 'upcoming'
         elif now > self.end_date:
