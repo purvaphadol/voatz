@@ -5,11 +5,14 @@ from app.models.user_role import UserRoleMapping
 from app.models.user import User
 from app.models.role import Role
 from app.models.department import Department
+from app.models.role_permission import RolePermissionMapping
+from app.models.user_permission import UserPermissionMapping
 from app.utils import get_current_company_id, require_permission
 from app.utils.db_utils import safe_commit
 from app.utils.audit import audit_action, set_audit_fields
 from app.utils.validators import parse_pagination
 from app.utils.constants import STATUS_INACTIVE
+from app.utils.query_helpers import get_active_user_role_mappings, get_active_role_permissions
 
 user_roles_bp = Blueprint('user_roles', __name__)
 
@@ -138,7 +141,7 @@ def assign_role_to_user(user_id):
     if not role:
         return jsonify({'error': 'Role not found in this company'}), 404
 
-    if role.role_name.lower() == 'super admin':
+    if role.is_protected:
         return jsonify({'error': 'Super Admin role cannot be assigned via API'}), 403
 
     department = Department.query.filter_by(id=data['department_id'], company_id=company_id).first()
@@ -181,8 +184,44 @@ def remove_role_from_user(mapping_id):
         company_id=company_id
     ).first_or_404()
 
+    role = Role.query.get(user_role.role_id)
+    if role and role.is_protected:
+        return jsonify({'error': 'Super Admin role cannot be unassigned'}), 403
+
     user_role.status = STATUS_INACTIVE
     set_audit_fields(user_role, is_create=False)
+    
+    db.session.flush()
+
+    user_id = user_role.user_id
+    active_mappings = get_active_user_role_mappings(user_id, company_id)
+    active_role_ids = [ur.role_id for ur in active_mappings]
+
+    if not active_role_ids:
+        user_perms = UserPermissionMapping.query.filter_by(
+            user_id=user_id,
+            company_id=company_id,
+            permission_type=1
+        ).filter(UserPermissionMapping.status != STATUS_INACTIVE).all()
+
+        for up in user_perms:
+            up.status = STATUS_INACTIVE
+            set_audit_fields(up, is_create=False)
+    else:
+        active_role_perms = get_active_role_permissions(active_role_ids, company_id)
+        active_covered_pairs = {(rp.module_id, rp.action_id) for rp in active_role_perms}
+
+        user_perms = UserPermissionMapping.query.filter_by(
+            user_id=user_id,
+            company_id=company_id,
+            permission_type=1
+        ).filter(UserPermissionMapping.status != STATUS_INACTIVE).all()
+
+        for up in user_perms:
+            if (up.module_id, up.action_id) not in active_covered_pairs:
+                up.status = STATUS_INACTIVE
+                set_audit_fields(up, is_create=False)
+
     return safe_commit(
         (jsonify({'message': 'Role removed from user successfully'}), 200),
         'Internal server error during role removal'

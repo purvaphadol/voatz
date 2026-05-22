@@ -144,7 +144,12 @@ const Roles = () => {
 
     try {
       if (editingRole) {
-        await rolesAPI.update(editingRole.id, formData);
+        const updateData = {};
+        if (formData.role_name !== editingRole.role_name) updateData.role_name = formData.role_name;
+        if (formData.description !== (editingRole.description || '')) updateData.description = formData.description;
+        if (formData.department_id !== (editingRole.department_id || '')) updateData.department_id = formData.department_id;
+
+        await rolesAPI.update(editingRole.id, updateData);
         setSuccess('Role updated successfully');
       } else {
         await rolesAPI.create(formData);

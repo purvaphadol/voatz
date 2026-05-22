@@ -45,6 +45,7 @@ super_admin_id = session.execute(role.insert().values(
     role_name='Super Admin',
     department_id=department_id,
     company_id=company_id,
+    is_protected=True,
     created_at=datetime.now(),
     updated_at=datetime.now()
 ).returning(role.c.id)).scalar()

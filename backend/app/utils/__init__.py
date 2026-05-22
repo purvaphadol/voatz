@@ -54,7 +54,7 @@ def is_current_user_super_admin():
             return False
         
         super_admin_role = Role.query.filter(
-            Role.role_name.ilike('super admin'),
+            Role.is_protected == True,,
             Role.company_id == user.company_id,
             Role.status != 0
         ).first()

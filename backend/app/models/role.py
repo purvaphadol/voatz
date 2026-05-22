@@ -8,6 +8,7 @@ class Role(db.Model, TimestampAuditMixin):
     description = db.Column(db.Text)
     department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    is_protected = db.Column(db.Boolean, default=False, nullable=False, server_default='false')
     
     # Relationships
     department = db.relationship('Department', backref='roles')

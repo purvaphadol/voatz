@@ -125,6 +125,12 @@ def update_role(role_id):
     ).first_or_404()
     data = request.get_json()
 
+    if role.is_protected:
+        if 'role_name' in data:
+            return jsonify({'error': 'Protected roles cannot be renamed'}), 403
+        if 'department_id' in data:
+            return jsonify({'error': 'Protected roles cannot be moved to a different department'}), 403
+
     cleaned_data, error = validate_role_input(data, is_create=False)
     if error:
         return error[0], error[1]
@@ -164,7 +170,7 @@ def delete_role(role_id):
     company_id = get_current_company_id()
     role = Role.query.filter_by(id=role_id, company_id=company_id).first_or_404()
 
-    if role.role_name.lower() == 'super admin':
+    if role.is_protected:
         return jsonify({'error': 'Super Admin role cannot be deleted'}), 403
 
     role.status = STATUS_INACTIVE
