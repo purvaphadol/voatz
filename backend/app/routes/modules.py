@@ -10,8 +10,8 @@ from app.utils import get_current_company_id, require_permission
 from app.utils.db_utils import safe_commit
 from app.utils.audit import audit_action, set_audit_fields
 from app.utils.constants import STATUS_ACTIVE, STATUS_INACTIVE
-from app.utils.query_helpers import get_active_modules_query
-from app.utils.validators import validate_module_input, parse_pagination
+from app.utils.query_helpers import get_active_modules_query, get_admin_modules_query
+from app.utils.validators import validate_module_input
 
 modules_bp = Blueprint('modules', __name__)
 
@@ -20,20 +20,16 @@ modules_bp = Blueprint('modules', __name__)
 def list_modules():
     company_id = get_current_company_id()
     
-    page, per_page, error = parse_pagination(request)
-    if error:
-        return error
-        
-    query = get_active_modules_query(company_id)
+    query = get_admin_modules_query(company_id)
     
     search = request.args.get('search', '').strip()
     if search:
         query = query.filter(Module.module_name.ilike(f"%{search}%"))
         
-    paginated_modules = query.paginate(page=page, per_page=per_page, error_out=False)
+    modules_list = query.all()
     
     module_data = []
-    for m in paginated_modules.items:
+    for m in modules_list:
         module_data.append({
             'id': m.id, 
             'module_name': m.module_name,
@@ -52,9 +48,7 @@ def list_modules():
     
     return jsonify({
         'data': module_data,
-        'total': paginated_modules.total,
-        'page': paginated_modules.page,
-        'pages': paginated_modules.pages
+        'total': len(module_data)
     })
 
 @modules_bp.route('/', methods=['POST'])
@@ -108,7 +102,7 @@ def create_module():
         'module_id': module.id,
         'display_route': module.display_route
     }
-    return safe_commit(response_data, 201)
+    return safe_commit((jsonify(response_data), 201), 'Internal server error during module creation')
 
 @modules_bp.route('/<int:module_id>', methods=['GET'])
 @require_permission('Modules', 'view')
@@ -201,7 +195,7 @@ def update_module(module_id):
         'message': 'Module updated',
         'display_route': module.display_route
     }
-    return safe_commit(response_data, 200)
+    return safe_commit((jsonify(response_data), 200), 'Internal server error during module update')
 
 @modules_bp.route('/<int:module_id>/status', methods=['PATCH'])
 @require_permission('Modules', 'update')
@@ -225,7 +219,7 @@ def update_module_status(module_id):
     module.status = status
     set_audit_fields(module, is_create=False)
     
-    return safe_commit({'message': 'Module status updated'}, 200)
+    return safe_commit((jsonify({'message': 'Module status updated'}), 200), 'Internal server error during module status update')
 
 @modules_bp.route('/<int:module_id>', methods=['DELETE'])
 @require_permission('Modules', 'delete')
@@ -273,4 +267,4 @@ def delete_module(module_id):
     module.status = STATUS_INACTIVE
     set_audit_fields(module, is_create=False)
     
-    return safe_commit({'message': 'Module deleted successfully'}, 200)
+    return safe_commit((jsonify({'message': 'Module deleted successfully'}), 200), 'Internal server error during module deletion')

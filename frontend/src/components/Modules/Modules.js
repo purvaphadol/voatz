@@ -43,6 +43,7 @@ import {
   Settings as SettingsIcon,
   ExpandMore as ExpandMoreIcon,
   PlayArrow as ActionIcon,
+  Restore as RestoreIcon,
 } from '@mui/icons-material';
 import { modulesAPI, moduleActionsAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
@@ -101,7 +102,7 @@ const Modules = () => {
   const loadModules = async () => {
     try {
       setLoading(true);
-      const response = await modulesAPI.getAll();
+      const response = await modulesAPI.getAll({ per_page: 200 });
       setModules(response.data.data || []);
     } catch (error) {
       console.error('Error loading modules:', error);
@@ -181,6 +182,16 @@ const Modules = () => {
     }
   };
 
+  const handleReactivate = async (moduleId) => {
+    try {
+      await modulesAPI.updateStatus(moduleId, { status: 1 });
+      setSuccess('Module reactivated successfully');
+      loadModules();
+    } catch (error) {
+      setError(error.response?.data?.error || 'Failed to reactivate module');
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -192,14 +203,21 @@ const Modules = () => {
     }
 
     try {
-      const submitData = {
-        ...formData
-      };
-
       if (editingModule) {
-        await modulesAPI.update(editingModule.id, submitData);
+        const updateData = {};
+        if (formData.module_name !== editingModule.module_name) updateData.module_name = formData.module_name;
+        if (formData.route_name !== (editingModule.route_name || '')) updateData.route_name = formData.route_name;
+        if (formData.description !== (editingModule.description || '')) updateData.description = formData.description;
+        if (formData.icon !== (editingModule.icon || '')) updateData.icon = formData.icon;
+        if (formData.order_index !== (editingModule.order_index || 0)) updateData.order_index = formData.order_index;
+        if (formData.status !== editingModule.status) updateData.status = formData.status;
+
+        await modulesAPI.update(editingModule.id, updateData);
         setSuccess('Module updated successfully');
       } else {
+        const submitData = {
+          ...formData
+        };
         const response = await modulesAPI.create(submitData);
         setSuccess('Module created successfully');
         
@@ -337,16 +355,15 @@ const Modules = () => {
     { field: 'description', headerName: 'Description', width: 250 },
     { field: 'icon', headerName: 'Icon', width: 100 },
     {
-      field: 'is_active',
+      field: 'status',
       headerName: 'Status',
       width: 120,
-      renderCell: (params) => (
-        <Chip
-          label={params.value ? 'Active' : 'Inactive'}
-          color={params.value ? 'success' : 'error'}
-          size="small"
-        />
-      ),
+      renderCell: (params) => {
+        const status = params.value;
+        if (status === 1) return <Chip label="Active" color="success" size="small" />;
+        if (status === 9) return <Chip label="Inactive" color="warning" size="small" />;
+        return <Chip label="Deleted" color="error" size="small" />;
+      },
     },
     {
       field: 'company_name',
@@ -405,6 +422,16 @@ const Modules = () => {
               onClick={() => handleManageActions(params.row)}
             />
           );
+
+          if (params.row.status === 9) {
+            actions.push(
+              <GridActionsCellItem
+                icon={<RestoreIcon />}
+                label="Reactivate"
+                onClick={() => handleReactivate(params.row.id)}
+              />
+            );
+          }
         }
         
         if (canDelete) {

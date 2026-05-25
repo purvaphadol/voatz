@@ -17,6 +17,7 @@ def get_user_sidebar():
     modules = Module.query.filter_by(company_id=company_id).filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
     module_routes = {module.module_name: module.display_route for module in modules}
     module_orders = {module.module_name: module.order_index for module in modules}
+    module_icons = {module.module_name: module.icon for module in modules}
     
     menu_items = []
     for module_name, actions in permissions.items():
@@ -31,7 +32,7 @@ def get_user_sidebar():
             'module': module_name,
             'route': display_route,  # Add the dynamic route
             'order_index': module_orders.get(module_name, 999),  # Include order_index
-            'icon': get_module_icon(module_name),
+            'icon': module_icons.get(module_name, 'folder'),
             'actions': []
         }
         

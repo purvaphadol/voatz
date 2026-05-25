@@ -95,6 +95,19 @@ def get_active_modules_query(company_id):
     ).order_by(Module.order_index.asc(), Module.module_name.asc())
 
 
+def get_admin_modules_query(company_id):
+    """
+    Returns a SQLAlchemy query for all admin modules in a given company.
+    Shows active and deactivated modules, hides deleted modules.
+    """
+    from app.models.module import Module
+    from app.utils.constants import STATUS_INACTIVE
+    return Module.query.filter(
+        Module.company_id == company_id,
+        Module.status != STATUS_INACTIVE
+    ).order_by(Module.order_index.asc(), Module.module_name.asc())
+
+
 def get_active_module_actions_query(module_id, company_id):
     """
     Returns a SQLAlchemy query for all active module actions for a specific module.

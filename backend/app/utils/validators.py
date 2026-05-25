@@ -317,8 +317,8 @@ def validate_module_input(data, is_create=False):
     if 'order_index' in data and data['order_index'] is not None:
         try:
             order_index = int(data['order_index'])
-            if order_index < 0:
-                return None, (jsonify({'error': 'Order index must be >= 0'}), 400)
+            if order_index < 0 or order_index > 999:
+                return None, (jsonify({'error': 'Order index must be between 0 and 999'}), 400)
             cleaned['order_index'] = order_index
         except (ValueError, TypeError):
             return None, (jsonify({'error': 'Invalid order_index format'}), 400)

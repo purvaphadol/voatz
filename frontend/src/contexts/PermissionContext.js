@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { menuAPI } from '../services/api';
 
@@ -19,6 +19,11 @@ export const PermissionProvider = ({ children }) => {
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const permissionsRef = useRef(permissions);
+
+  useEffect(() => {
+    permissionsRef.current = permissions;
+  }, [permissions]);
 
   useEffect(() => {
     if (isAuthenticated() && token) {
@@ -58,7 +63,7 @@ export const PermissionProvider = ({ children }) => {
       
       // Check if permissions actually changed (for auto-refresh)
       if (isAutoRefresh) {
-        const hasChanged = JSON.stringify(newPermissionsObj) !== JSON.stringify(permissions);
+        const hasChanged = JSON.stringify(newPermissionsObj) !== JSON.stringify(permissionsRef.current);
         if (hasChanged) {
           console.log('🔄 [PermissionContext] Permissions changed detected - updating silently...');
         } else {
@@ -144,11 +149,6 @@ export const PermissionProvider = ({ children }) => {
 
   const hasPermission = (module, action) => {
     const result = permissions[module] && permissions[module][action] === true;
-    // Only log if debug mode is enabled or if it's a critical check
-    if (window.DEBUG_PERMISSIONS || (!result && (module === 'Users' || module === 'Dashboard'))) {
-      console.log(`🔍 [PermissionContext] hasPermission(${module}, ${action}):`, result);
-      console.log(`🔍 [PermissionContext] permissions[${module}]:`, permissions[module]);
-    }
     return result;
   };
 
