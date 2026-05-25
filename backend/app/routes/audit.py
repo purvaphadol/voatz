@@ -2,25 +2,29 @@ from flask import Blueprint, request, jsonify
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.utils import require_permission, get_current_company_id
+from app.utils.validators import parse_pagination
+from app.utils.constants import MAX_PER_PAGE
 from app.utils.audit import get_user_activity, get_audit_summary
 from datetime import datetime, timedelta
 
 audit_bp = Blueprint('audit', __name__)
 
 @audit_bp.route('/logs', methods=['GET'])
-@require_permission('Settings', 'view')
+@require_permission('AuditLogs', 'view')
 def get_audit_logs():
     """Get audit logs with filtering and pagination"""
     company_id = get_current_company_id()
     
     # Query parameters
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 50))
+    page, per_page = parse_pagination(request)
     user_id = request.args.get('user_id', type=int)
     action = request.args.get('action')
     module = request.args.get('module')
     success = request.args.get('success')
-    days = int(request.args.get('days', 30))
+    try:
+        days = int(request.args.get('days', 30))
+    except ValueError:
+        return jsonify({'error': 'Invalid days parameter'}), 400
     
     # Build query
     query = AuditLog.query.filter_by(company_id=company_id)
@@ -51,10 +55,13 @@ def get_audit_logs():
     
     logs = pagination.items
     
+    user_ids = list({log.user_id for log in logs if log.user_id})
+    users_map = {u.id: u for u in User.query.filter(User.id.in_(user_ids)).all()}
+    
     # Format response
     formatted_logs = []
     for log in logs:
-        user = User.query.get(log.user_id) if log.user_id else None
+        user = users_map.get(log.user_id) if log.user_id else None
         
         formatted_logs.append({
             'id': log.id,
@@ -98,11 +105,14 @@ def get_audit_logs():
     })
 
 @audit_bp.route('/summary', methods=['GET'])
-@require_permission('Settings', 'view')
+@require_permission('AuditLogs', 'view')
 def get_audit_summary_api():
     """Get audit summary statistics"""
     company_id = get_current_company_id()
-    days = int(request.args.get('days', 30))
+    try:
+        days = int(request.args.get('days', 30))
+    except ValueError:
+        return jsonify({'error': 'Invalid days parameter'}), 400
     
     summary = get_audit_summary(company_id, days)
     
@@ -117,7 +127,11 @@ def get_audit_summary_api():
 def get_user_audit_logs(user_id):
     """Get audit logs for specific user"""
     company_id = get_current_company_id()
-    limit = int(request.args.get('limit', 50))
+    try:
+        limit = int(request.args.get('limit', 50))
+        limit = min(limit, MAX_PER_PAGE)
+    except ValueError:
+        return jsonify({'error': 'Invalid limit parameter'}), 400
     action_filter = request.args.get('action')
     success_filter = request.args.get('success')
     
@@ -166,11 +180,14 @@ def get_user_audit_logs(user_id):
     })
 
 @audit_bp.route('/export', methods=['GET'])
-@require_permission('Settings', 'view')
+@require_permission('AuditLogs', 'view')
 def export_audit_logs():
     """Export audit logs as CSV"""
     company_id = get_current_company_id()
-    days = int(request.args.get('days', 30))
+    try:
+        days = int(request.args.get('days', 30))
+    except ValueError:
+        return jsonify({'error': 'Invalid days parameter'}), 400
     
     start_date = datetime.now() - timedelta(days=days)
     logs = AuditLog.query.filter(
@@ -185,8 +202,11 @@ def export_audit_logs():
         'Target ID', 'Success', 'IP Address', 'Method', 'Endpoint', 'Description'
     ])
     
+    user_ids = list({log.user_id for log in logs if log.user_id})
+    users_map = {u.id: u for u in User.query.filter(User.id.in_(user_ids)).all()}
+    
     for log in logs:
-        user = User.query.get(log.user_id) if log.user_id else None
+        user = users_map.get(log.user_id) if log.user_id else None
         user_name = user.name if user else 'System'
         
         csv_data.append([
@@ -211,11 +231,14 @@ def export_audit_logs():
     })
 
 @audit_bp.route('/stats', methods=['GET'])
-@require_permission('Settings', 'view')
+@require_permission('AuditLogs', 'view')
 def get_audit_stats():
     """Get detailed audit statistics"""
     company_id = get_current_company_id()
-    days = int(request.args.get('days', 7))
+    try:
+        days = int(request.args.get('days', 7))
+    except ValueError:
+        return jsonify({'error': 'Invalid days parameter'}), 400
     
     start_date = datetime.now() - timedelta(days=days)
     

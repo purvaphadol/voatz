@@ -109,6 +109,7 @@ def create_user():
     user.password_hash = generate_password_hash(data['password'])
     user.company_id = company_id
     user.department_id = dept_id
+    user.status = STATUS_ACTIVE
     
     db.session.add(user)
     set_audit_fields(user, is_create=True)
@@ -179,6 +180,14 @@ def update_user(user_id):
         
     if 'department_id' in data:
         user.department_id = dept_id
+        
+    if data.get('status') is not None:
+        try:
+            status_val = int(data['status'])
+            if status_val in (0, 1):
+                user.status = status_val
+        except (ValueError, TypeError):
+            pass
         
     set_audit_fields(user, is_create=False)
     

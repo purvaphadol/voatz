@@ -20,7 +20,7 @@ def set_audit_fields(obj, is_create=False):
         pass
 
 def log_activity(action, module=None, target_type=None, target_id=None, 
-                description=None, success=True, error_message=None, metadata=None):
+                description=None, success=True, error_message=None, metadata=None, auto_commit=False):
     """Log an activity to the audit trail"""
     try:
         user = get_current_user()
@@ -39,7 +39,7 @@ def log_activity(action, module=None, target_type=None, target_id=None,
         audit_log.description = description
         audit_log.success = success
         audit_log.error_message = error_message
-        audit_log.metadata = metadata
+        audit_log.extra_data = metadata
         
         # Request context
         if request:
@@ -49,7 +49,13 @@ def log_activity(action, module=None, target_type=None, target_id=None,
             audit_log.endpoint = request.endpoint
         
         db.session.add(audit_log)
-        db.session.commit()
+        try:
+            db.session.flush()
+            if auto_commit:
+                db.session.commit()
+        except Exception as e:
+            print(f"Audit flush error: {e}")
+            return
         
     except Exception as e:
         # Don't let audit logging break the main functionality
@@ -76,10 +82,6 @@ def audit_action(action, module=None, target_type=None, get_target_id=None, desc
                 
                 # Execute the function
                 result = f(*args, **kwargs)
-                
-                # Extract metadata from successful response
-                if hasattr(result, 'json') and result.json:
-                    metadata['response_data'] = result.json
                 
                 return result
                 
@@ -109,7 +111,8 @@ def audit_action(action, module=None, target_type=None, get_target_id=None, desc
                     description=description or f"{action} action performed",
                     success=success,
                     error_message=error_message,
-                    metadata=metadata
+                    metadata=metadata,
+                    auto_commit=True
                 )
         
         return decorated_function
@@ -134,13 +137,18 @@ def log_login_attempt(user_email, success, error_message=None, user_id=None, com
             audit_log.method = request.method
             audit_log.endpoint = 'auth.login'
         
-        audit_log.metadata = {
+        audit_log.extra_data = {
             'email': user_email,
             'timestamp': datetime.now().isoformat()
         }
         
         db.session.add(audit_log)
-        db.session.commit()
+        try:
+            db.session.flush()
+            db.session.commit()
+        except Exception as e:
+            print(f"Audit flush error: {e}")
+            return
         
     except Exception as e:
         print(f"Login audit logging error: {e}")
@@ -165,7 +173,7 @@ def log_permission_check(module, action, allowed, user_id=None, company_id=None)
             audit_log.endpoint = request.endpoint
             audit_log.method = request.method
         
-        audit_log.metadata = {
+        audit_log.extra_data = {
             'permission_module': module,
             'permission_action': action,
             'access_granted': allowed,
@@ -173,13 +181,21 @@ def log_permission_check(module, action, allowed, user_id=None, company_id=None)
         }
         
         db.session.add(audit_log)
-        db.session.commit()
+        try:
+            db.session.flush()
+            db.session.commit()
+        except Exception as e:
+            print(f"Audit flush error: {e}")
+            return
         
     except Exception as e:
         print(f"Permission audit logging error: {e}")
 
 def get_user_activity(user_id=None, company_id=None, limit=50, action_filter=None, success_filter=None):
     """Get user activity logs with filtering"""
+    if company_id is None:
+        return []
+        
     query = AuditLog.query
     
     if company_id:

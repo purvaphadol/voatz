@@ -41,7 +41,7 @@ import {
   Error as ErrorIcon,
   ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
-import { auditAPI, usersAPI } from '../../services/api';
+import { auditAPI, usersAPI, modulesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 
 const CustomToolbar = ({ onFilter, onExport }) => (
@@ -82,15 +82,26 @@ const AuditLogs = () => {
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [modules, setModules] = useState([]);
 
-  const canView = hasPermission('Settings', 'view');
+  const canView = hasPermission('AuditLogs', 'view');
 
   useEffect(() => {
     if (canView) {
       loadAuditLogs();
       loadUsers();
+      loadModules();
     }
   }, [canView, pagination.page, pagination.per_page]);
+
+  const loadModules = async () => {
+    try {
+      const response = await modulesAPI.getAll();
+      setModules(response.data.data || []);
+    } catch (error) {
+      console.error('Error loading modules:', error);
+    }
+  };
 
   const loadAuditLogs = async () => {
     try {
@@ -392,12 +403,7 @@ const AuditLogs = () => {
                   label="Module"
                 >
                   <MenuItem value="">All Modules</MenuItem>
-                  <MenuItem value="Users">Users</MenuItem>
-                  <MenuItem value="Roles">Roles</MenuItem>
-                  <MenuItem value="Departments">Departments</MenuItem>
-                  <MenuItem value="Companies">Companies</MenuItem>
-                  <MenuItem value="Permissions">Permissions</MenuItem>
-                  <MenuItem value="Authentication">Authentication</MenuItem>
+                  {modules.map(m => <MenuItem key={m.id} value={m.module_name}>{m.module_name}</MenuItem>)}
                 </Select>
               </FormControl>
             </Grid>
