@@ -92,6 +92,98 @@ def validate_user_input(data, is_create=False):
         
     return cleaned_data, None
 
+def validate_voter_input(data, is_create=False):
+    if not data:
+        return None, (jsonify({'error': 'Data is required'}), 400)
+        
+    cleaned_data = {}
+    
+    # phone_number validation
+    if is_create and 'phone_number' not in data:
+        return None, (jsonify({'error': 'phone_number is required'}), 400)
+        
+    if 'phone_number' in data:
+        phone_val = data['phone_number']
+        if phone_val is not None:
+            phone_str = str(phone_val).strip()
+            if is_create and not phone_str:
+                return None, (jsonify({'error': 'phone_number is required'}), 400)
+            if len(phone_str) > 20:
+                return None, (jsonify({'error': 'phone_number cannot exceed 20 characters'}), 400)
+            cleaned_data['phone_number'] = phone_str
+        else:
+            if is_create:
+                return None, (jsonify({'error': 'phone_number is required'}), 400)
+            cleaned_data['phone_number'] = None
+            
+    # date_of_birth validation
+    if 'date_of_birth' in data:
+        dob_val = data['date_of_birth']
+        if dob_val and str(dob_val).strip():
+            dob_str = str(dob_val).strip()
+            from datetime import datetime
+            try:
+                parsed_dob = datetime.strptime(dob_str, '%Y-%m-%d').date()
+                cleaned_data['date_of_birth'] = parsed_dob
+            except (ValueError, TypeError):
+                return None, (jsonify({'error': 'Invalid date_of_birth format, use YYYY-MM-DD'}), 400)
+        else:
+            cleaned_data['date_of_birth'] = None
+            
+    # voter_type validation
+    if 'voter_type' in data:
+        vt_val = data['voter_type']
+        if vt_val is None or str(vt_val).strip() == '':
+            cleaned_data['voter_type'] = 'standard'
+        else:
+            vt_str = str(vt_val).strip()
+            if vt_str not in ['standard', 'overseas', 'military', 'disabled']:
+                return None, (jsonify({'error': 'Invalid voter_type'}), 400)
+            cleaned_data['voter_type'] = vt_str
+            
+    # name validation
+    if 'name' in data:
+        name_val = data['name']
+        if name_val is not None:
+            name_str = str(name_val).strip().title()
+            if len(name_str) > 100:
+                return None, (jsonify({'error': 'Name cannot exceed 100 characters'}), 400)
+            cleaned_data['name'] = name_str
+        else:
+            cleaned_data['name'] = None
+            
+    # email validation
+    if 'email' in data:
+        email_val = data['email']
+        if email_val and str(email_val).strip():
+            cleaned_email, err = validate_email(email_val)
+            if err:
+                return None, err
+            cleaned_data['email'] = cleaned_email
+        else:
+            cleaned_data['email'] = None
+            
+    # jurisdiction validation
+    if 'jurisdiction' in data:
+        jur_val = data['jurisdiction']
+        if jur_val is not None:
+            jur_str = str(jur_val).strip()
+            if len(jur_str) > 100:
+                return None, (jsonify({'error': 'Jurisdiction cannot exceed 100 characters'}), 400)
+            cleaned_data['jurisdiction'] = jur_str
+        else:
+            cleaned_data['jurisdiction'] = None
+            
+    # registered_address validation
+    if 'registered_address' in data:
+        addr_val = data['registered_address']
+        if addr_val is not None:
+            cleaned_data['registered_address'] = str(addr_val).strip()
+        else:
+            cleaned_data['registered_address'] = None
+            
+    return cleaned_data, None
+
 def parse_pagination(request):
     try:
         page = int(request.args.get('page', DEFAULT_PAGE))

@@ -38,10 +38,6 @@ import {
   Badge,
   Tab,
   Tabs,
-  TabPanel,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
 } from '@mui/material';
 import {
   DataGrid,
@@ -161,6 +157,7 @@ const Voters = () => {
     enable_biometric_fallback: true,
     require_pin_change: false,
   });
+  const [createLinked, setCreateLinked] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -211,6 +208,7 @@ const Voters = () => {
   // Enhanced handler functions
   const handleAdd = () => {
     setEditingVoter(null);
+    setCreateLinked(false);
     setFormData({
       user_id: '',
       name: '',
@@ -240,6 +238,7 @@ const Voters = () => {
 
   const handleEdit = (voter) => {
     setEditingVoter(voter);
+    setCreateLinked(voter.user_id !== null);
     setFormData({
       user_id: voter.user_id || '',
       name: voter.name || '',
@@ -317,21 +316,8 @@ const Voters = () => {
     setBiometricDialogOpen(true);
   };
 
-  const handleDeviceManagement = async (voter) => {
-    try {
-      setVerificationVoter(voter);
-      // Load device data from API
-      const deviceResponse = await votersAPI.getDevices(voter.id);
-      setDeviceData({
-        registered_devices: deviceResponse.data.devices || [],
-        pending_approvals: deviceResponse.data.pending || [],
-        device_limit_reached: deviceResponse.data.devices?.length >= voter.max_registered_devices,
-        auto_approve_trusted: voter.auto_approve_trusted || false,
-      });
-      setDeviceDialogOpen(true);
-    } catch (error) {
-      setError('Failed to load device information');
-    }
+  const handleDeviceManagement = (voter) => {
+    setError('Device management will be available in a future update');
   };
 
   const handleSecuritySettings = (voter) => {
@@ -447,17 +433,20 @@ const Voters = () => {
       field: 'verification_level',
       headerName: 'Level',
       width: 120,
-      renderCell: (params) => (
-        <Tooltip title={`Verification Level: ${params.value || 'none'}`}>
-          <Chip
-            icon={getVerificationIcon(params.value)}
-            label={params.value || 'none'}
-            color={getVerificationLevelColor(params.value)}
-            size="small"
-            variant="outlined"
-          />
-        </Tooltip>
-      ),
+      renderCell: (params) => {
+        const level = params.value || 'none';
+        return (
+          <Tooltip title={`Verification Level: ${level}`}>
+            <Chip
+              icon={getVerificationIcon(level)}
+              label={level}
+              color={getVerificationLevelColor(level)}
+              size="small"
+              variant="outlined"
+            />
+          </Tooltip>
+        );
+      },
     },
     {
       field: 'voter_type',
@@ -689,7 +678,65 @@ const Voters = () => {
                 </>
               )}
               
-              {(!editingVoter && !formData.user_id) && (
+              {(!editingVoter && !formData.user_id) ? (
+                <>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Full Name"
+                      value={formData.name}
+                      onChange={(e) => setFormData({...formData, name: e.target.value})}
+                      required
+                    />
+                  </Grid>
+                  
+                  <Grid item xs={12}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={createLinked}
+                          onChange={(e) => {
+                            setCreateLinked(e.target.checked);
+                            if (!e.target.checked) {
+                              setFormData({ ...formData, email: '', password: '' });
+                            }
+                          }}
+                        />
+                      }
+                      label="Create Linked User Account (with login credentials)"
+                    />
+                    <Typography variant="caption" display="block" color="textSecondary" sx={{ mt: 0.5 }}>
+                      Leave password empty to create a standalone voter (no system login). Fill password to create a linked user account.
+                    </Typography>
+                  </Grid>
+
+                  {createLinked && (
+                    <>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Email"
+                          type="email"
+                          value={formData.email}
+                          onChange={(e) => setFormData({...formData, email: e.target.value})}
+                          required
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Password"
+                          type="password"
+                          value={formData.password}
+                          onChange={(e) => setFormData({...formData, password: e.target.value})}
+                          required
+                          helperText="Fill password to create a linked user account"
+                        />
+                      </Grid>
+                    </>
+                  )}
+                </>
+              ) : (editingVoter && !formData.user_id) ? (
                 <>
                   <Grid item xs={12} sm={6}>
                     <TextField
@@ -707,21 +754,10 @@ const Voters = () => {
                       type="email"
                       value={formData.email}
                       onChange={(e) => setFormData({...formData, email: e.target.value})}
-                      required
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Password"
-                      type="password"
-                      value={formData.password}
-                      onChange={(e) => setFormData({...formData, password: e.target.value})}
-                      required
                     />
                   </Grid>
                 </>
-              )}
+              ) : null}
               
               <Grid item xs={12} sm={6}>
                 <TextField

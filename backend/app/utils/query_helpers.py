@@ -15,6 +15,14 @@ def get_active_users_query(company_id):
         User.status != STATUS_INACTIVE
     )
 
+def get_active_voters_query(company_id):
+    from app.models.voter import Voter
+    return Voter.query.filter(
+        Voter.company_id == company_id,
+        Voter.status != STATUS_INACTIVE
+    )
+
+
 def get_active_roles_query(company_id):
     """
     Returns a SQLAlchemy query for all active roles in a given company.

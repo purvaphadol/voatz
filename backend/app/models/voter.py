@@ -5,11 +5,15 @@ class Voter(db.Model, TimestampAuditMixin):
     __tablename__ = 'voters'
     
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, unique=True)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+
+    # Standalone voter identity (used when user_id is NULL)
+    name = db.Column(db.String(100), nullable=True)   # required if no user linked
+    email = db.Column(db.String(150), nullable=True)
     
     # Voter identification
-    voter_id = db.Column(db.String(100), unique=True, nullable=False)  # Unique voter identifier
+    voter_id = db.Column(db.String(100), nullable=False)  # Unique voter identifier
     phone_number = db.Column(db.String(20), nullable=False)
     date_of_birth = db.Column(db.Date, nullable=True)
     
@@ -47,6 +51,20 @@ class Voter(db.Model, TimestampAuditMixin):
         db.Index('idx_voter_phone', 'phone_number'),
         db.Index('idx_voter_verification', 'is_verified', 'verification_level'),
     )
+
+    @property
+    def display_name(self):
+        """Get voter's name from linked user or standalone name field"""
+        if self.user:
+            return self.user.name
+        return self.name or 'Unknown'
+
+    @property
+    def display_email(self):
+        """Get voter's email from linked user or standalone email field"""
+        if self.user:
+            return self.user.email
+        return self.email
     
     def __repr__(self):
-        return f'<Voter {self.voter_id} - {self.user.name if self.user else "Unknown"}>' 
+        return f'<Voter {self.voter_id} - {self.user.name if self.user else "Unknown"}>'
