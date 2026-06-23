@@ -6,10 +6,15 @@ from app.models.election import Election
 from app.models.candidate import Candidate
 from app.models.vote import Vote
 from app.utils import get_current_company_id, require_permission, get_current_user
+from app.utils.validators import parse_pagination
+from app.utils.query_helpers import get_active_ballots_query
+from app.utils.db_utils import safe_commit
+from app.utils.audit import set_audit_fields, audit_action
 from sqlalchemy import or_
 from datetime import datetime, timezone
 import secrets
 import string
+
 
 ballots_bp = Blueprint('ballots', __name__)
 
@@ -23,10 +28,11 @@ def list_ballots():
     ballot_type = request.args.get('ballot_type')
     is_active = request.args.get('is_active')
     is_published = request.args.get('is_published')
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 10))
+    page, per_page, error = parse_pagination(request)
+    if error:
+        return error
 
-    query = Ballot.query.join(Election).filter(Ballot.company_id == company_id)
+    query = get_active_ballots_query(company_id).join(Election)
     
     if search:
         query = query.filter(or_(
@@ -51,6 +57,7 @@ def list_ballots():
     pagination = query.order_by(Ballot.election_id, Ballot.order_index).paginate(page=page, per_page=per_page, error_out=False)
     ballots = pagination.items
     
+    base = get_active_ballots_query(company_id)
     return jsonify({
         'data': [{
             'id': b.id,
@@ -87,14 +94,15 @@ def list_ballots():
         'pages': pagination.pages,
         'summary': {
             'total_ballots': pagination.total,
-            'active_ballots': sum(1 for b in ballots if b.is_active),
-            'published_ballots': sum(1 for b in ballots if b.is_published),
-            'draft_ballots': sum(1 for b in ballots if not b.is_published)
+            'active_ballots': pagination.total,
+            'published_ballots': base.filter_by(is_published=True).count(),
+            'draft_ballots': base.filter_by(is_published=False).count()
         }
     })
 
 @ballots_bp.route('/', methods=['POST'])
 @require_permission('Ballots', 'create')
+@audit_action('create_ballot', module='Ballots')
 def create_ballot():
     """Create a new ballot"""
     company_id = get_current_company_id()
@@ -104,24 +112,29 @@ def create_ballot():
     if not data or not data.get('title') or not data.get('election_id') or not data.get('ballot_type'):
         return jsonify({'error': 'Title, election_id, and ballot_type are required'}), 400
     
+    try:
+        election_id = int(data['election_id'])
+    except (ValueError, TypeError):
+        return jsonify({'error': 'election_id must be a valid integer'}), 400
+    
     # Validate election exists and belongs to company
-    election = Election.query.filter_by(id=data['election_id'], company_id=company_id).first()
+    election = Election.query.filter_by(id=election_id, company_id=company_id).first()
     if not election:
         return jsonify({'error': 'Election not found'}), 404
     
-    # Don't allow ballot creation for active elections
-    if election.status == 'active':
-        return jsonify({'error': 'Cannot create ballots for active elections'}), 400
+    # Don't allow ballot creation for active, completed, or cancelled elections
+    if election.status in ['active', 'cancelled', 'completed']:
+        return jsonify({'error': 'Cannot create ballots for active, completed, or cancelled elections'}), 400
     
     # Generate unique ballot code
     ballot_code = generate_ballot_code()
-    while Ballot.query.filter_by(ballot_code=ballot_code, election_id=data['election_id']).first():
+    while Ballot.query.filter_by(ballot_code=ballot_code, election_id=election_id).first():
         ballot_code = generate_ballot_code()
     
     # Create ballot
     ballot = Ballot()
     ballot.company_id = company_id
-    ballot.election_id = data['election_id']
+    ballot.election_id = election_id
     ballot.title = data['title']
     ballot.description = data.get('description', '')
     ballot.ballot_code = ballot_code
@@ -150,16 +163,18 @@ def create_ballot():
     ballot.is_published = data.get('is_published', False)
     ballot.is_test_ballot = data.get('is_test_ballot', False)
     
-    ballot.created_by = current_user.id if current_user else None
+    set_audit_fields(ballot, is_create=True)
     
     db.session.add(ballot)
-    db.session.commit()
-    
-    return jsonify({
-        'message': 'Ballot created successfully',
-        'ballot_id': ballot.id,
-        'ballot_code': ballot.ballot_code
-    }), 201
+    db.session.flush()
+    return safe_commit(
+        (jsonify({
+            'message': 'Ballot created successfully',
+            'ballot_id': ballot.id,
+            'ballot_code': ballot.ballot_code
+        }), 201),
+        'Failed to create ballot'
+    )
 
 @ballots_bp.route('/<int:ballot_id>', methods=['GET'])
 @require_permission('Ballots', 'view')
@@ -168,11 +183,12 @@ def get_ballot(ballot_id):
     company_id = get_current_company_id()
     ballot = Ballot.query.join(Election).filter(
         Ballot.id == ballot_id,
-        Ballot.company_id == company_id
+        Ballot.company_id == company_id,
+        Ballot.is_active == True
     ).first_or_404()
     
     # Get candidates
-    candidates = Candidate.query.filter_by(ballot_id=ballot_id).order_by(Candidate.order_index).all()
+    candidates = Candidate.query.filter_by(ballot_id=ballot_id, is_active=True).order_by(Candidate.order_index).all()
     
     # Get vote count
     vote_count = Vote.query.filter_by(ballot_id=ballot_id).count()
@@ -230,11 +246,12 @@ def get_ballot(ballot_id):
 
 @ballots_bp.route('/<int:ballot_id>', methods=['PUT'])
 @require_permission('Ballots', 'update')
+@audit_action('update_ballot', module='Ballots')
 def update_ballot(ballot_id):
     """Update ballot information"""
     company_id = get_current_company_id()
     current_user = get_current_user()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first_or_404()
+    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     data = request.get_json()
     
     # Check if election is active
@@ -285,18 +302,20 @@ def update_ballot(ballot_id):
     if 'is_published' in data:
         ballot.is_published = data['is_published']
     
-    ballot.updated_by = current_user.id if current_user else None
-    ballot.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(ballot, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Ballot updated successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Ballot updated successfully'}), 200),
+        'Failed to update ballot'
+    )
 
 @ballots_bp.route('/<int:ballot_id>', methods=['DELETE'])
 @require_permission('Ballots', 'delete')
+@audit_action('delete_ballot', module='Ballots')
 def delete_ballot(ballot_id):
     """Delete ballot (soft delete)"""
     company_id = get_current_company_id()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first_or_404()
+    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     
     # Check if election is active
     if ballot.election.status == 'active':
@@ -309,18 +328,21 @@ def delete_ballot(ballot_id):
     
     # Soft delete by updating status
     ballot.is_active = False
-    ballot.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(ballot, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Ballot deleted successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Ballot deleted successfully'}), 200),
+        'Failed to delete ballot'
+    )
 
 @ballots_bp.route('/<int:ballot_id>/publish', methods=['POST'])
 @require_permission('Ballots', 'update')
+@audit_action('publish_ballot', module='Ballots')
 def publish_ballot(ballot_id):
     """Publish a ballot"""
     company_id = get_current_company_id()
     current_user = get_current_user()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first_or_404()
+    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     
     # Validate ballot can be published
     if ballot.election.status == 'active':
@@ -332,39 +354,42 @@ def publish_ballot(ballot_id):
         return jsonify({'error': 'Ballot must have at least one active candidate'}), 400
     
     ballot.is_published = True
-    ballot.updated_by = current_user.id if current_user else None
-    ballot.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(ballot, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Ballot published successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Ballot published successfully'}), 200),
+        'Failed to publish ballot'
+    )
 
 @ballots_bp.route('/<int:ballot_id>/unpublish', methods=['POST'])
 @require_permission('Ballots', 'update')
+@audit_action('unpublish_ballot', module='Ballots')
 def unpublish_ballot(ballot_id):
     """Unpublish a ballot"""
     company_id = get_current_company_id()
     current_user = get_current_user()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first_or_404()
+    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     
     # Check if election is active
     if ballot.election.status == 'active':
         return jsonify({'error': 'Cannot unpublish ballots for active elections'}), 400
     
     ballot.is_published = False
-    ballot.updated_by = current_user.id if current_user else None
-    ballot.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(ballot, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Ballot unpublished successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Ballot unpublished successfully'}), 200),
+        'Failed to unpublish ballot'
+    )
 
 @ballots_bp.route('/<int:ballot_id>/candidates', methods=['GET'])
 @require_permission('Ballots', 'view')
 def get_ballot_candidates(ballot_id):
     """Get all candidates for a ballot"""
     company_id = get_current_company_id()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first_or_404()
+    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     
-    candidates = Candidate.query.filter_by(ballot_id=ballot_id).order_by(Candidate.order_index).all()
+    candidates = Candidate.query.filter_by(ballot_id=ballot_id, is_active=True).order_by(Candidate.order_index).all()
     
     return jsonify({
         'ballot_id': ballot_id,
@@ -395,7 +420,7 @@ def reorder_ballot_candidates(ballot_id):
     """Reorder candidates in a ballot"""
     company_id = get_current_company_id()
     current_user = get_current_user()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first_or_404()
+    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     data = request.get_json()
     
     # Check if election is active
@@ -410,19 +435,21 @@ def reorder_ballot_candidates(ballot_id):
         candidate = Candidate.query.filter_by(id=candidate_id, ballot_id=ballot_id).first()
         if candidate:
             candidate.order_index = index
-            candidate.updated_by = current_user.id if current_user else None
-            candidate.updated_at = datetime.now(timezone.utc)
+            set_audit_fields(candidate, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Candidates reordered successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Candidates reordered successfully'}), 200),
+        'Failed to reorder candidates'
+    )
 
 @ballots_bp.route('/<int:ballot_id>/duplicate', methods=['POST'])
 @require_permission('Ballots', 'create')
+@audit_action('duplicate_ballot', module='Ballots')
 def duplicate_ballot(ballot_id):
     """Duplicate a ballot"""
     company_id = get_current_company_id()
     current_user = get_current_user()
-    original_ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first_or_404()
+    original_ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     data = request.get_json()
     
     # Create new ballot
@@ -448,7 +475,7 @@ def duplicate_ballot(ballot_id):
     new_ballot.is_active = True
     new_ballot.is_published = False
     new_ballot.is_test_ballot = original_ballot.is_test_ballot
-    new_ballot.created_by = current_user.id if current_user else None
+    set_audit_fields(new_ballot, is_create=True)
     
     db.session.add(new_ballot)
     db.session.flush()
@@ -471,16 +498,17 @@ def duplicate_ballot(ballot_id):
             new_candidate.is_incumbent = original_candidate.is_incumbent
             new_candidate.is_active = True
             new_candidate.is_qualified = True
-            new_candidate.created_by = current_user.id if current_user else None
+            set_audit_fields(new_candidate, is_create=True)
             db.session.add(new_candidate)
     
-    db.session.commit()
-    
-    return jsonify({
-        'message': 'Ballot duplicated successfully',
-        'ballot_id': new_ballot.id,
-        'ballot_code': new_ballot.ballot_code
-    }), 201
+    return safe_commit(
+        (jsonify({
+            'message': 'Ballot duplicated successfully',
+            'ballot_id': new_ballot.id,
+            'ballot_code': new_ballot.ballot_code
+        }), 201),
+        'Failed to duplicate ballot'
+    )
 
 @ballots_bp.route('/stats', methods=['GET'])
 @require_permission('Ballots', 'view')

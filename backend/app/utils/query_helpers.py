@@ -29,6 +29,13 @@ def get_active_elections_query(company_id):
         Election.status != 'cancelled'
     )
 
+def get_active_ballots_query(company_id):
+    from app.models.ballot import Ballot
+    return Ballot.query.filter(
+        Ballot.company_id == company_id,
+        Ballot.is_active == True
+    )
+
 def get_election_registrations_query(election_id, company_id):
     from app.models.voter_registration import VoterRegistration
     return VoterRegistration.query.filter(
