@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 load_dotenv()
 DATABASE_URI = os.environ["DATABASE_URL"]  # reads from backend/.env automatically
 
+import re
+masked_uri = re.sub(r':([^@]+)@', ':****@', DATABASE_URI)
+print(f"Connecting to database: {masked_uri}")
+
 engine = create_engine(DATABASE_URI)
 metadata = MetaData()
 metadata.reflect(bind=engine)
@@ -16,7 +20,11 @@ Session = sessionmaker(bind=engine)
 session = Session()
 
 # Table references
-company = metadata.tables['companies']
+try:
+    company = metadata.tables['companies']
+except KeyError:
+    print(f"Error: 'companies' table not found. Reflected tables: {list(metadata.tables.keys())}")
+    raise
 department = metadata.tables['departments']
 role = metadata.tables['roles']
 user = metadata.tables['users']
@@ -29,7 +37,8 @@ user_role_mapping = metadata.tables['user_role_mapping']
 company_id = session.execute(company.insert().values(
     company_name='Datagrid',
     created_at=datetime.now(),
-    updated_at=datetime.now()
+    updated_at=datetime.now(),
+    status=1
 ).returning(company.c.id)).scalar()
 
 # Insert Department
@@ -37,7 +46,8 @@ department_id = session.execute(department.insert().values(
     department_name='Admin',
     company_id=company_id,
     created_at=datetime.now(),
-    updated_at=datetime.now()
+    updated_at=datetime.now(),
+    status=1
 ).returning(department.c.id)).scalar()
 
 # Insert Roles
@@ -46,7 +56,8 @@ super_admin_id = session.execute(role.insert().values(
     department_id=department_id,
     company_id=company_id,
     created_at=datetime.now(),
-    updated_at=datetime.now()
+    updated_at=datetime.now(),
+    status=1
 ).returning(role.c.id)).scalar()
 
 admin_id = session.execute(role.insert().values(
@@ -54,7 +65,8 @@ admin_id = session.execute(role.insert().values(
     department_id=department_id,
     company_id=company_id,
     created_at=datetime.now(),
-    updated_at=datetime.now()
+    updated_at=datetime.now(),
+    status=1
 ).returning(role.c.id)).scalar()
 
 # Insert Users
@@ -64,7 +76,8 @@ user_1_id = session.execute(user.insert().values(
     password_hash=generate_password_hash("admin123"),
     company_id=company_id,
     created_at=datetime.now(),
-    updated_at=datetime.now()
+    updated_at=datetime.now(),
+    status=1
 ).returning(user.c.id)).scalar()
 
 user_2_id = session.execute(user.insert().values(
@@ -73,7 +86,8 @@ user_2_id = session.execute(user.insert().values(
     password_hash=generate_password_hash("admin123"),
     company_id=company_id,
     created_at=datetime.now(),
-    updated_at=datetime.now()
+    updated_at=datetime.now(),
+    status=1
 ).returning(user.c.id)).scalar()
 
 # Insert User-Role Mappings
@@ -83,35 +97,39 @@ session.execute(user_role_mapping.insert().values([
         "role_id": super_admin_id,
         "department_id": department_id,
         "company_id": company_id,
-        "status": 1
+        "status": 1,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now()
     },
     {
         "user_id": user_2_id,
         "role_id": admin_id,
         "department_id": department_id,
         "company_id": company_id,
-        "status": 1
+        "status": 1,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now()
     }
 ]))
 
 # Insert Modules
 modules = [
-    {"module_name": "Dashboard", "company_id": company_id, "is_active": True, "order_index": 1},
-    {"module_name": "Users", "company_id": company_id, "is_active": True, "order_index": 2},
-    {"module_name": "Roles", "company_id": company_id, "is_active": True, "order_index": 3},
-    {"module_name": "Departments", "company_id": company_id, "is_active": True, "order_index": 4},
-    {"module_name": "Companies", "company_id": company_id, "is_active": True, "order_index": 5},
-    {"module_name": "Modules", "company_id": company_id, "is_active": True, "order_index": 6},
-    {"module_name": "Permissions", "company_id": company_id, "is_active": True, "order_index": 7},
-    {"module_name": "UserRoles", "company_id": company_id, "is_active": True, "order_index": 8},
-    {"module_name": "Settings", "company_id": company_id, "is_active": True, "order_index": 9},
+    {"module_name": "Dashboard", "company_id": company_id, "status": 1, "order_index": 1},
+    {"module_name": "Users", "company_id": company_id, "status": 1, "order_index": 2},
+    {"module_name": "Roles", "company_id": company_id, "status": 1, "order_index": 3},
+    {"module_name": "Departments", "company_id": company_id, "status": 1, "order_index": 4},
+    {"module_name": "Companies", "company_id": company_id, "status": 1, "order_index": 5},
+    {"module_name": "Modules", "company_id": company_id, "status": 1, "order_index": 6},
+    {"module_name": "Permissions", "company_id": company_id, "status": 1, "order_index": 7},
+    {"module_name": "UserRoles", "company_id": company_id, "status": 1, "order_index": 8},
+    {"module_name": "Settings", "company_id": company_id, "status": 1, "order_index": 9},
     # Voting system modules
-    {"module_name": "Voters", "company_id": company_id, "is_active": True, "order_index": 10},
-    {"module_name": "Elections", "company_id": company_id, "is_active": True, "order_index": 11},
-    {"module_name": "Ballots", "company_id": company_id, "is_active": True, "order_index": 12},
-    {"module_name": "Candidates", "company_id": company_id, "is_active": True, "order_index": 13},
-    {"module_name": "Votes", "company_id": company_id, "is_active": True, "order_index": 14},
-    {"module_name": "VoterRegistrations", "company_id": company_id, "is_active": True, "order_index": 15}
+    {"module_name": "Voters", "company_id": company_id, "status": 1, "order_index": 10},
+    {"module_name": "Elections", "company_id": company_id, "status": 1, "order_index": 11},
+    {"module_name": "Ballots", "company_id": company_id, "status": 1, "order_index": 12},
+    {"module_name": "Candidates", "company_id": company_id, "status": 1, "order_index": 13},
+    {"module_name": "Votes", "company_id": company_id, "status": 1, "order_index": 14},
+    {"module_name": "VoterRegistrations", "company_id": company_id, "status": 1, "order_index": 15}
 ]
 
 for m in modules:
@@ -135,7 +153,9 @@ for mod_id in module_ids:
             "action_name": act['name'],
             "action_url": act['url'],
             "company_id": company_id,
-            "status": 1
+            "status": 1,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
         })
 
 session.execute(module_action.insert(), module_action_rows)
@@ -149,7 +169,10 @@ session.execute(role_permission.insert(), [{
     "company_id": company_id,
     "role_id": super_admin_id,
     "module_id": row.module_id,
-    "action_id": row.id
+    "action_id": row.id,
+    "status": 1,
+    "created_at": datetime.now(),
+    "updated_at": datetime.now()
 } for row in all_actions])
 
 session.commit()

@@ -6,10 +6,12 @@ from app.models.voter import Voter
 from app.models.election import Election
 from app.models.user import User
 from app.utils import get_current_company_id, require_permission, get_current_user
+from app.utils.query_helpers import STATUS_INACTIVE
+from app.utils.validators import parse_pagination
+from app.utils.db_utils import safe_commit
+from app.utils.audit import set_audit_fields, audit_action
 from sqlalchemy import or_
 from datetime import datetime, timezone
-import secrets
-import string
 
 voter_registrations_bp = Blueprint('voter_registrations', __name__)
 
@@ -24,11 +26,15 @@ def list_voter_registrations():
     status = request.args.get('status')
     registration_type = request.args.get('registration_type')
     verification_level = request.args.get('verification_level')
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 10))
+    page, per_page, error = parse_pagination(request)
+    if error:
+        return error
 
-    query = VoterRegistration.query.join(Voter).join(User).join(Election).filter(
-        VoterRegistration.company_id == company_id
+    query = VoterRegistration.query.join(Voter).outerjoin(User).join(Election).filter(
+        VoterRegistration.company_id == company_id,
+        VoterRegistration.status != 'deleted',
+        Voter.status != STATUS_INACTIVE,
+        Election.status != str(STATUS_INACTIVE)
     )
     
     if search:
@@ -58,13 +64,15 @@ def list_voter_registrations():
     pagination = query.order_by(VoterRegistration.registered_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
     registrations = pagination.items
     
+    base = VoterRegistration.query.filter_by(company_id=company_id).filter(VoterRegistration.status != 'deleted')
+    
     return jsonify({
         'data': [{
             'id': r.id,
             'registration_id': r.registration_id,
             'voter_id': r.voter_id,
-            'voter_name': r.voter.user.name,
-            'voter_email': r.voter.user.email,
+            'voter_name': r.voter.display_name,
+            'voter_email': r.voter.display_email,
             'voter_phone': r.voter.phone_number,
             'election_id': r.election_id,
             'election_title': r.election.title,
@@ -92,15 +100,18 @@ def list_voter_registrations():
         'pages': pagination.pages,
         'summary': {
             'total_registrations': pagination.total,
-            'approved_registrations': sum(1 for r in registrations if r.status == 'approved'),
-            'pending_registrations': sum(1 for r in registrations if r.status == 'pending'),
-            'rejected_registrations': sum(1 for r in registrations if r.status == 'rejected'),
-            'eligible_voters': sum(1 for r in registrations if r.is_eligible_to_vote)
+            'approved_registrations': base.filter_by(status='approved').count(),
+            'pending_registrations': base.filter_by(status='pending').count(),
+            'rejected_registrations': base.filter_by(status='rejected').count(),
+            'eligible_voters': base.filter_by(status='approved').filter(
+                VoterRegistration.verification_level_met.in_(['standard', 'full'])
+            ).count()
         }
     })
 
 @voter_registrations_bp.route('/', methods=['POST'])
 @require_permission('VoterRegistrations', 'create')
+@audit_action('create_voter_registration', module='VoterRegistrations', description='Created voter registration')
 def create_voter_registration():
     """Create a new voter registration"""
     company_id = get_current_company_id()
@@ -110,20 +121,26 @@ def create_voter_registration():
     if not data or not data.get('voter_id') or not data.get('election_id'):
         return jsonify({'error': 'voter_id and election_id are required'}), 400
     
+    try:
+        voter_id = int(data['voter_id'])
+        election_id = int(data['election_id'])
+    except (ValueError, TypeError, KeyError):
+        return jsonify({'error': 'voter_id and election_id must be valid integers'}), 400
+    
     # Validate voter exists and belongs to company
-    voter = Voter.query.filter_by(id=data['voter_id'], company_id=company_id).first()
+    voter = Voter.query.filter_by(id=voter_id, company_id=company_id).first()
     if not voter:
         return jsonify({'error': 'Voter not found'}), 404
     
     # Validate election exists and belongs to company
-    election = Election.query.filter_by(id=data['election_id'], company_id=company_id).first()
+    election = Election.query.filter_by(id=election_id, company_id=company_id).first()
     if not election:
         return jsonify({'error': 'Election not found'}), 404
     
     # Check if voter is already registered for this election
     existing_registration = VoterRegistration.query.filter_by(
-        voter_id=data['voter_id'],
-        election_id=data['election_id']
+        voter_id=voter_id,
+        election_id=election_id
     ).first()
     if existing_registration:
         return jsonify({'error': 'Voter is already registered for this election'}), 400
@@ -132,17 +149,14 @@ def create_voter_registration():
     if election.registration_deadline and datetime.now(timezone.utc) > election.registration_deadline:
         return jsonify({'error': 'Registration deadline has passed'}), 400
     
-    # Generate unique registration ID
-    registration_id = generate_registration_id()
-    while VoterRegistration.query.filter_by(registration_id=registration_id).first():
-        registration_id = generate_registration_id()
-    
     # Create voter registration
     registration = VoterRegistration()
     registration.company_id = company_id
-    registration.voter_id = data['voter_id']
-    registration.election_id = data['election_id']
-    registration.registration_id = registration_id
+    registration.voter_id = voter_id
+    registration.election_id = election_id
+    registration.generate_registration_id()
+    while VoterRegistration.query.filter_by(registration_id=registration.registration_id).first():
+        registration.generate_registration_id()
     registration.registration_type = data.get('registration_type', 'standard')
     registration.registered_at = datetime.now(timezone.utc)
     
@@ -184,33 +198,34 @@ def create_voter_registration():
     # Add audit event
     registration.add_audit_event('registration_created', 'Voter registration created')
     
-    registration.created_by = current_user.id if current_user else None
+    set_audit_fields(registration, is_create=True)
     
     db.session.add(registration)
-    db.session.commit()
-    
-    return jsonify({
+    return safe_commit((jsonify({
         'message': 'Voter registration created successfully',
         'registration_id': registration.registration_id,
         'id': registration.id
-    }), 201
+    }), 201), 'Failed to create voter registration')
 
 @voter_registrations_bp.route('/<int:registration_id>', methods=['GET'])
 @require_permission('VoterRegistrations', 'view')
 def get_voter_registration(registration_id):
     """Get detailed voter registration information"""
     company_id = get_current_company_id()
-    registration = VoterRegistration.query.join(Voter).join(User).join(Election).filter(
+    registration = VoterRegistration.query.join(Voter).outerjoin(User).join(Election).filter(
         VoterRegistration.id == registration_id,
-        VoterRegistration.company_id == company_id
+        VoterRegistration.company_id == company_id,
+        VoterRegistration.status != 'deleted',
+        Voter.status != STATUS_INACTIVE,
+        Election.status != STATUS_INACTIVE
     ).first_or_404()
     
     return jsonify({
         'id': registration.id,
         'registration_id': registration.registration_id,
         'voter_id': registration.voter_id,
-        'voter_name': registration.voter.user.name,
-        'voter_email': registration.voter.user.email,
+        'voter_name': registration.voter.display_name,
+        'voter_email': registration.voter.display_email,
         'voter_phone': registration.voter.phone_number,
         'voter_verification_level': registration.voter.verification_level,
         'election_id': registration.election_id,
@@ -265,8 +280,11 @@ def update_voter_registration(registration_id):
     """Update voter registration information"""
     company_id = get_current_company_id()
     current_user = get_current_user()
-    registration = VoterRegistration.query.filter_by(id=registration_id, company_id=company_id).first_or_404()
+    registration = VoterRegistration.query.filter_by(id=registration_id, company_id=company_id).filter(VoterRegistration.status != 'deleted').first_or_404()
     data = request.get_json()
+    
+    if 'voter_id' in data or 'election_id' in data:
+        return jsonify({'error': 'voter_id and election_id cannot be changed after registration'}), 400
     
     # Update verification status
     if 'eligibility_verified' in data:
@@ -310,19 +328,18 @@ def update_voter_registration(registration_id):
     # Add audit event
     registration.add_audit_event('registration_updated', 'Voter registration updated')
     
-    registration.updated_by = current_user.id if current_user else None
-    registration.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(registration, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Voter registration updated successfully'}), 200
+    return safe_commit((jsonify({'message': 'Voter registration updated successfully'}), 200), 'Failed to update voter registration')
 
 @voter_registrations_bp.route('/<int:registration_id>/approve', methods=['POST'])
 @require_permission('VoterRegistrations', 'update')
+@audit_action('approve_voter_registration', module='VoterRegistrations', description='Approved voter registration')
 def approve_voter_registration(registration_id):
     """Approve a voter registration"""
     company_id = get_current_company_id()
     current_user = get_current_user()
-    registration = VoterRegistration.query.filter_by(id=registration_id, company_id=company_id).first_or_404()
+    registration = VoterRegistration.query.filter_by(id=registration_id, company_id=company_id).filter(VoterRegistration.status != 'deleted').first_or_404()
     data = request.get_json()
     
     # Validate registration can be approved
@@ -345,17 +362,16 @@ def approve_voter_registration(registration_id):
             status='approved'
         ).count()
     
-    db.session.commit()
-    
-    return jsonify({'message': 'Voter registration approved successfully'}), 200
+    return safe_commit((jsonify({'message': 'Voter registration approved successfully'}), 200), 'Failed to approve voter registration')
 
 @voter_registrations_bp.route('/<int:registration_id>/reject', methods=['POST'])
 @require_permission('VoterRegistrations', 'update')
+@audit_action('reject_voter_registration', module='VoterRegistrations', description='Rejected voter registration')
 def reject_voter_registration(registration_id):
     """Reject a voter registration"""
     company_id = get_current_company_id()
     current_user = get_current_user()
-    registration = VoterRegistration.query.filter_by(id=registration_id, company_id=company_id).first_or_404()
+    registration = VoterRegistration.query.filter_by(id=registration_id, company_id=company_id).filter(VoterRegistration.status != 'deleted').first_or_404()
     data = request.get_json()
     
     # Validate registration can be rejected
@@ -377,12 +393,11 @@ def reject_voter_registration(registration_id):
             status='approved'
         ).count()
     
-    db.session.commit()
-    
-    return jsonify({'message': 'Voter registration rejected successfully'}), 200
+    return safe_commit((jsonify({'message': 'Voter registration rejected successfully'}), 200), 'Failed to reject voter registration')
 
 @voter_registrations_bp.route('/bulk-approve', methods=['POST'])
 @require_permission('VoterRegistrations', 'update')
+@audit_action('bulk_approve_registrations', module='VoterRegistrations', description='Bulk approved voter registrations')
 def bulk_approve_registrations():
     """Bulk approve voter registrations"""
     company_id = get_current_company_id()
@@ -409,22 +424,22 @@ def bulk_approve_registrations():
             approved_count += 1
     
     # Update election registered voter counts
-    election_ids = list(set(r.election_id for r in registrations))
-    for election_id in election_ids:
-        election = Election.query.get(election_id)
+    election_ids_needed = list(set(r.election_id for r in registrations))
+    elections_map = {e.id: e for e in Election.query.filter(Election.id.in_(election_ids_needed)).all()}
+    
+    for election_id in election_ids_needed:
+        election = elections_map.get(election_id)
         if election:
             election.total_registered_voters = VoterRegistration.query.filter_by(
                 election_id=election_id,
                 status='approved'
             ).count()
     
-    db.session.commit()
-    
-    return jsonify({
+    return safe_commit((jsonify({
         'message': f'Bulk approval completed',
         'approved_count': approved_count,
         'total_requested': len(registration_ids)
-    }), 200
+    }), 200), 'Failed to bulk approve registrations')
 
 @voter_registrations_bp.route('/stats', methods=['GET'])
 @require_permission('VoterRegistrations', 'view')
@@ -465,8 +480,3 @@ def get_voter_registration_stats():
         'verification_levels': {level: count for level, count in verification_levels},
         'registration_statuses': {status: count for status, count in registration_statuses}
     })
-
-def generate_registration_id():
-    """Generate a unique registration ID"""
-    alphabet = string.ascii_uppercase + string.digits
-    return 'REG-' + ''.join(secrets.choice(alphabet) for _ in range(12)) 

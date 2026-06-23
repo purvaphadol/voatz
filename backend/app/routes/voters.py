@@ -85,7 +85,7 @@ def create_voter():
     if not data or not data.get('phone_number'):
         return jsonify({'error': 'Phone number is required'}), 400
     
-    # Check if creating for existing user or new user
+    user = None
     user_id = data.get('user_id')
     if user_id:
         # Link to existing user
@@ -97,11 +97,11 @@ def create_voter():
         existing_voter = Voter.query.filter_by(user_id=user_id, company_id=company_id).first()
         if existing_voter:
             return jsonify({'error': 'User already has a voter profile'}), 400
-    else:
+    elif data.get('name') and not data.get('password'):
+        # Standalone voter, no user account
+        pass
+    elif data.get('name') and data.get('email') and data.get('password'):
         # Create new user
-        if not data.get('name') or not data.get('email') or not data.get('password'):
-            return jsonify({'error': 'Name, email, and password are required for new user'}), 400
-        
         # Check if email already exists
         if User.query.filter_by(email=data['email'], company_id=company_id).first():
             return jsonify({'error': 'Email already exists'}), 400
@@ -114,6 +114,8 @@ def create_voter():
         user.created_by = current_user.id if current_user else None
         db.session.add(user)
         db.session.flush()  # Get the user ID
+    else:
+        return jsonify({'error': 'Invalid request parameters for creating a voter'}), 400
     
     # Generate unique voter ID
     voter_id = generate_voter_id()
@@ -122,7 +124,7 @@ def create_voter():
     
     # Create voter profile
     voter = Voter()
-    voter.user_id = user.id
+    voter.user_id = user.id if user else None
     voter.company_id = company_id
     voter.voter_id = voter_id
     voter.phone_number = data['phone_number']
