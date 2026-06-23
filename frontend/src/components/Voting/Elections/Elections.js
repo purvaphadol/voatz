@@ -305,28 +305,24 @@ const Elections = () => {
     }
   };
 
-  const getElectionStatusColor = (election) => {
-    const now = new Date();
-    const startDate = new Date(election.start_date);
-    const endDate = new Date(election.end_date);
-    
-    if (!election.is_active) return 'default';
-    if (now < startDate) return 'info';
-    if (now >= startDate && now <= endDate) return 'success';
-    if (now > endDate) return 'warning';
-    return 'default';
+  const getElectionStatusColor = (status) => {
+    switch(status) {
+      case 'active': return 'success';
+      case 'draft': return 'default';
+      case 'completed': return 'info';
+      case 'cancelled': return 'error';
+      default: return 'default';
+    }
   };
 
-  const getElectionStatusText = (election) => {
-    const now = new Date();
-    const startDate = new Date(election.start_date);
-    const endDate = new Date(election.end_date);
-    
-    if (!election.is_active) return 'Inactive';
-    if (now < startDate) return 'Scheduled';
-    if (now >= startDate && now <= endDate) return 'Active';
-    if (now > endDate) return 'Ended';
-    return 'Unknown';
+  const getElectionStatusText = (status) => {
+    switch(status) {
+      case 'active': return 'Active';
+      case 'draft': return 'Draft';
+      case 'completed': return 'Completed';
+      case 'cancelled': return 'Cancelled';
+      default: return status || 'Unknown';
+    }
   };
 
   const columns = [
@@ -350,8 +346,8 @@ const Elections = () => {
       width: 120,
       renderCell: (params) => (
         <Chip
-          label={getElectionStatusText(params.row)}
-          color={getElectionStatusColor(params.row)}
+          label={getElectionStatusText(params.row.status)}
+          color={getElectionStatusColor(params.row.status)}
           size="small"
         />
       ),
@@ -383,18 +379,6 @@ const Elections = () => {
           label={params.value ? 'Yes' : 'No'}
           color={params.value ? 'success' : 'default'}
           size="small"
-        />
-      ),
-    },
-    {
-      field: 'voting_method',
-      headerName: 'Method',
-      width: 120,
-      renderCell: (params) => (
-        <Chip
-          label={params.value || 'single_choice'}
-          size="small"
-          variant="outlined"
         />
       ),
     },
@@ -961,8 +945,8 @@ const Elections = () => {
               <Grid item xs={12} sm={6}>
                 <Typography variant="subtitle2">Status</Typography>
                 <Chip
-                  label={getElectionStatusText(selectedElection)}
-                  color={getElectionStatusColor(selectedElection)}
+                  label={getElectionStatusText(selectedElection.status)}
+                  color={getElectionStatusColor(selectedElection.status)}
                 />
               </Grid>
               

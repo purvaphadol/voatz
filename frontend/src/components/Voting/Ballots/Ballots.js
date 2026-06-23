@@ -98,7 +98,7 @@ const Ballots = () => {
   const { hasPermission } = usePermissions();
   const [ballots, setBallots] = useState([]);
   const [elections, setElections] = useState([]);
-  const [candidates, setCandidates] = useState([]);
+  const [configTab, setConfigTab] = useState(0);
   const [ballotCandidates, setBallotCandidates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -170,7 +170,6 @@ const Ballots = () => {
     if (canView) {
       loadBallots();
       loadElections();
-      loadCandidates();
       loadStats();
     }
   }, [canView]);
@@ -194,15 +193,6 @@ const Ballots = () => {
       setElections(response.data.data || []);
     } catch (error) {
       console.error('Error loading elections:', error);
-    }
-  };
-
-  const loadCandidates = async () => {
-    try {
-      const response = await candidatesAPI.getAll();
-      setCandidates(response.data.data || []);
-    } catch (error) {
-      console.error('Error loading candidates:', error);
     }
   };
 
@@ -354,6 +344,7 @@ const Ballots = () => {
 
   const handleAdvancedConfig = (ballot) => {
     setSelectedBallot(ballot);
+    setConfigTab(0);
     setAdvancedConfig({
       geographic_restrictions: {
         enabled: !!ballot.jurisdiction_restriction,
@@ -1124,7 +1115,7 @@ const Ballots = () => {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ width: '100%' }}>
-            <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)}>
+            <Tabs value={configTab} onChange={(e, newValue) => setConfigTab(newValue)}>
               <Tab label="Geographic Restrictions" icon={<GeographyIcon />} />
               <Tab label="Voter Eligibility" icon={<CandidatesIcon />} />
               <Tab label="Voting Rules" icon={<RulesIcon />} />
@@ -1132,7 +1123,7 @@ const Ballots = () => {
             </Tabs>
             
             {/* Geographic Restrictions Tab */}
-            {activeTab === 0 && (
+            {configTab === 0 && (
               <Box sx={{ mt: 2 }}>
                 <Accordion>
                   <AccordionSummary expandIcon={<ExpandIcon />}>
@@ -1216,7 +1207,7 @@ const Ballots = () => {
             )}
             
             {/* Voter Eligibility Tab */}
-            {activeTab === 1 && (
+            {configTab === 1 && (
               <Box sx={{ mt: 2 }}>
                 <Accordion>
                   <AccordionSummary expandIcon={<ExpandIcon />}>
@@ -1255,20 +1246,20 @@ const Ballots = () => {
               
               <Grid item xs={12} sm={6}>
                         <TextField
-                          fullWidth
-                          label="Minimum Age"
-                          type="number"
-                          value={advancedConfig.voter_eligibility.age_requirements.min}
-                          onChange={(e) => setAdvancedConfig({
-                            ...advancedConfig,
-                            voter_eligibility: {
-                              ...advancedConfig.voter_eligibility,
-                              age_requirements: {
-                                ...advancedConfig.voter_eligibility.age_requirements,
-                                min: parseInt(e.target.value)
-                              }
-                            }
-                          })}
+                           fullWidth
+                           label="Minimum Age"
+                           type="number"
+                           value={advancedConfig.voter_eligibility.age_requirements.min}
+                           onChange={(e) => setAdvancedConfig({
+                             ...advancedConfig,
+                             voter_eligibility: {
+                               ...advancedConfig.voter_eligibility,
+                               age_requirements: {
+                                 ...advancedConfig.voter_eligibility.age_requirements,
+                                 min: parseInt(e.target.value)
+                               }
+                             }
+                           })}
                         />
                       </Grid>
                       
@@ -1295,7 +1286,7 @@ const Ballots = () => {
             )}
             
             {/* Voting Rules Tab */}
-            {activeTab === 2 && (
+            {configTab === 2 && (
               <Box sx={{ mt: 2 }}>
                 <Accordion>
                   <AccordionSummary expandIcon={<ExpandIcon />}>
@@ -1383,7 +1374,7 @@ const Ballots = () => {
             )}
             
             {/* Display Options Tab */}
-            {activeTab === 3 && (
+            {configTab === 3 && (
               <Box sx={{ mt: 2 }}>
                 <Accordion>
                   <AccordionSummary expandIcon={<ExpandIcon />}>
@@ -1425,7 +1416,7 @@ const Ballots = () => {
                           }
                           label="Show Candidate Descriptions"
                         />
-            </Grid>
+             </Grid>
                       
                       <Grid item xs={12} sm={6}>
                         <FormControlLabel
@@ -1469,7 +1460,25 @@ const Ballots = () => {
           </DialogContent>
           <DialogActions>
           <Button onClick={() => setConfigDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" startIcon={<ConfigIcon />}>
+          <Button 
+            variant="contained" 
+            startIcon={<ConfigIcon />}
+            onClick={async () => {
+              setError('');
+              setSuccess('');
+              try {
+                await ballotsAPI.update(selectedBallot.id, {
+                  jurisdiction_restriction: advancedConfig.geographic_restrictions.jurisdictions.join(','),
+                  voter_type_restriction: advancedConfig.voter_eligibility.voter_types.join(',')
+                });
+                setSuccess('Configuration saved successfully');
+                loadBallots();
+                setConfigDialogOpen(false);
+              } catch (err) {
+                setError(err.response?.data?.error || 'Failed to save configuration');
+              }
+            }}
+          >
             Save Configuration
             </Button>
           </DialogActions>
@@ -1578,8 +1587,8 @@ const Ballots = () => {
                   />
                   <ListItemSecondaryAction>
                     <Chip
-                      label={candidate.is_withdrawn ? 'Withdrawn' : 'Active'}
-                      color={candidate.is_withdrawn ? 'error' : 'success'}
+                      label={candidate.is_active ? 'Active' : 'Inactive'}
+                      color={candidate.is_active ? 'success' : 'default'}
                       size="small"
                     />
                   </ListItemSecondaryAction>
