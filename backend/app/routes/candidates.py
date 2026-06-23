@@ -14,6 +14,12 @@ import string
 import logging
 import os
 
+from app.utils.validators import parse_pagination
+from app.utils.db_utils import safe_commit
+from app.utils.audit import set_audit_fields, audit_action
+from app.utils.query_helpers import get_active_candidates_query
+from app.utils.constants import STATUS_INACTIVE
+
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
 UPLOAD_SUBFOLDER = 'uploads/candidates'
 
@@ -36,10 +42,11 @@ def list_candidates():
     party = request.args.get('party')
     is_active = request.args.get('is_active')
     is_incumbent = request.args.get('is_incumbent')
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 10))
+    page, per_page, error = parse_pagination(request)
+    if error:
+        return error
 
-    query = Candidate.query.join(Ballot).join(Election).filter(Candidate.company_id == company_id)
+    query = get_active_candidates_query(company_id).join(Ballot).join(Election)
     
     if search:
         query = query.filter(or_(
@@ -66,6 +73,14 @@ def list_candidates():
 
     pagination = query.order_by(Candidate.ballot_id, Candidate.order_index).paginate(page=page, per_page=per_page, error_out=False)
     candidates = pagination.items
+    
+    base = get_active_candidates_query(company_id)
+    summary = {
+        'total_candidates': pagination.total,
+        'active_candidates': pagination.total,
+        'incumbent_candidates': base.filter_by(is_incumbent=True).count(),
+        'withdrawn_candidates': Candidate.query.filter_by(company_id=company_id, is_withdrawn=True).count()
+    }
     
     return jsonify({
         'data': [{
@@ -97,16 +112,12 @@ def list_candidates():
         'total': pagination.total,
         'page': pagination.page,
         'pages': pagination.pages,
-        'summary': {
-            'total_candidates': pagination.total,
-            'active_candidates': sum(1 for c in candidates if c.is_active),
-            'incumbent_candidates': sum(1 for c in candidates if c.is_incumbent),
-            'withdrawn_candidates': sum(1 for c in candidates if c.is_withdrawn)
-        }
+        'summary': summary
     })
 
 @candidates_bp.route('/', methods=['POST'])
 @require_permission('Candidates', 'create')
+@audit_action('create_candidate', module='Candidates')
 def create_candidate():
     """Create a new candidate"""
     company_id = get_current_company_id()
@@ -116,24 +127,29 @@ def create_candidate():
     if not data or not data.get('name') or not data.get('ballot_id'):
         return jsonify({'error': 'name and ballot_id are required'}), 400
     
+    try:
+        ballot_id = int(data['ballot_id'])
+    except (ValueError, TypeError, KeyError):
+        return jsonify({'error': 'ballot_id must be a valid integer'}), 400
+    
     # Validate ballot exists and belongs to company
-    ballot = Ballot.query.filter_by(id=data['ballot_id'], company_id=company_id).first()
+    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first()
     if not ballot:
         return jsonify({'error': 'Ballot not found'}), 404
     
-    # Don't allow candidate creation for active elections
-    if ballot.election.status == 'active':
-        return jsonify({'error': 'Cannot create candidates for active elections'}), 400
+    # Don't allow candidate creation for active, completed, or cancelled elections
+    if ballot.election.status in ['active', 'cancelled', 'completed']:
+        return jsonify({'error': 'Cannot create candidates for active, completed, or cancelled elections'}), 400
     
     # Generate unique candidate code
     candidate_code = generate_candidate_code()
-    while Candidate.query.filter_by(candidate_code=candidate_code, ballot_id=data['ballot_id']).first():
+    while Candidate.query.filter_by(candidate_code=candidate_code, ballot_id=ballot_id).first():
         candidate_code = generate_candidate_code()
     
     # Create candidate
     candidate = Candidate()
     candidate.company_id = company_id
-    candidate.ballot_id = data['ballot_id']
+    candidate.ballot_id = ballot_id
     candidate.name = data['name']
     candidate.candidate_code = candidate_code
     candidate.party = data.get('party')
@@ -174,16 +190,19 @@ def create_candidate():
     candidate.endorsements = data.get('endorsements')
     candidate.key_issues = data.get('key_issues')
     
-    candidate.created_by = current_user.id if current_user else None
+    set_audit_fields(candidate, is_create=True)
     
     db.session.add(candidate)
-    db.session.commit()
+    db.session.flush()
     
-    return jsonify({
-        'message': 'Candidate created successfully',
-        'candidate_id': candidate.id,
-        'candidate_code': candidate.candidate_code
-    }), 201
+    return safe_commit(
+        (jsonify({
+            'message': 'Candidate created successfully',
+            'candidate_id': candidate.id,
+            'candidate_code': candidate.candidate_code
+        }), 201),
+        'Failed to create candidate'
+    )
 
 @candidates_bp.route('/<int:candidate_id>', methods=['GET'])
 @require_permission('Candidates', 'view')
@@ -192,7 +211,8 @@ def get_candidate(candidate_id):
     company_id = get_current_company_id()
     candidate = Candidate.query.join(Ballot).join(Election).filter(
         Candidate.id == candidate_id,
-        Candidate.company_id == company_id
+        Candidate.company_id == company_id,
+        Candidate.is_active == True
     ).first_or_404()
     
     return jsonify({
@@ -247,21 +267,14 @@ def get_candidate(candidate_id):
 
 @candidates_bp.route('/<int:candidate_id>', methods=['PUT'])
 @require_permission('Candidates', 'update')
+@audit_action('update_candidate', module='Candidates')
 def update_candidate(candidate_id):
     """Update candidate information"""
-    logger.info(f"🔍 PUT /candidates/{candidate_id} - Starting update request")
-    
     company_id = get_current_company_id()
-    current_user = get_current_user()
     
-    logger.info(f"🔍 Current user: {current_user.id if current_user else 'None'}")
-    logger.info(f"🔍 Company ID: {company_id}")
-    
-    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id).first_or_404()
-    logger.info(f"🔍 Found candidate: {candidate.name}")
+    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id, is_active=True).first_or_404()
     
     data = request.get_json()
-    logger.info(f"🔍 Request data keys: {list(data.keys()) if data else 'None'}")
     
     # Check if election is active
     if candidate.ballot.election.status == 'active':
@@ -333,21 +346,20 @@ def update_candidate(candidate_id):
     if data.get('key_issues'):
         candidate.key_issues = data['key_issues']
     
-    candidate.updated_by = current_user.id if current_user else None
-    candidate.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(candidate, is_create=False)
     
-    logger.info(f"🔍 Committing changes to database for candidate {candidate_id}")
-    db.session.commit()
-    
-    logger.info(f"🔍 PUT /candidates/{candidate_id} - Successfully completed")
-    return jsonify({'message': 'Candidate updated successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Candidate updated successfully'}), 200),
+        'Failed to update candidate'
+    )
 
 @candidates_bp.route('/<int:candidate_id>', methods=['DELETE'])
 @require_permission('Candidates', 'delete')
+@audit_action('delete_candidate', module='Candidates')
 def delete_candidate(candidate_id):
     """Delete candidate (soft delete)"""
     company_id = get_current_company_id()
-    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id).first_or_404()
+    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id, is_active=True).first_or_404()
     
     # Check if election is active
     if candidate.ballot.election.status == 'active':
@@ -356,7 +368,7 @@ def delete_candidate(candidate_id):
     # Check if there are votes for this candidate
     vote_count = Vote.query.filter(
         Vote.ballot_id == candidate.ballot_id,
-        Vote.vote_data.contains(f'"{candidate.id}"')
+        db.cast(Vote.vote_data, db.String).contains(f'"{candidate.id}"')
     ).count()
     
     if vote_count > 0:
@@ -364,43 +376,48 @@ def delete_candidate(candidate_id):
     
     # Soft delete by updating status
     candidate.is_active = False
-    candidate.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(candidate, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Candidate deleted successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Candidate deleted successfully'}), 200),
+        'Failed to delete candidate'
+    )
 
 @candidates_bp.route('/<int:candidate_id>/withdraw', methods=['POST'])
 @require_permission('Candidates', 'update')
+@audit_action('withdraw_candidate', module='Candidates')
 def withdraw_candidate(candidate_id):
     """Withdraw a candidate from the election"""
     company_id = get_current_company_id()
-    current_user = get_current_user()
-    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id).first_or_404()
+    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id, is_active=True).first_or_404()
     data = request.get_json()
     
     # Check if election is active
     if candidate.ballot.election.status == 'active':
         return jsonify({'error': 'Cannot withdraw candidates from active elections'}), 400
     
-    reason = data.get('reason', 'Candidate withdrawal') if data else 'Candidate withdrawal'
+    reason = 'Candidate withdrawal'
+    if data:
+        reason = data.get('withdrawal_reason') or data.get('reason', 'Candidate withdrawal')
     
     candidate.is_withdrawn = True
     candidate.withdrawal_date = datetime.now(timezone.utc)
     candidate.withdrawal_reason = reason
     candidate.is_active = False
-    candidate.updated_by = current_user.id if current_user else None
-    candidate.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(candidate, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Candidate withdrawn successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Candidate withdrawn successfully'}), 200),
+        'Failed to withdraw candidate'
+    )
 
 @candidates_bp.route('/<int:candidate_id>/reinstate', methods=['POST'])
 @require_permission('Candidates', 'update')
+@audit_action('reinstate_candidate', module='Candidates')
 def reinstate_candidate(candidate_id):
     """Reinstate a withdrawn candidate"""
     company_id = get_current_company_id()
-    current_user = get_current_user()
-    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id).first_or_404()
+    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id, is_withdrawn=True).first_or_404()
     
     # Check if election is active
     if candidate.ballot.election.status == 'active':
@@ -413,11 +430,12 @@ def reinstate_candidate(candidate_id):
     candidate.withdrawal_date = None
     candidate.withdrawal_reason = None
     candidate.is_active = True
-    candidate.updated_by = current_user.id if current_user else None
-    candidate.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(candidate, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Candidate reinstated successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Candidate reinstated successfully'}), 200),
+        'Failed to reinstate candidate'
+    )
 
 @candidates_bp.route('/stats', methods=['GET'])
 @require_permission('Candidates', 'view')
@@ -445,7 +463,7 @@ def get_candidate_stats():
     })
 
 @candidates_bp.route('/upload-image', methods=['POST'])
-@jwt_required()
+@require_permission('Candidates', 'create')
 def upload_candidate_image():
     """Upload a candidate profile image. Returns a URL to store on the candidate record."""
     if 'image' not in request.files:
