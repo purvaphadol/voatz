@@ -8,6 +8,7 @@ from app.models.module_action import ModuleAction
 from functools import wraps
 from flask import jsonify
 from app import db
+from werkzeug.exceptions import NotFound, HTTPException
 import logging
 
 # Set up logging
@@ -196,6 +197,9 @@ def require_permission(module_name, action_name):
                 return f(*args, **kwargs)
                 
             except Exception as e:
+                if isinstance(e, HTTPException):
+                    return jsonify({'error': e.description}), e.code
+                
                 logger.error(f"Exception in require_permission decorator for {module_name}.{action_name}: {str(e)}", exc_info=True)
                 # Instead of masking with 401, return 500 for actual errors
                 return jsonify({

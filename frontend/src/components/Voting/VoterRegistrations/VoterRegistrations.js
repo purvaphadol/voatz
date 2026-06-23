@@ -156,7 +156,7 @@ const VoterRegistrations = () => {
   const [formData, setFormData] = useState({
     voter_id: '',
     election_id: '',
-    registration_status: 'pending',
+    status: 'pending',
     notes: '',
     special_requirements: '',
     accessibility_needs: '',
@@ -315,7 +315,7 @@ const VoterRegistrations = () => {
     setFormData({
       voter_id: '',
       election_id: '',
-      registration_status: 'pending',
+      status: 'pending',
       notes: '',
       special_requirements: '',
       accessibility_needs: '',
@@ -330,7 +330,7 @@ const VoterRegistrations = () => {
     setFormData({
       voter_id: registration.voter_id || '',
       election_id: registration.election_id || '',
-      registration_status: registration.registration_status || 'pending',
+      status: registration.status || 'pending',
       notes: registration.notes || '',
       special_requirements: registration.special_requirements || '',
       accessibility_needs: registration.accessibility_needs || '',
@@ -391,7 +391,7 @@ const VoterRegistrations = () => {
 
   const handleConfirmApproval = async () => {
     try {
-      await voterRegistrationsAPI.approve(processingRegistration.id, approvalData);
+      await voterRegistrationsAPI.approve(processingRegistration.id, { notes: approvalData.approval_notes });
       setSuccess('Registration approved successfully');
       setApprovalDialogOpen(false);
       loadRegistrations();
@@ -403,7 +403,7 @@ const VoterRegistrations = () => {
 
   const handleConfirmRejection = async () => {
     try {
-      await voterRegistrationsAPI.reject(processingRegistration.id, rejectionData);
+      await voterRegistrationsAPI.reject(processingRegistration.id, { reason: rejectionData.rejection_reason || rejectionData.rejection_notes });
       setSuccess('Registration rejected successfully');
       setRejectionDialogOpen(false);
       loadRegistrations();
@@ -493,7 +493,7 @@ const VoterRegistrations = () => {
       ),
     },
     {
-      field: 'registration_status',
+      field: 'status',
       headerName: 'Status',
       width: 120,
       renderCell: (params) => {
@@ -600,7 +600,7 @@ const VoterRegistrations = () => {
             </Tooltip>
           );
           
-          if (params.row.registration_status === 'pending') {
+          if (params.row.status === 'pending') {
             actions.push(
               <Tooltip title="Approve this registration and grant voting eligibility to the voter" key="approve">
               <GridActionsCellItem
@@ -619,7 +619,7 @@ const VoterRegistrations = () => {
                 />
               </Tooltip>
             );
-          } else if (params.row.registration_status === 'approved') {
+          } else if (params.row.status === 'approved') {
             actions.push(
               <Tooltip title="View verification details and compliance status" key="verify">
                 <GridActionsCellItem
@@ -818,7 +818,7 @@ const VoterRegistrations = () => {
                   >
                     {voters.map((voter) => (
                       <MenuItem key={voter.id} value={voter.id}>
-                        {voter.name} ({voter.email})
+                        {voter.name}{voter.email ? ` (${voter.email})` : ''}
                       </MenuItem>
                     ))}
                   </Select>
@@ -845,8 +845,8 @@ const VoterRegistrations = () => {
                 <FormControl fullWidth>
                   <InputLabel>Registration Status</InputLabel>
                   <Select
-                    value={formData.registration_status}
-                    onChange={(e) => setFormData({...formData, registration_status: e.target.value})}
+                    value={formData.status}
+                    onChange={(e) => setFormData({...formData, status: e.target.value})}
                   >
                     <MenuItem value="pending">Pending</MenuItem>
                     <MenuItem value="under_review">Under Review</MenuItem>
@@ -939,8 +939,8 @@ const VoterRegistrations = () => {
               <Grid item xs={12} sm={6}>
                 <Typography variant="subtitle2">Status</Typography>
                 <Chip
-                  label={selectedRegistration.registration_status}
-                  color={getStatusColor(selectedRegistration.registration_status)}
+                  label={selectedRegistration.status}
+                  color={getStatusColor(selectedRegistration.status)}
                 />
               </Grid>
               
@@ -984,7 +984,7 @@ const VoterRegistrations = () => {
                 </Grid>
               )}
               
-              {selectedRegistration.registration_status === 'rejected' && (
+              {selectedRegistration.status === 'rejected' && (
                 <>
                   <Grid item xs={12}>
                     <Divider sx={{ my: 2 }} />
@@ -1164,7 +1164,7 @@ const VoterRegistrations = () => {
         <DialogContent>
           <Typography variant="body2" color="textSecondary" gutterBottom>
             Upload a CSV or JSON file. CSV must have a header row with column names matching registration fields
-            (voter_id, election_id, registration_status, etc.).
+            (voter_id, election_id, status, etc.).
           </Typography>
           <Box mt={2}>
             <Button variant="outlined" component="label" startIcon={<ImportIcon />} fullWidth>

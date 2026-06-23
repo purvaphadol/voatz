@@ -1,0 +1,2041 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.1.0, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/dev82/Documents/voatz/backend
+plugins: env-1.6.0, anyio-4.12.1
+collecting ... collected 24 items
+
+tests/test_voters_and_registrations.py::test_voter_create_standalone FAILED [  4%]
+tests/test_voters_and_registrations.py::test_voter_create_linked PASSED  [  8%]
+tests/test_voters_and_registrations.py::test_voter_create_missing_phone PASSED [ 12%]
+tests/test_voters_and_registrations.py::test_voter_create_invalid_voter_type PASSED [ 16%]
+tests/test_voters_and_registrations.py::test_voter_create_invalid_dob PASSED [ 20%]
+tests/test_voters_and_registrations.py::test_voter_list PASSED           [ 25%]
+tests/test_voters_and_registrations.py::test_voter_get_standalone FAILED [ 29%]
+tests/test_voters_and_registrations.py::test_voter_get_not_found FAILED  [ 33%]
+tests/test_voters_and_registrations.py::test_voter_update_standalone FAILED [ 37%]
+tests/test_voters_and_registrations.py::test_voter_update_linked PASSED  [ 41%]
+tests/test_voters_and_registrations.py::test_voter_verify_phone FAILED   [ 45%]
+tests/test_voters_and_registrations.py::test_voter_verify_invalid_type FAILED [ 50%]
+tests/test_voters_and_registrations.py::test_voter_delete FAILED         [ 54%]
+tests/test_voters_and_registrations.py::test_voter_delete_twice PASSED   [ 58%]
+tests/test_voters_and_registrations.py::test_registration_create FAILED  [ 62%]
+tests/test_voters_and_registrations.py::test_registration_duplicate FAILED [ 66%]
+tests/test_voters_and_registrations.py::test_registration_invalid_id_format PASSED [ 70%]
+tests/test_voters_and_registrations.py::test_registration_list FAILED    [ 75%]
+tests/test_voters_and_registrations.py::test_registration_update_immutable FAILED [ 79%]
+tests/test_voters_and_registrations.py::test_registration_approve_missing_verification FAILED [ 83%]
+tests/test_voters_and_registrations.py::test_registration_approve_success FAILED [ 87%]
+tests/test_voters_and_registrations.py::test_registration_reject_missing_reason FAILED [ 91%]
+tests/test_voters_and_registrations.py::test_registration_reject_success FAILED [ 95%]
+tests/test_voters_and_registrations.py::test_registration_bulk_approve FAILED [100%]
+
+=================================== FAILURES ===================================
+_________________________ test_voter_create_standalone _________________________
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...Yjg2NjUwZi0zMDI0LTQyNzktODY0Ny03NjE1OWRmZmRmM2YiLCJleHAiOjE3ODE1OTgzNTJ9.8nT7jaPbAflBkQs2Dmd-yPZEu8GNBKdnxrG2FyNX-1w'}}
+
+    def test_voter_create_standalone(client, setup_data):
+        res = client.post('/api/voters/', json={'name': 'John Doe', 'phone_number': '1234567890'}, headers=setup_data['headers'])
+>       assert res.status_code == 201
+E       assert 400 == 201
+E        +  where 400 = <WrapperTestResponse streamed [400 BAD REQUEST]>.status_code
+
+tests/test_voters_and_registrations.py:118: AssertionError
+__________________________ test_voter_get_standalone ___________________________
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...NTNjZjZiOC0yNWM5LTRkNTEtYmFmOS0wNWIzNTRhYWY0NTAiLCJleHAiOjE3ODE1OTgzNTV9.IwOaqKOigyMan-5dR0lkawlOHsJTmBB0KafW-3HUH2s'}}
+
+    def test_voter_get_standalone(client, setup_data):
+        res_post = client.post('/api/voters/', json={'name': 'Standalone', 'phone_number': '1234567890'}, headers=setup_data['headers'])
+>       voter_id = res_post.json['id']
+E       KeyError: 'id'
+
+tests/test_voters_and_registrations.py:155: KeyError
+___________________________ test_voter_get_not_found ___________________________
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...NWE5MGZmMS0wMWMwLTRmNTctYTg2OC01ZjU0M2QwZmU2ZDMiLCJleHAiOjE3ODE1OTgzNTZ9.JHFHw0ov-hZn70g8vIJl4KQhPyWyQdOixVw4J12XMJY'}}
+
+    def test_voter_get_not_found(client, setup_data):
+        res = client.get('/api/voters/999999', headers=setup_data['headers'])
+>       assert res.status_code == 404
+E       assert 500 == 404
+E        +  where 500 = <WrapperTestResponse streamed [500 INTERNAL SERVER ERROR]>.status_code
+
+tests/test_voters_and_registrations.py:163: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    app.utils:__init__.py:199 Exception in require_permission decorator for Voters.view: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+Traceback (most recent call last):
+  File "/home/dev82/Documents/voatz/backend/app/utils/__init__.py", line 196, in decorated_function
+    return f(*args, **kwargs)
+  File "/home/dev82/Documents/voatz/backend/app/routes/voters.py", line 153, in get_voter
+    ).first_or_404()
+  File "/home/dev82/.local/lib/python3.10/site-packages/flask_sqlalchemy/query.py", line 46, in first_or_404
+    abort(404, description=description)
+  File "/home/dev82/.local/lib/python3.10/site-packages/flask/helpers.py", line 284, in abort
+    current_app.aborter(code, *args, **kwargs)
+  File "/home/dev82/.local/lib/python3.10/site-packages/werkzeug/exceptions.py", line 876, in __call__
+    raise self.mapping[code](*args, **kwargs)
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+_________________________ test_voter_update_standalone _________________________
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...NGQ1MjlhOC02YzRhLTRlMmItYWEwMC1jMzZjYjQyM2EwYjMiLCJleHAiOjE3ODE1OTgzNTZ9.c4hBmb-S_TFWw7mLqzw4pal7JVGnlaMAvwcBDnFvfEQ'}}
+
+    def test_voter_update_standalone(client, setup_data):
+        res_post = client.post('/api/voters/', json={'name': 'Old Name', 'phone_number': '123'}, headers=setup_data['headers'])
+>       voter_id = res_post.json['id']
+E       KeyError: 'id'
+
+tests/test_voters_and_registrations.py:167: KeyError
+___________________________ test_voter_verify_phone ____________________________
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...YzJmZDE2My04MmQzLTRjNDktOWYyNi04YTMyZjIwNjRiOTciLCJleHAiOjE3ODE1OTgzNTh9.uOr1qHy5hOXQnLhsc5CfqBHF1hbhiop9J9gq-hH-SMs'}}
+
+    def test_voter_verify_phone(client, setup_data):
+        res_post = client.post('/api/voters/', json={'name': 'Verify Me', 'phone_number': '123'}, headers=setup_data['headers'])
+        voter_id = res_post.json.get('voter_registration_id') or res_post.json.get('voter_id')
+        res = client.post(f'/api/voters/{voter_id}/verify', json={'verification_type': 'phone'}, headers=setup_data['headers'])
+>       assert res.status_code == 200
+E       assert 404 == 200
+E        +  where 404 = <WrapperTestResponse streamed [404 NOT FOUND]>.status_code
+
+tests/test_voters_and_registrations.py:187: AssertionError
+________________________ test_voter_verify_invalid_type ________________________
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...NGIxNWRiMy05YmVkLTQyMTItYTkyNi03Mjk5MDhlYjQ5MjgiLCJleHAiOjE3ODE1OTgzNTh9.lma6ctmiKYVgWSsCLIATOXRhcVivrfImNs9tcPXicR8'}}
+
+    def test_voter_verify_invalid_type(client, setup_data):
+        res_post = client.post('/api/voters/', json={'name': 'Verify Me Not', 'phone_number': '123'}, headers=setup_data['headers'])
+        voter_id = res_post.json.get('voter_registration_id') or res_post.json.get('voter_id')
+        res = client.post(f'/api/voters/{voter_id}/verify', json={'verification_type': 'magic'}, headers=setup_data['headers'])
+>       assert res.status_code == 400
+E       assert 404 == 400
+E        +  where 404 = <WrapperTestResponse streamed [404 NOT FOUND]>.status_code
+
+tests/test_voters_and_registrations.py:196: AssertionError
+______________________________ test_voter_delete _______________________________
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...YjM5ZDk2OS03MGQ4LTQ3NjYtYjBmOS0zZDhjYjhkNDljZDIiLCJleHAiOjE3ODE1OTgzNTl9.qZeaATXaQKazsQ1XDaFggm2BZYcQwlbETrFqD-_CKJc'}}
+
+    def test_voter_delete(client, setup_data):
+        res_post = client.post('/api/voters/', json={'name': 'Delete Me', 'phone_number': '123'}, headers=setup_data['headers'])
+        voter_id = res_post.json.get('voter_registration_id') or res_post.json.get('voter_id')
+        res = client.delete(f'/api/voters/{voter_id}', headers=setup_data['headers'])
+>       assert res.status_code == 200
+E       assert 404 == 200
+E        +  where 404 = <WrapperTestResponse streamed [404 NOT FOUND]>.status_code
+
+tests/test_voters_and_registrations.py:202: AssertionError
+___________________________ test_registration_create ___________________________
+
+self = <sqlalchemy.engine.base.Connection object at 0x7e99e210d1e0>
+dialect = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e210d150>
+statement = <sqlalchemy.dialects.postgresql.base.PGCompiler object at 0x7e99e210c160>
+parameters = [{'company_id': 1, 'title': 'Test Election', 'description': None, 'election_code': 'E123', ...}]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e2528b80; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'Test Election', 'description': None, 'election_code': 'E123', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e210d150>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       psycopg2.errors.NotNullViolation: null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, Test Election, null, E123, null, null, 2026-06-16 11:56:00.499074, 2026-06-17 11:56:00.499078, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:00.501266+05:30, 2026-06-16 11:56:00.501269+05:30, null, null).
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: NotNullViolation
+
+The above exception was the direct cause of the following exception:
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...MDU3NjQyNy1mNzNlLTQ1ZmItOWY0Yi01NzFjMWMxYzEyNzAiLCJleHAiOjE3ODE1OTgzNjB9.pNnbeP-ZkQampVEwNkifLjTD4BCfvEBIPdEm4qJRZOM'}}
+
+    def test_registration_create(client, setup_data):
+        with client.application.app_context():
+            company_id = setup_data['company_id']
+            voter, user = create_seed_voter(company_id, '111', '123')
+            election = Election(company_id=company_id, title='Test Election', election_code='E123', status='draft', start_date=datetime.now(timezone.utc), end_date=datetime.now(timezone.utc)+timedelta(days=1))
+            db.session.add(election)
+>           db.session.commit()
+
+tests/test_voters_and_registrations.py:231: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/scoping.py:599: in commit
+    return self._proxied.commit()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:2032: in commit
+    trans.commit(_to_root=True)
+<string>:2: in commit
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1313: in commit
+    self._prepare_impl()
+<string>:2: in _prepare_impl
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1288: in _prepare_impl
+    self.session.flush()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4345: in flush
+    self._flush(objects)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4480: in _flush
+    with util.safe_reraise():
+../../../.local/lib/python3.10/site-packages/sqlalchemy/util/langhelpers.py:224: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4441: in _flush
+    flush_context.execute()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:466: in execute
+    rec.execute(self)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:642: in execute
+    util.preloaded.orm_persistence.save_obj(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:93: in save_obj
+    _emit_insert_statements(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:1233: in _emit_insert_statements
+    result = connection.execute(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1415: in execute
+    return meth(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/sql/elements.py:523: in _execute_on_connection
+    return connection._execute_clauseelement(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1637: in _execute_clauseelement
+    ret = self._execute_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1842: in _execute_context
+    return self._exec_single_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1982: in _exec_single_context
+    self._handle_dbapi_exception(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:2351: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e2528b80; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'Test Election', 'description': None, 'election_code': 'E123', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e210d150>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (psycopg2.errors.NotNullViolation) null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, Test Election, null, E123, null, null, 2026-06-16 11:56:00.499074, 2026-06-17 11:56:00.499078, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:00.501266+05:30, 2026-06-16 11:56:00.501269+05:30, null, null).
+E       
+E       [SQL: INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, end_date, registration_deadline, early_voting_start, early_voting_end, allow_early_voting, require_biometric, require_photo_id, allow_overseas_voting, allow_military_voting, max_votes_per_voter, allow_vote_changes, require_all_ballots, jurisdiction, geographic_scope, eligible_voter_types, status, is_public, is_test_election, results_published, results_published_at, total_registered_voters, total_votes_cast, turnout_percentage, election_hash, audit_enabled, paper_trail_required, created_at, updated_at, created_by, updated_by) VALUES (%(company_id)s, %(title)s, %(description)s, %(election_code)s, %(election_type)s, %(election_category)s, %(start_date)s, %(end_date)s, %(registration_deadline)s, %(early_voting_start)s, %(early_voting_end)s, %(allow_early_voting)s, %(require_biometric)s, %(require_photo_id)s, %(allow_overseas_voting)s, %(allow_military_voting)s, %(max_votes_per_voter)s, %(allow_vote_changes)s, %(require_all_ballots)s, %(jurisdiction)s, %(geographic_scope)s, %(eligible_voter_types)s, %(status)s, %(is_public)s, %(is_test_election)s, %(results_published)s, %(results_published_at)s, %(total_registered_voters)s, %(total_votes_cast)s, %(turnout_percentage)s, %(election_hash)s, %(audit_enabled)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id]
+E       [parameters: {'company_id': 1, 'title': 'Test Election', 'description': None, 'election_code': 'E123', 'election_type': None, 'election_category': None, 'start_date': datetime.datetime(2026, 6, 16, 6, 26, 0, 499074, tzinfo=datetime.timezone.utc), 'end_date': datetime.datetime(2026, 6, 17, 6, 26, 0, 499078, tzinfo=datetime.timezone.utc), 'registration_deadline': None, 'early_voting_start': None, 'early_voting_end': None, 'allow_early_voting': False, 'require_biometric': True, 'require_photo_id': True, 'allow_overseas_voting': False, 'allow_military_voting': False, 'max_votes_per_voter': 1, 'allow_vote_changes': False, 'require_all_ballots': False, 'jurisdiction': None, 'geographic_scope': None, 'eligible_voter_types': 'standard', 'status': 'draft', 'is_public': True, 'is_test_election': False, 'results_published': False, 'results_published_at': None, 'total_registered_voters': 0, 'total_votes_cast': 0, 'turnout_percentage': 0.0, 'election_hash': None, 'audit_enabled': True, 'paper_trail_required': True, 'created_at': datetime.datetime(2026, 6, 16, 6, 26, 0, 501266, tzinfo=datetime.timezone.utc), 'updated_at': datetime.datetime(2026, 6, 16, 6, 26, 0, 501269, tzinfo=datetime.timezone.utc), 'created_by': None, 'updated_by': None}]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: IntegrityError
+_________________________ test_registration_duplicate __________________________
+
+self = <sqlalchemy.engine.base.Connection object at 0x7e99e2574a30>
+dialect = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1898280>
+statement = <sqlalchemy.dialects.postgresql.base.PGCompiler object at 0x7e99e210c160>
+parameters = [{'company_id': 1, 'title': 'Test Election 2', 'description': None, 'election_code': 'E222', ...}]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e25298a0; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'Test Election 2', 'description': None, 'election_code': 'E222', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1898280>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       psycopg2.errors.NotNullViolation: null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, Test Election 2, null, E222, null, null, 2026-06-16 11:56:01.854369, 2026-06-17 11:56:01.854372, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:01.854876+05:30, 2026-06-16 11:56:01.854879+05:30, null, null).
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: NotNullViolation
+
+The above exception was the direct cause of the following exception:
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...ZjM3YmIzMC0wNjdjLTRlOTEtODY2Yi0zMDU4MDgwZjM2YTgiLCJleHAiOjE3ODE1OTgzNjF9.trAHX104RN8jqc9FVGVmKE3k_Fge_TOMEihv-vT2Ps4'}}
+
+    def test_registration_duplicate(client, setup_data):
+        with client.application.app_context():
+            company_id = setup_data['company_id']
+            voter, user = create_seed_voter(company_id, '222', '222')
+            election = Election(company_id=company_id, title='Test Election 2', election_code='E222', status='draft', start_date=datetime.now(timezone.utc), end_date=datetime.now(timezone.utc)+timedelta(days=1))
+            db.session.add(election)
+>           db.session.commit()
+
+tests/test_voters_and_registrations.py:246: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/scoping.py:599: in commit
+    return self._proxied.commit()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:2032: in commit
+    trans.commit(_to_root=True)
+<string>:2: in commit
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1313: in commit
+    self._prepare_impl()
+<string>:2: in _prepare_impl
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1288: in _prepare_impl
+    self.session.flush()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4345: in flush
+    self._flush(objects)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4480: in _flush
+    with util.safe_reraise():
+../../../.local/lib/python3.10/site-packages/sqlalchemy/util/langhelpers.py:224: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4441: in _flush
+    flush_context.execute()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:466: in execute
+    rec.execute(self)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:642: in execute
+    util.preloaded.orm_persistence.save_obj(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:93: in save_obj
+    _emit_insert_statements(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:1233: in _emit_insert_statements
+    result = connection.execute(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1415: in execute
+    return meth(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/sql/elements.py:523: in _execute_on_connection
+    return connection._execute_clauseelement(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1637: in _execute_clauseelement
+    ret = self._execute_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1842: in _execute_context
+    return self._exec_single_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1982: in _exec_single_context
+    self._handle_dbapi_exception(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:2351: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e25298a0; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'Test Election 2', 'description': None, 'election_code': 'E222', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1898280>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (psycopg2.errors.NotNullViolation) null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, Test Election 2, null, E222, null, null, 2026-06-16 11:56:01.854369, 2026-06-17 11:56:01.854372, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:01.854876+05:30, 2026-06-16 11:56:01.854879+05:30, null, null).
+E       
+E       [SQL: INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, end_date, registration_deadline, early_voting_start, early_voting_end, allow_early_voting, require_biometric, require_photo_id, allow_overseas_voting, allow_military_voting, max_votes_per_voter, allow_vote_changes, require_all_ballots, jurisdiction, geographic_scope, eligible_voter_types, status, is_public, is_test_election, results_published, results_published_at, total_registered_voters, total_votes_cast, turnout_percentage, election_hash, audit_enabled, paper_trail_required, created_at, updated_at, created_by, updated_by) VALUES (%(company_id)s, %(title)s, %(description)s, %(election_code)s, %(election_type)s, %(election_category)s, %(start_date)s, %(end_date)s, %(registration_deadline)s, %(early_voting_start)s, %(early_voting_end)s, %(allow_early_voting)s, %(require_biometric)s, %(require_photo_id)s, %(allow_overseas_voting)s, %(allow_military_voting)s, %(max_votes_per_voter)s, %(allow_vote_changes)s, %(require_all_ballots)s, %(jurisdiction)s, %(geographic_scope)s, %(eligible_voter_types)s, %(status)s, %(is_public)s, %(is_test_election)s, %(results_published)s, %(results_published_at)s, %(total_registered_voters)s, %(total_votes_cast)s, %(turnout_percentage)s, %(election_hash)s, %(audit_enabled)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id]
+E       [parameters: {'company_id': 1, 'title': 'Test Election 2', 'description': None, 'election_code': 'E222', 'election_type': None, 'election_category': None, 'start_date': datetime.datetime(2026, 6, 16, 6, 26, 1, 854369, tzinfo=datetime.timezone.utc), 'end_date': datetime.datetime(2026, 6, 17, 6, 26, 1, 854372, tzinfo=datetime.timezone.utc), 'registration_deadline': None, 'early_voting_start': None, 'early_voting_end': None, 'allow_early_voting': False, 'require_biometric': True, 'require_photo_id': True, 'allow_overseas_voting': False, 'allow_military_voting': False, 'max_votes_per_voter': 1, 'allow_vote_changes': False, 'require_all_ballots': False, 'jurisdiction': None, 'geographic_scope': None, 'eligible_voter_types': 'standard', 'status': 'draft', 'is_public': True, 'is_test_election': False, 'results_published': False, 'results_published_at': None, 'total_registered_voters': 0, 'total_votes_cast': 0, 'turnout_percentage': 0.0, 'election_hash': None, 'audit_enabled': True, 'paper_trail_required': True, 'created_at': datetime.datetime(2026, 6, 16, 6, 26, 1, 854876, tzinfo=datetime.timezone.utc), 'updated_at': datetime.datetime(2026, 6, 16, 6, 26, 1, 854879, tzinfo=datetime.timezone.utc), 'created_by': None, 'updated_by': None}]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: IntegrityError
+____________________________ test_registration_list ____________________________
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...YjVjYjlkMC1jNzZmLTQ1MWYtODNkYy02N2M1ZWY3NzhkY2UiLCJleHAiOjE3ODE1OTgzNjN9._YQj6fXEyRUWWmcHGlTOZV5KkdOKMKBpW_bH_St46Bc'}}
+
+    def test_registration_list(client, setup_data):
+        res = client.get('/api/voter-registrations/', headers=setup_data['headers'])
+>       assert res.status_code == 200
+E       assert 500 == 200
+E        +  where 500 = <WrapperTestResponse streamed [500 INTERNAL SERVER ERROR]>.status_code
+
+tests/test_voters_and_registrations.py:259: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    app.utils:__init__.py:199 Exception in require_permission decorator for VoterRegistrations.view: (psycopg2.errors.UndefinedFunction) operator does not exist: character varying <> integer
+LINE 3: ...eted' AND voters.status != 0 AND elections.status != 0 ORDER...
+                                                             ^
+HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
+
+[SQL: SELECT voter_registrations.id AS voter_registrations_id, voter_registrations.voter_id AS voter_registrations_voter_id, voter_registrations.election_id AS voter_registrations_election_id, voter_registrations.company_id AS voter_registrations_company_id, voter_registrations.registration_id AS voter_registrations_registration_id, voter_registrations.status AS voter_registrations_status, voter_registrations.registration_type AS voter_registrations_registration_type, voter_registrations.registered_at AS voter_registrations_registered_at, voter_registrations.approved_at AS voter_registrations_approved_at, voter_registrations.rejected_at AS voter_registrations_rejected_at, voter_registrations.expires_at AS voter_registrations_expires_at, voter_registrations.processed_by AS voter_registrations_processed_by, voter_registrations.approval_notes AS voter_registrations_approval_notes, voter_registrations.rejection_reason AS voter_registrations_rejection_reason, voter_registrations.eligibility_verified AS voter_registrations_eligibility_verified, voter_registrations.identity_verified AS voter_registrations_identity_verified, voter_registrations.address_verified AS voter_registrations_address_verified, voter_registrations.age_verified AS voter_registrations_age_verified, voter_registrations.verification_level_met AS voter_registrations_verification_level_met, voter_registrations.required_verification_level AS voter_registrations_required_verification_level, voter_registrations.registered_address AS voter_registrations_registered_address, voter_registrations.jurisdiction AS voter_registrations_jurisdiction, voter_registrations.precinct AS voter_registrations_precinct, voter_registrations.district AS voter_registrations_district, voter_registrations.eligible_ballot_types AS voter_registrations_eligible_ballot_types, voter_registrations.ballot_restrictions AS voter_registrations_ballot_restrictions, voter_registrations.special_accommodations AS voter_registrations_special_accommodations, voter_registrations.preferred_language AS voter_registrations_preferred_language, voter_registrations.accessibility_needs AS voter_registrations_accessibility_needs, voter_registrations.notification_preferences AS voter_registrations_notification_preferences, voter_registrations.registration_source AS voter_registrations_registration_source, voter_registrations.registration_method AS voter_registrations_registration_method, voter_registrations.device_id AS voter_registrations_device_id, voter_registrations.ip_address AS voter_registrations_ip_address, voter_registrations.user_agent AS voter_registrations_user_agent, voter_registrations.location_data AS voter_registrations_location_data, voter_registrations.documents_submitted AS voter_registrations_documents_submitted, voter_registrations.verification_documents AS voter_registrations_verification_documents, voter_registrations.is_first_time_voter AS voter_registrations_is_first_time_voter, voter_registrations.previous_registrations AS voter_registrations_previous_registrations, voter_registrations.voter_history_verified AS voter_registrations_voter_history_verified, voter_registrations.compliance_checks AS voter_registrations_compliance_checks, voter_registrations.audit_trail AS voter_registrations_audit_trail, voter_registrations.fraud_check_score AS voter_registrations_fraud_check_score, voter_registrations.risk_assessment AS voter_registrations_risk_assessment, voter_registrations.notifications_sent AS voter_registrations_notifications_sent, voter_registrations.confirmation_sent AS voter_registrations_confirmation_sent, voter_registrations.reminder_sent AS voter_registrations_reminder_sent, voter_registrations.error_count AS voter_registrations_error_count, voter_registrations.error_messages AS voter_registrations_error_messages, voter_registrations.last_error AS voter_registrations_last_error, voter_registrations.created_at AS voter_registrations_created_at, voter_registrations.updated_at AS voter_registrations_updated_at, voter_registrations.created_by AS voter_registrations_created_by, voter_registrations.updated_by AS voter_registrations_updated_by 
+FROM voter_registrations JOIN voters ON voters.id = voter_registrations.voter_id LEFT OUTER JOIN users ON users.id = voters.user_id JOIN elections ON elections.id = voter_registrations.election_id 
+WHERE voter_registrations.company_id = %(company_id_1)s AND voter_registrations.status != %(status_1)s AND voters.status != %(status_2)s AND elections.status != %(status_3)s ORDER BY voter_registrations.registered_at DESC 
+ LIMIT %(param_1)s OFFSET %(param_2)s]
+[parameters: {'company_id_1': 1, 'status_1': 'deleted', 'status_2': 0, 'status_3': 0, 'param_1': 10, 'param_2': 0}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1963, in _exec_single_context
+    self.dialect.do_execute(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py", line 943, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.UndefinedFunction: operator does not exist: character varying <> integer
+LINE 3: ...eted' AND voters.status != 0 AND elections.status != 0 ORDER...
+                                                             ^
+HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/dev82/Documents/voatz/backend/app/utils/__init__.py", line 196, in decorated_function
+    return f(*args, **kwargs)
+  File "/home/dev82/Documents/voatz/backend/app/routes/voter_registrations.py", line 64, in list_voter_registrations
+    pagination = query.order_by(VoterRegistration.registered_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+  File "/home/dev82/.local/lib/python3.10/site-packages/flask_sqlalchemy/query.py", line 98, in paginate
+    return QueryPagination(
+  File "/home/dev82/.local/lib/python3.10/site-packages/flask_sqlalchemy/pagination.py", line 72, in __init__
+    items = self._query_items()
+  File "/home/dev82/.local/lib/python3.10/site-packages/flask_sqlalchemy/pagination.py", line 358, in _query_items
+    out = query.limit(self.per_page).offset(self._query_offset).all()
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/orm/query.py", line 2704, in all
+    return self._iter().all()  # type: ignore
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/orm/query.py", line 2857, in _iter
+    result: Union[ScalarResult[_T], Result[_T]] = self.session.execute(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py", line 2365, in execute
+    return self._execute_internal(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py", line 2251, in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/orm/context.py", line 306, in orm_execute_statement
+    result = conn.execute(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1415, in execute
+    return meth(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/sql/elements.py", line 523, in _execute_on_connection
+    return connection._execute_clauseelement(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1637, in _execute_clauseelement
+    ret = self._execute_context(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1842, in _execute_context
+    return self._exec_single_context(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1982, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 2351, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1963, in _exec_single_context
+    self.dialect.do_execute(
+  File "/home/dev82/.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py", line 943, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.ProgrammingError: (psycopg2.errors.UndefinedFunction) operator does not exist: character varying <> integer
+LINE 3: ...eted' AND voters.status != 0 AND elections.status != 0 ORDER...
+                                                             ^
+HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
+
+[SQL: SELECT voter_registrations.id AS voter_registrations_id, voter_registrations.voter_id AS voter_registrations_voter_id, voter_registrations.election_id AS voter_registrations_election_id, voter_registrations.company_id AS voter_registrations_company_id, voter_registrations.registration_id AS voter_registrations_registration_id, voter_registrations.status AS voter_registrations_status, voter_registrations.registration_type AS voter_registrations_registration_type, voter_registrations.registered_at AS voter_registrations_registered_at, voter_registrations.approved_at AS voter_registrations_approved_at, voter_registrations.rejected_at AS voter_registrations_rejected_at, voter_registrations.expires_at AS voter_registrations_expires_at, voter_registrations.processed_by AS voter_registrations_processed_by, voter_registrations.approval_notes AS voter_registrations_approval_notes, voter_registrations.rejection_reason AS voter_registrations_rejection_reason, voter_registrations.eligibility_verified AS voter_registrations_eligibility_verified, voter_registrations.identity_verified AS voter_registrations_identity_verified, voter_registrations.address_verified AS voter_registrations_address_verified, voter_registrations.age_verified AS voter_registrations_age_verified, voter_registrations.verification_level_met AS voter_registrations_verification_level_met, voter_registrations.required_verification_level AS voter_registrations_required_verification_level, voter_registrations.registered_address AS voter_registrations_registered_address, voter_registrations.jurisdiction AS voter_registrations_jurisdiction, voter_registrations.precinct AS voter_registrations_precinct, voter_registrations.district AS voter_registrations_district, voter_registrations.eligible_ballot_types AS voter_registrations_eligible_ballot_types, voter_registrations.ballot_restrictions AS voter_registrations_ballot_restrictions, voter_registrations.special_accommodations AS voter_registrations_special_accommodations, voter_registrations.preferred_language AS voter_registrations_preferred_language, voter_registrations.accessibility_needs AS voter_registrations_accessibility_needs, voter_registrations.notification_preferences AS voter_registrations_notification_preferences, voter_registrations.registration_source AS voter_registrations_registration_source, voter_registrations.registration_method AS voter_registrations_registration_method, voter_registrations.device_id AS voter_registrations_device_id, voter_registrations.ip_address AS voter_registrations_ip_address, voter_registrations.user_agent AS voter_registrations_user_agent, voter_registrations.location_data AS voter_registrations_location_data, voter_registrations.documents_submitted AS voter_registrations_documents_submitted, voter_registrations.verification_documents AS voter_registrations_verification_documents, voter_registrations.is_first_time_voter AS voter_registrations_is_first_time_voter, voter_registrations.previous_registrations AS voter_registrations_previous_registrations, voter_registrations.voter_history_verified AS voter_registrations_voter_history_verified, voter_registrations.compliance_checks AS voter_registrations_compliance_checks, voter_registrations.audit_trail AS voter_registrations_audit_trail, voter_registrations.fraud_check_score AS voter_registrations_fraud_check_score, voter_registrations.risk_assessment AS voter_registrations_risk_assessment, voter_registrations.notifications_sent AS voter_registrations_notifications_sent, voter_registrations.confirmation_sent AS voter_registrations_confirmation_sent, voter_registrations.reminder_sent AS voter_registrations_reminder_sent, voter_registrations.error_count AS voter_registrations_error_count, voter_registrations.error_messages AS voter_registrations_error_messages, voter_registrations.last_error AS voter_registrations_last_error, voter_registrations.created_at AS voter_registrations_created_at, voter_registrations.updated_at AS voter_registrations_updated_at, voter_registrations.created_by AS voter_registrations_created_by, voter_registrations.updated_by AS voter_registrations_updated_by 
+FROM voter_registrations JOIN voters ON voters.id = voter_registrations.voter_id LEFT OUTER JOIN users ON users.id = voters.user_id JOIN elections ON elections.id = voter_registrations.election_id 
+WHERE voter_registrations.company_id = %(company_id_1)s AND voter_registrations.status != %(status_1)s AND voters.status != %(status_2)s AND elections.status != %(status_3)s ORDER BY voter_registrations.registered_at DESC 
+ LIMIT %(param_1)s OFFSET %(param_2)s]
+[parameters: {'company_id_1': 1, 'status_1': 'deleted', 'status_2': 0, 'status_3': 0, 'param_1': 10, 'param_2': 0}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+______________________ test_registration_update_immutable ______________________
+
+self = <sqlalchemy.engine.base.Connection object at 0x7e99e1d71180>
+dialect = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1d70f10>
+statement = <sqlalchemy.dialects.postgresql.base.PGCompiler object at 0x7e99e210c160>
+parameters = [{'company_id': 1, 'title': 'E3', 'description': None, 'election_code': 'E333', ...}]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e211a6b0; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E3', 'description': None, 'election_code': 'E333', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1d70f10>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       psycopg2.errors.NotNullViolation: null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E3, null, E333, null, null, 2026-06-16 11:56:04.706125, 2026-06-17 11:56:04.70613, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:04.707049+05:30, 2026-06-16 11:56:04.707055+05:30, null, null).
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: NotNullViolation
+
+The above exception was the direct cause of the following exception:
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...NmYyNWNhNS1iNTE5LTRiZTktYjlmMS1hMzVkODJjYWEyNzciLCJleHAiOjE3ODE1OTgzNjR9.k2uQ6obHf410QrlTZBzAWKwwharfF4YKRgT4m4MF3aI'}}
+
+    def test_registration_update_immutable(client, setup_data):
+        with client.application.app_context():
+            company_id = setup_data['company_id']
+            voter, user = create_seed_voter(company_id, '333', '333')
+            election = Election(company_id=company_id, title='E3', election_code='E333', status='draft', start_date=datetime.now(timezone.utc), end_date=datetime.now(timezone.utc)+timedelta(days=1))
+            db.session.add(election)
+>           db.session.commit()
+
+tests/test_voters_and_registrations.py:273: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/scoping.py:599: in commit
+    return self._proxied.commit()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:2032: in commit
+    trans.commit(_to_root=True)
+<string>:2: in commit
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1313: in commit
+    self._prepare_impl()
+<string>:2: in _prepare_impl
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1288: in _prepare_impl
+    self.session.flush()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4345: in flush
+    self._flush(objects)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4480: in _flush
+    with util.safe_reraise():
+../../../.local/lib/python3.10/site-packages/sqlalchemy/util/langhelpers.py:224: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4441: in _flush
+    flush_context.execute()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:466: in execute
+    rec.execute(self)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:642: in execute
+    util.preloaded.orm_persistence.save_obj(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:93: in save_obj
+    _emit_insert_statements(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:1233: in _emit_insert_statements
+    result = connection.execute(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1415: in execute
+    return meth(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/sql/elements.py:523: in _execute_on_connection
+    return connection._execute_clauseelement(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1637: in _execute_clauseelement
+    ret = self._execute_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1842: in _execute_context
+    return self._exec_single_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1982: in _exec_single_context
+    self._handle_dbapi_exception(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:2351: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e211a6b0; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E3', 'description': None, 'election_code': 'E333', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1d70f10>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (psycopg2.errors.NotNullViolation) null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E3, null, E333, null, null, 2026-06-16 11:56:04.706125, 2026-06-17 11:56:04.70613, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:04.707049+05:30, 2026-06-16 11:56:04.707055+05:30, null, null).
+E       
+E       [SQL: INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, end_date, registration_deadline, early_voting_start, early_voting_end, allow_early_voting, require_biometric, require_photo_id, allow_overseas_voting, allow_military_voting, max_votes_per_voter, allow_vote_changes, require_all_ballots, jurisdiction, geographic_scope, eligible_voter_types, status, is_public, is_test_election, results_published, results_published_at, total_registered_voters, total_votes_cast, turnout_percentage, election_hash, audit_enabled, paper_trail_required, created_at, updated_at, created_by, updated_by) VALUES (%(company_id)s, %(title)s, %(description)s, %(election_code)s, %(election_type)s, %(election_category)s, %(start_date)s, %(end_date)s, %(registration_deadline)s, %(early_voting_start)s, %(early_voting_end)s, %(allow_early_voting)s, %(require_biometric)s, %(require_photo_id)s, %(allow_overseas_voting)s, %(allow_military_voting)s, %(max_votes_per_voter)s, %(allow_vote_changes)s, %(require_all_ballots)s, %(jurisdiction)s, %(geographic_scope)s, %(eligible_voter_types)s, %(status)s, %(is_public)s, %(is_test_election)s, %(results_published)s, %(results_published_at)s, %(total_registered_voters)s, %(total_votes_cast)s, %(turnout_percentage)s, %(election_hash)s, %(audit_enabled)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id]
+E       [parameters: {'company_id': 1, 'title': 'E3', 'description': None, 'election_code': 'E333', 'election_type': None, 'election_category': None, 'start_date': datetime.datetime(2026, 6, 16, 6, 26, 4, 706125, tzinfo=datetime.timezone.utc), 'end_date': datetime.datetime(2026, 6, 17, 6, 26, 4, 706130, tzinfo=datetime.timezone.utc), 'registration_deadline': None, 'early_voting_start': None, 'early_voting_end': None, 'allow_early_voting': False, 'require_biometric': True, 'require_photo_id': True, 'allow_overseas_voting': False, 'allow_military_voting': False, 'max_votes_per_voter': 1, 'allow_vote_changes': False, 'require_all_ballots': False, 'jurisdiction': None, 'geographic_scope': None, 'eligible_voter_types': 'standard', 'status': 'draft', 'is_public': True, 'is_test_election': False, 'results_published': False, 'results_published_at': None, 'total_registered_voters': 0, 'total_votes_cast': 0, 'turnout_percentage': 0.0, 'election_hash': None, 'audit_enabled': True, 'paper_trail_required': True, 'created_at': datetime.datetime(2026, 6, 16, 6, 26, 4, 707049, tzinfo=datetime.timezone.utc), 'updated_at': datetime.datetime(2026, 6, 16, 6, 26, 4, 707055, tzinfo=datetime.timezone.utc), 'created_by': None, 'updated_by': None}]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: IntegrityError
+________________ test_registration_approve_missing_verification ________________
+
+self = <sqlalchemy.engine.base.Connection object at 0x7e99e15fe500>
+dialect = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e15fe230>
+statement = <sqlalchemy.dialects.postgresql.base.PGCompiler object at 0x7e99e210c160>
+parameters = [{'company_id': 1, 'title': 'E4', 'description': None, 'election_code': 'E444', ...}]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e25298a0; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E4', 'description': None, 'election_code': 'E444', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e15fe230>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       psycopg2.errors.NotNullViolation: null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E4, null, E444, null, null, 2026-06-16 11:56:06.371436, 2026-06-17 11:56:06.371439, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:06.371936+05:30, 2026-06-16 11:56:06.371938+05:30, null, null).
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: NotNullViolation
+
+The above exception was the direct cause of the following exception:
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...NjMzMzAzYi00NzUyLTQ3NTgtYjljNS0wMTA5ZWJkOWM0YWEiLCJleHAiOjE3ODE1OTgzNjZ9.ips6gGQ4oL0Of8YVMgjTie7owqEXeCG-QucNoBAtFnw'}}
+
+    def test_registration_approve_missing_verification(client, setup_data):
+        with client.application.app_context():
+            company_id = setup_data['company_id']
+            voter, user = create_seed_voter(company_id, '444', '444')
+            election = Election(company_id=company_id, title='E4', election_code='E444', status='draft', start_date=datetime.now(timezone.utc), end_date=datetime.now(timezone.utc)+timedelta(days=1))
+            db.session.add(election)
+>           db.session.commit()
+
+tests/test_voters_and_registrations.py:288: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/scoping.py:599: in commit
+    return self._proxied.commit()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:2032: in commit
+    trans.commit(_to_root=True)
+<string>:2: in commit
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1313: in commit
+    self._prepare_impl()
+<string>:2: in _prepare_impl
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1288: in _prepare_impl
+    self.session.flush()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4345: in flush
+    self._flush(objects)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4480: in _flush
+    with util.safe_reraise():
+../../../.local/lib/python3.10/site-packages/sqlalchemy/util/langhelpers.py:224: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4441: in _flush
+    flush_context.execute()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:466: in execute
+    rec.execute(self)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:642: in execute
+    util.preloaded.orm_persistence.save_obj(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:93: in save_obj
+    _emit_insert_statements(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:1233: in _emit_insert_statements
+    result = connection.execute(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1415: in execute
+    return meth(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/sql/elements.py:523: in _execute_on_connection
+    return connection._execute_clauseelement(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1637: in _execute_clauseelement
+    ret = self._execute_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1842: in _execute_context
+    return self._exec_single_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1982: in _exec_single_context
+    self._handle_dbapi_exception(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:2351: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e25298a0; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E4', 'description': None, 'election_code': 'E444', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e15fe230>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (psycopg2.errors.NotNullViolation) null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E4, null, E444, null, null, 2026-06-16 11:56:06.371436, 2026-06-17 11:56:06.371439, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:06.371936+05:30, 2026-06-16 11:56:06.371938+05:30, null, null).
+E       
+E       [SQL: INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, end_date, registration_deadline, early_voting_start, early_voting_end, allow_early_voting, require_biometric, require_photo_id, allow_overseas_voting, allow_military_voting, max_votes_per_voter, allow_vote_changes, require_all_ballots, jurisdiction, geographic_scope, eligible_voter_types, status, is_public, is_test_election, results_published, results_published_at, total_registered_voters, total_votes_cast, turnout_percentage, election_hash, audit_enabled, paper_trail_required, created_at, updated_at, created_by, updated_by) VALUES (%(company_id)s, %(title)s, %(description)s, %(election_code)s, %(election_type)s, %(election_category)s, %(start_date)s, %(end_date)s, %(registration_deadline)s, %(early_voting_start)s, %(early_voting_end)s, %(allow_early_voting)s, %(require_biometric)s, %(require_photo_id)s, %(allow_overseas_voting)s, %(allow_military_voting)s, %(max_votes_per_voter)s, %(allow_vote_changes)s, %(require_all_ballots)s, %(jurisdiction)s, %(geographic_scope)s, %(eligible_voter_types)s, %(status)s, %(is_public)s, %(is_test_election)s, %(results_published)s, %(results_published_at)s, %(total_registered_voters)s, %(total_votes_cast)s, %(turnout_percentage)s, %(election_hash)s, %(audit_enabled)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id]
+E       [parameters: {'company_id': 1, 'title': 'E4', 'description': None, 'election_code': 'E444', 'election_type': None, 'election_category': None, 'start_date': datetime.datetime(2026, 6, 16, 6, 26, 6, 371436, tzinfo=datetime.timezone.utc), 'end_date': datetime.datetime(2026, 6, 17, 6, 26, 6, 371439, tzinfo=datetime.timezone.utc), 'registration_deadline': None, 'early_voting_start': None, 'early_voting_end': None, 'allow_early_voting': False, 'require_biometric': True, 'require_photo_id': True, 'allow_overseas_voting': False, 'allow_military_voting': False, 'max_votes_per_voter': 1, 'allow_vote_changes': False, 'require_all_ballots': False, 'jurisdiction': None, 'geographic_scope': None, 'eligible_voter_types': 'standard', 'status': 'draft', 'is_public': True, 'is_test_election': False, 'results_published': False, 'results_published_at': None, 'total_registered_voters': 0, 'total_votes_cast': 0, 'turnout_percentage': 0.0, 'election_hash': None, 'audit_enabled': True, 'paper_trail_required': True, 'created_at': datetime.datetime(2026, 6, 16, 6, 26, 6, 371936, tzinfo=datetime.timezone.utc), 'updated_at': datetime.datetime(2026, 6, 16, 6, 26, 6, 371938, tzinfo=datetime.timezone.utc), 'created_by': None, 'updated_by': None}]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: IntegrityError
+______________________ test_registration_approve_success _______________________
+
+self = <sqlalchemy.engine.base.Connection object at 0x7e99e16de5f0>
+dialect = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e16dded0>
+statement = <sqlalchemy.dialects.postgresql.base.PGCompiler object at 0x7e99e210c160>
+parameters = [{'company_id': 1, 'title': 'E5', 'description': None, 'election_code': 'E555', ...}]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e211ab60; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E5', 'description': None, 'election_code': 'E555', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e16dded0>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       psycopg2.errors.NotNullViolation: null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E5, null, E555, null, null, 2026-06-16 11:56:07.729399, 2026-06-17 11:56:07.729403, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:07.730057+05:30, 2026-06-16 11:56:07.730061+05:30, null, null).
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: NotNullViolation
+
+The above exception was the direct cause of the following exception:
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...YTViNmRmZC1hODRjLTQyZjUtYjMyNC05Y2FiYWVjYWM5YTAiLCJleHAiOjE3ODE1OTgzNjd9.er9BYc0K_qj1WBiNomT5PjQa9xEgwJViOq7VcM__NJw'}}
+
+    def test_registration_approve_success(client, setup_data):
+        with client.application.app_context():
+            company_id = setup_data['company_id']
+            voter, user = create_seed_voter(company_id, '555', '555')
+            election = Election(company_id=company_id, title='E5', election_code='E555', status='draft', start_date=datetime.now(timezone.utc), end_date=datetime.now(timezone.utc)+timedelta(days=1))
+            db.session.add(election)
+>           db.session.commit()
+
+tests/test_voters_and_registrations.py:303: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/scoping.py:599: in commit
+    return self._proxied.commit()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:2032: in commit
+    trans.commit(_to_root=True)
+<string>:2: in commit
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1313: in commit
+    self._prepare_impl()
+<string>:2: in _prepare_impl
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1288: in _prepare_impl
+    self.session.flush()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4345: in flush
+    self._flush(objects)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4480: in _flush
+    with util.safe_reraise():
+../../../.local/lib/python3.10/site-packages/sqlalchemy/util/langhelpers.py:224: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4441: in _flush
+    flush_context.execute()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:466: in execute
+    rec.execute(self)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:642: in execute
+    util.preloaded.orm_persistence.save_obj(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:93: in save_obj
+    _emit_insert_statements(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:1233: in _emit_insert_statements
+    result = connection.execute(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1415: in execute
+    return meth(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/sql/elements.py:523: in _execute_on_connection
+    return connection._execute_clauseelement(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1637: in _execute_clauseelement
+    ret = self._execute_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1842: in _execute_context
+    return self._exec_single_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1982: in _exec_single_context
+    self._handle_dbapi_exception(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:2351: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e211ab60; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E5', 'description': None, 'election_code': 'E555', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e16dded0>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (psycopg2.errors.NotNullViolation) null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E5, null, E555, null, null, 2026-06-16 11:56:07.729399, 2026-06-17 11:56:07.729403, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:07.730057+05:30, 2026-06-16 11:56:07.730061+05:30, null, null).
+E       
+E       [SQL: INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, end_date, registration_deadline, early_voting_start, early_voting_end, allow_early_voting, require_biometric, require_photo_id, allow_overseas_voting, allow_military_voting, max_votes_per_voter, allow_vote_changes, require_all_ballots, jurisdiction, geographic_scope, eligible_voter_types, status, is_public, is_test_election, results_published, results_published_at, total_registered_voters, total_votes_cast, turnout_percentage, election_hash, audit_enabled, paper_trail_required, created_at, updated_at, created_by, updated_by) VALUES (%(company_id)s, %(title)s, %(description)s, %(election_code)s, %(election_type)s, %(election_category)s, %(start_date)s, %(end_date)s, %(registration_deadline)s, %(early_voting_start)s, %(early_voting_end)s, %(allow_early_voting)s, %(require_biometric)s, %(require_photo_id)s, %(allow_overseas_voting)s, %(allow_military_voting)s, %(max_votes_per_voter)s, %(allow_vote_changes)s, %(require_all_ballots)s, %(jurisdiction)s, %(geographic_scope)s, %(eligible_voter_types)s, %(status)s, %(is_public)s, %(is_test_election)s, %(results_published)s, %(results_published_at)s, %(total_registered_voters)s, %(total_votes_cast)s, %(turnout_percentage)s, %(election_hash)s, %(audit_enabled)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id]
+E       [parameters: {'company_id': 1, 'title': 'E5', 'description': None, 'election_code': 'E555', 'election_type': None, 'election_category': None, 'start_date': datetime.datetime(2026, 6, 16, 6, 26, 7, 729399, tzinfo=datetime.timezone.utc), 'end_date': datetime.datetime(2026, 6, 17, 6, 26, 7, 729403, tzinfo=datetime.timezone.utc), 'registration_deadline': None, 'early_voting_start': None, 'early_voting_end': None, 'allow_early_voting': False, 'require_biometric': True, 'require_photo_id': True, 'allow_overseas_voting': False, 'allow_military_voting': False, 'max_votes_per_voter': 1, 'allow_vote_changes': False, 'require_all_ballots': False, 'jurisdiction': None, 'geographic_scope': None, 'eligible_voter_types': 'standard', 'status': 'draft', 'is_public': True, 'is_test_election': False, 'results_published': False, 'results_published_at': None, 'total_registered_voters': 0, 'total_votes_cast': 0, 'turnout_percentage': 0.0, 'election_hash': None, 'audit_enabled': True, 'paper_trail_required': True, 'created_at': datetime.datetime(2026, 6, 16, 6, 26, 7, 730057, tzinfo=datetime.timezone.utc), 'updated_at': datetime.datetime(2026, 6, 16, 6, 26, 7, 730061, tzinfo=datetime.timezone.utc), 'created_by': None, 'updated_by': None}]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: IntegrityError
+___________________ test_registration_reject_missing_reason ____________________
+
+self = <sqlalchemy.engine.base.Connection object at 0x7e99e1dad3f0>
+dialect = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1dad090>
+statement = <sqlalchemy.dialects.postgresql.base.PGCompiler object at 0x7e99e210c160>
+parameters = [{'company_id': 1, 'title': 'E6', 'description': None, 'election_code': 'E666', ...}]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e25298a0; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E6', 'description': None, 'election_code': 'E666', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1dad090>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       psycopg2.errors.NotNullViolation: null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E6, null, E666, null, null, 2026-06-16 11:56:09.093929, 2026-06-17 11:56:09.093932, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:09.094489+05:30, 2026-06-16 11:56:09.094491+05:30, null, null).
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: NotNullViolation
+
+The above exception was the direct cause of the following exception:
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...MmFmZjMyNS0zOGMwLTQ5OTEtODRhYS1lYTc1ZWE4MTQ0YjEiLCJleHAiOjE3ODE1OTgzNjh9.z6iET_0q9uxEaGmRxsEsexz1ps4k_6uSrvNXHsv9JNg'}}
+
+    def test_registration_reject_missing_reason(client, setup_data):
+        with client.application.app_context():
+            company_id = setup_data['company_id']
+            voter, user = create_seed_voter(company_id, '666', '666')
+            election = Election(company_id=company_id, title='E6', election_code='E666', status='draft', start_date=datetime.now(timezone.utc), end_date=datetime.now(timezone.utc)+timedelta(days=1))
+            db.session.add(election)
+>           db.session.commit()
+
+tests/test_voters_and_registrations.py:318: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/scoping.py:599: in commit
+    return self._proxied.commit()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:2032: in commit
+    trans.commit(_to_root=True)
+<string>:2: in commit
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1313: in commit
+    self._prepare_impl()
+<string>:2: in _prepare_impl
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1288: in _prepare_impl
+    self.session.flush()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4345: in flush
+    self._flush(objects)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4480: in _flush
+    with util.safe_reraise():
+../../../.local/lib/python3.10/site-packages/sqlalchemy/util/langhelpers.py:224: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4441: in _flush
+    flush_context.execute()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:466: in execute
+    rec.execute(self)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:642: in execute
+    util.preloaded.orm_persistence.save_obj(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:93: in save_obj
+    _emit_insert_statements(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:1233: in _emit_insert_statements
+    result = connection.execute(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1415: in execute
+    return meth(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/sql/elements.py:523: in _execute_on_connection
+    return connection._execute_clauseelement(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1637: in _execute_clauseelement
+    ret = self._execute_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1842: in _execute_context
+    return self._exec_single_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1982: in _exec_single_context
+    self._handle_dbapi_exception(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:2351: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e25298a0; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E6', 'description': None, 'election_code': 'E666', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1dad090>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (psycopg2.errors.NotNullViolation) null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E6, null, E666, null, null, 2026-06-16 11:56:09.093929, 2026-06-17 11:56:09.093932, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:09.094489+05:30, 2026-06-16 11:56:09.094491+05:30, null, null).
+E       
+E       [SQL: INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, end_date, registration_deadline, early_voting_start, early_voting_end, allow_early_voting, require_biometric, require_photo_id, allow_overseas_voting, allow_military_voting, max_votes_per_voter, allow_vote_changes, require_all_ballots, jurisdiction, geographic_scope, eligible_voter_types, status, is_public, is_test_election, results_published, results_published_at, total_registered_voters, total_votes_cast, turnout_percentage, election_hash, audit_enabled, paper_trail_required, created_at, updated_at, created_by, updated_by) VALUES (%(company_id)s, %(title)s, %(description)s, %(election_code)s, %(election_type)s, %(election_category)s, %(start_date)s, %(end_date)s, %(registration_deadline)s, %(early_voting_start)s, %(early_voting_end)s, %(allow_early_voting)s, %(require_biometric)s, %(require_photo_id)s, %(allow_overseas_voting)s, %(allow_military_voting)s, %(max_votes_per_voter)s, %(allow_vote_changes)s, %(require_all_ballots)s, %(jurisdiction)s, %(geographic_scope)s, %(eligible_voter_types)s, %(status)s, %(is_public)s, %(is_test_election)s, %(results_published)s, %(results_published_at)s, %(total_registered_voters)s, %(total_votes_cast)s, %(turnout_percentage)s, %(election_hash)s, %(audit_enabled)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id]
+E       [parameters: {'company_id': 1, 'title': 'E6', 'description': None, 'election_code': 'E666', 'election_type': None, 'election_category': None, 'start_date': datetime.datetime(2026, 6, 16, 6, 26, 9, 93929, tzinfo=datetime.timezone.utc), 'end_date': datetime.datetime(2026, 6, 17, 6, 26, 9, 93932, tzinfo=datetime.timezone.utc), 'registration_deadline': None, 'early_voting_start': None, 'early_voting_end': None, 'allow_early_voting': False, 'require_biometric': True, 'require_photo_id': True, 'allow_overseas_voting': False, 'allow_military_voting': False, 'max_votes_per_voter': 1, 'allow_vote_changes': False, 'require_all_ballots': False, 'jurisdiction': None, 'geographic_scope': None, 'eligible_voter_types': 'standard', 'status': 'draft', 'is_public': True, 'is_test_election': False, 'results_published': False, 'results_published_at': None, 'total_registered_voters': 0, 'total_votes_cast': 0, 'turnout_percentage': 0.0, 'election_hash': None, 'audit_enabled': True, 'paper_trail_required': True, 'created_at': datetime.datetime(2026, 6, 16, 6, 26, 9, 94489, tzinfo=datetime.timezone.utc), 'updated_at': datetime.datetime(2026, 6, 16, 6, 26, 9, 94491, tzinfo=datetime.timezone.utc), 'created_by': None, 'updated_by': None}]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: IntegrityError
+_______________________ test_registration_reject_success _______________________
+
+self = <sqlalchemy.engine.base.Connection object at 0x7e99e1d99630>
+dialect = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1d98eb0>
+statement = <sqlalchemy.dialects.postgresql.base.PGCompiler object at 0x7e99e210c160>
+parameters = [{'company_id': 1, 'title': 'E7', 'description': None, 'election_code': 'E777', ...}]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e211aa70; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E7', 'description': None, 'election_code': 'E777', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1d98eb0>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       psycopg2.errors.NotNullViolation: null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E7, null, E777, null, null, 2026-06-16 11:56:10.496629, 2026-06-17 11:56:10.496632, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:10.497142+05:30, 2026-06-16 11:56:10.497144+05:30, null, null).
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: NotNullViolation
+
+The above exception was the direct cause of the following exception:
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...ODY3MzNmZC0yNmU4LTRkMzEtOGNhNC0zN2RlOGM2ZDhiZjkiLCJleHAiOjE3ODE1OTgzNzB9.FFU8CaHuw4dZ1q_9Vq11eyMcq2YbwDv8mMFqV-7Mrp4'}}
+
+    def test_registration_reject_success(client, setup_data):
+        with client.application.app_context():
+            company_id = setup_data['company_id']
+            voter, user = create_seed_voter(company_id, '777', '777')
+            election = Election(company_id=company_id, title='E7', election_code='E777', status='draft', start_date=datetime.now(timezone.utc), end_date=datetime.now(timezone.utc)+timedelta(days=1))
+            db.session.add(election)
+>           db.session.commit()
+
+tests/test_voters_and_registrations.py:333: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/scoping.py:599: in commit
+    return self._proxied.commit()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:2032: in commit
+    trans.commit(_to_root=True)
+<string>:2: in commit
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1313: in commit
+    self._prepare_impl()
+<string>:2: in _prepare_impl
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1288: in _prepare_impl
+    self.session.flush()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4345: in flush
+    self._flush(objects)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4480: in _flush
+    with util.safe_reraise():
+../../../.local/lib/python3.10/site-packages/sqlalchemy/util/langhelpers.py:224: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4441: in _flush
+    flush_context.execute()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:466: in execute
+    rec.execute(self)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:642: in execute
+    util.preloaded.orm_persistence.save_obj(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:93: in save_obj
+    _emit_insert_statements(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:1233: in _emit_insert_statements
+    result = connection.execute(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1415: in execute
+    return meth(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/sql/elements.py:523: in _execute_on_connection
+    return connection._execute_clauseelement(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1637: in _execute_clauseelement
+    ret = self._execute_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1842: in _execute_context
+    return self._exec_single_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1982: in _exec_single_context
+    self._handle_dbapi_exception(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:2351: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e211aa70; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E7', 'description': None, 'election_code': 'E777', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1d98eb0>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (psycopg2.errors.NotNullViolation) null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E7, null, E777, null, null, 2026-06-16 11:56:10.496629, 2026-06-17 11:56:10.496632, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:10.497142+05:30, 2026-06-16 11:56:10.497144+05:30, null, null).
+E       
+E       [SQL: INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, end_date, registration_deadline, early_voting_start, early_voting_end, allow_early_voting, require_biometric, require_photo_id, allow_overseas_voting, allow_military_voting, max_votes_per_voter, allow_vote_changes, require_all_ballots, jurisdiction, geographic_scope, eligible_voter_types, status, is_public, is_test_election, results_published, results_published_at, total_registered_voters, total_votes_cast, turnout_percentage, election_hash, audit_enabled, paper_trail_required, created_at, updated_at, created_by, updated_by) VALUES (%(company_id)s, %(title)s, %(description)s, %(election_code)s, %(election_type)s, %(election_category)s, %(start_date)s, %(end_date)s, %(registration_deadline)s, %(early_voting_start)s, %(early_voting_end)s, %(allow_early_voting)s, %(require_biometric)s, %(require_photo_id)s, %(allow_overseas_voting)s, %(allow_military_voting)s, %(max_votes_per_voter)s, %(allow_vote_changes)s, %(require_all_ballots)s, %(jurisdiction)s, %(geographic_scope)s, %(eligible_voter_types)s, %(status)s, %(is_public)s, %(is_test_election)s, %(results_published)s, %(results_published_at)s, %(total_registered_voters)s, %(total_votes_cast)s, %(turnout_percentage)s, %(election_hash)s, %(audit_enabled)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id]
+E       [parameters: {'company_id': 1, 'title': 'E7', 'description': None, 'election_code': 'E777', 'election_type': None, 'election_category': None, 'start_date': datetime.datetime(2026, 6, 16, 6, 26, 10, 496629, tzinfo=datetime.timezone.utc), 'end_date': datetime.datetime(2026, 6, 17, 6, 26, 10, 496632, tzinfo=datetime.timezone.utc), 'registration_deadline': None, 'early_voting_start': None, 'early_voting_end': None, 'allow_early_voting': False, 'require_biometric': True, 'require_photo_id': True, 'allow_overseas_voting': False, 'allow_military_voting': False, 'max_votes_per_voter': 1, 'allow_vote_changes': False, 'require_all_ballots': False, 'jurisdiction': None, 'geographic_scope': None, 'eligible_voter_types': 'standard', 'status': 'draft', 'is_public': True, 'is_test_election': False, 'results_published': False, 'results_published_at': None, 'total_registered_voters': 0, 'total_votes_cast': 0, 'turnout_percentage': 0.0, 'election_hash': None, 'audit_enabled': True, 'paper_trail_required': True, 'created_at': datetime.datetime(2026, 6, 16, 6, 26, 10, 497142, tzinfo=datetime.timezone.utc), 'updated_at': datetime.datetime(2026, 6, 16, 6, 26, 10, 497144, tzinfo=datetime.timezone.utc), 'created_by': None, 'updated_by': None}]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: IntegrityError
+________________________ test_registration_bulk_approve ________________________
+
+self = <sqlalchemy.engine.base.Connection object at 0x7e99e1dc7ca0>
+dialect = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1dc6800>
+statement = <sqlalchemy.dialects.postgresql.base.PGCompiler object at 0x7e99e210c160>
+parameters = [{'company_id': 1, 'title': 'E8', 'description': None, 'election_code': 'E888', ...}]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e25298a0; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E8', 'description': None, 'election_code': 'E888', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1dc6800>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       psycopg2.errors.NotNullViolation: null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E8, null, E888, null, null, 2026-06-16 11:56:12.112588, 2026-06-17 11:56:12.112592, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:12.113124+05:30, 2026-06-16 11:56:12.113126+05:30, null, null).
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: NotNullViolation
+
+The above exception was the direct cause of the following exception:
+
+client = <FlaskClient <Flask 'app'>>
+setup_data = {'company_id': 1, 'user_id': 1, 'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc4MTU5MTE...MTIwZDU5My04YTg4LTRlN2ItYWI4OS0xODA0ZDZhMzIzM2EiLCJleHAiOjE3ODE1OTgzNzF9.lMmcLv4vrCqLf5B1IIPyJTd-LMxoy61DhpcbR_Sners'}}
+
+    def test_registration_bulk_approve(client, setup_data):
+        with client.application.app_context():
+            company_id = setup_data['company_id']
+            voter1, user1 = create_seed_voter(company_id, '881', '881')
+            voter2, user2 = create_seed_voter(company_id, '882', '882')
+            election = Election(company_id=company_id, title='E8', election_code='E888', status='draft', start_date=datetime.now(timezone.utc), end_date=datetime.now(timezone.utc)+timedelta(days=1))
+            db.session.add(election)
+>           db.session.commit()
+
+tests/test_voters_and_registrations.py:352: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/scoping.py:599: in commit
+    return self._proxied.commit()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:2032: in commit
+    trans.commit(_to_root=True)
+<string>:2: in commit
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1313: in commit
+    self._prepare_impl()
+<string>:2: in _prepare_impl
+    ???
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/state_changes.py:139: in _go
+    ret_value = fn(self, *arg, **kw)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:1288: in _prepare_impl
+    self.session.flush()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4345: in flush
+    self._flush(objects)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4480: in _flush
+    with util.safe_reraise():
+../../../.local/lib/python3.10/site-packages/sqlalchemy/util/langhelpers.py:224: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/session.py:4441: in _flush
+    flush_context.execute()
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:466: in execute
+    rec.execute(self)
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/unitofwork.py:642: in execute
+    util.preloaded.orm_persistence.save_obj(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:93: in save_obj
+    _emit_insert_statements(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/orm/persistence.py:1233: in _emit_insert_statements
+    result = connection.execute(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1415: in execute
+    return meth(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/sql/elements.py:523: in _execute_on_connection
+    return connection._execute_clauseelement(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1637: in _execute_clauseelement
+    ret = self._execute_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1842: in _execute_context
+    return self._exec_single_context(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1982: in _exec_single_context
+    self._handle_dbapi_exception(
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:2351: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/base.py:1963: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.postgresql.psycopg2.PGDialect_psycopg2 object at 0x7e99e5e8e7d0>
+cursor = <cursor object at 0x7e99e25298a0; closed: -1>
+statement = 'INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, e...ed)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id'
+parameters = {'company_id': 1, 'title': 'E8', 'description': None, 'election_code': 'E888', ...}
+context = <sqlalchemy.dialects.postgresql.psycopg2.PGExecutionContext_psycopg2 object at 0x7e99e1dc6800>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (psycopg2.errors.NotNullViolation) null value in column "election_type" of relation "elections" violates not-null constraint
+E       DETAIL:  Failing row contains (1, 1, E8, null, E888, null, null, 2026-06-16 11:56:12.112588, 2026-06-17 11:56:12.112592, null, null, null, f, t, t, f, f, 1, f, f, null, null, standard, draft, t, f, f, null, 0, 0, 0, null, t, t, 2026-06-16 11:56:12.113124+05:30, 2026-06-16 11:56:12.113126+05:30, null, null).
+E       
+E       [SQL: INSERT INTO elections (company_id, title, description, election_code, election_type, election_category, start_date, end_date, registration_deadline, early_voting_start, early_voting_end, allow_early_voting, require_biometric, require_photo_id, allow_overseas_voting, allow_military_voting, max_votes_per_voter, allow_vote_changes, require_all_ballots, jurisdiction, geographic_scope, eligible_voter_types, status, is_public, is_test_election, results_published, results_published_at, total_registered_voters, total_votes_cast, turnout_percentage, election_hash, audit_enabled, paper_trail_required, created_at, updated_at, created_by, updated_by) VALUES (%(company_id)s, %(title)s, %(description)s, %(election_code)s, %(election_type)s, %(election_category)s, %(start_date)s, %(end_date)s, %(registration_deadline)s, %(early_voting_start)s, %(early_voting_end)s, %(allow_early_voting)s, %(require_biometric)s, %(require_photo_id)s, %(allow_overseas_voting)s, %(allow_military_voting)s, %(max_votes_per_voter)s, %(allow_vote_changes)s, %(require_all_ballots)s, %(jurisdiction)s, %(geographic_scope)s, %(eligible_voter_types)s, %(status)s, %(is_public)s, %(is_test_election)s, %(results_published)s, %(results_published_at)s, %(total_registered_voters)s, %(total_votes_cast)s, %(turnout_percentage)s, %(election_hash)s, %(audit_enabled)s, %(paper_trail_required)s, %(created_at)s, %(updated_at)s, %(created_by)s, %(updated_by)s) RETURNING elections.id]
+E       [parameters: {'company_id': 1, 'title': 'E8', 'description': None, 'election_code': 'E888', 'election_type': None, 'election_category': None, 'start_date': datetime.datetime(2026, 6, 16, 6, 26, 12, 112588, tzinfo=datetime.timezone.utc), 'end_date': datetime.datetime(2026, 6, 17, 6, 26, 12, 112592, tzinfo=datetime.timezone.utc), 'registration_deadline': None, 'early_voting_start': None, 'early_voting_end': None, 'allow_early_voting': False, 'require_biometric': True, 'require_photo_id': True, 'allow_overseas_voting': False, 'allow_military_voting': False, 'max_votes_per_voter': 1, 'allow_vote_changes': False, 'require_all_ballots': False, 'jurisdiction': None, 'geographic_scope': None, 'eligible_voter_types': 'standard', 'status': 'draft', 'is_public': True, 'is_test_election': False, 'results_published': False, 'results_published_at': None, 'total_registered_voters': 0, 'total_votes_cast': 0, 'turnout_percentage': 0.0, 'election_hash': None, 'audit_enabled': True, 'paper_trail_required': True, 'created_at': datetime.datetime(2026, 6, 16, 6, 26, 12, 113124, tzinfo=datetime.timezone.utc), 'updated_at': datetime.datetime(2026, 6, 16, 6, 26, 12, 113126, tzinfo=datetime.timezone.utc), 'created_by': None, 'updated_by': None}]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+../../../.local/lib/python3.10/site-packages/sqlalchemy/engine/default.py:943: IntegrityError
+=============================== warnings summary ===============================
+tests/test_voters_and_registrations.py: 71 warnings
+  /home/dev82/Documents/voatz/backend/app/utils/__init__.py:32: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    return User.query.get(user_id)
+
+tests/test_voters_and_registrations.py::test_voter_update_linked
+  /home/dev82/Documents/voatz/backend/tests/test_voters_and_registrations.py:180: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    voter = Voter.query.get(voter_id)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_voters_and_registrations.py::test_voter_create_standalone
+FAILED tests/test_voters_and_registrations.py::test_voter_get_standalone - Ke...
+FAILED tests/test_voters_and_registrations.py::test_voter_get_not_found - ass...
+FAILED tests/test_voters_and_registrations.py::test_voter_update_standalone
+FAILED tests/test_voters_and_registrations.py::test_voter_verify_phone - asse...
+FAILED tests/test_voters_and_registrations.py::test_voter_verify_invalid_type
+FAILED tests/test_voters_and_registrations.py::test_voter_delete - assert 404...
+FAILED tests/test_voters_and_registrations.py::test_registration_create - sql...
+FAILED tests/test_voters_and_registrations.py::test_registration_duplicate - ...
+FAILED tests/test_voters_and_registrations.py::test_registration_list - asser...
+FAILED tests/test_voters_and_registrations.py::test_registration_update_immutable
+FAILED tests/test_voters_and_registrations.py::test_registration_approve_missing_verification
+FAILED tests/test_voters_and_registrations.py::test_registration_approve_success
+FAILED tests/test_voters_and_registrations.py::test_registration_reject_missing_reason
+FAILED tests/test_voters_and_registrations.py::test_registration_reject_success
+FAILED tests/test_voters_and_registrations.py::test_registration_bulk_approve
+================== 16 failed, 8 passed, 72 warnings in 22.48s ==================
