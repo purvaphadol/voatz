@@ -7,12 +7,23 @@ from app.models.ballot import Ballot
 from app.models.voter_registration import VoterRegistration
 from app.models.vote import Vote
 from app.utils import get_current_company_id, require_permission, get_current_user
+from app.utils.validators import parse_pagination
+from app.utils.db_utils import safe_commit
+from app.utils.audit import set_audit_fields, audit_action
+from app.utils.query_helpers import get_active_elections_query, get_election_registrations_query
 from sqlalchemy import or_, and_
 from datetime import datetime, timedelta, timezone
 import secrets
 import string
 
 elections_bp = Blueprint('elections', __name__)
+
+def _safe_prop(obj, prop, default=None):
+    """Safely access a model property that may raise due to tz-naive/aware mismatch."""
+    try:
+        return getattr(obj, prop)
+    except TypeError:
+        return default
 
 @elections_bp.route('/', methods=['GET'])
 @require_permission('Elections', 'view')
@@ -23,10 +34,16 @@ def list_elections():
     election_type = request.args.get('election_type')
     status = request.args.get('status')
     is_active = request.args.get('is_active')
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 10))
+    show_cancelled = request.args.get('show_cancelled')
+    page, per_page, error = parse_pagination(request)
+    if error:
+        return error
 
-    query = Election.query.filter(Election.company_id == company_id)
+    # Use get_active_elections_query to exclude cancelled by default
+    if show_cancelled == 'true':
+        query = Election.query.filter(Election.company_id == company_id)
+    else:
+        query = get_active_elections_query(company_id)
     
     if search:
         query = query.filter(or_(
@@ -63,6 +80,17 @@ def list_elections():
 
     pagination = query.order_by(Election.start_date.desc()).paginate(page=page, per_page=per_page, error_out=False)
     elections = pagination.items
+
+    # Full dataset counts using base query
+    base = get_active_elections_query(company_id)
+    now = datetime.now(timezone.utc)
+    summary = {
+        'total_elections': pagination.total,
+        'active_elections': base.filter_by(status='active').count(),
+        'draft_elections': base.filter_by(status='draft').count(),
+        'completed_elections': base.filter_by(status='completed').count(),
+        'upcoming_elections': base.filter(Election.start_date > now).count()
+    }
     
     return jsonify({
         'data': [{
@@ -82,24 +110,20 @@ def list_elections():
             'total_votes_cast': e.total_votes_cast,
             'turnout_percentage': e.turnout_percentage,
             'results_published': e.results_published,
-            'voting_window_status': e.voting_window_status,
-            'is_active': e.is_active,
+            'voting_window_status': _safe_prop(e, 'voting_window_status', 'unknown'),
+            'is_active': _safe_prop(e, 'is_active', False),
             'created_at': e.created_at.isoformat() if e.created_at else None,
             'updated_at': e.updated_at.isoformat() if e.updated_at else None
         } for e in elections],
         'total': pagination.total,
         'page': pagination.page,
         'pages': pagination.pages,
-        'summary': {
-            'total_elections': pagination.total,
-            'active_elections': sum(1 for e in elections if e.is_active),
-            'draft_elections': sum(1 for e in elections if e.status == 'draft'),
-            'completed_elections': sum(1 for e in elections if e.status == 'completed')
-        }
+        'summary': summary
     })
 
 @elections_bp.route('/', methods=['POST'])
 @require_permission('Elections', 'create')
+@audit_action('create_election', module='Elections')
 def create_election():
     """Create a new election"""
     company_id = get_current_company_id()
@@ -165,16 +189,18 @@ def create_election():
     election.audit_enabled = data.get('audit_enabled', True)
     election.paper_trail_required = data.get('paper_trail_required', True)
     
-    election.created_by = current_user.id if current_user else None
+    set_audit_fields(election, is_create=True)
     
     db.session.add(election)
-    db.session.commit()
-    
-    return jsonify({
-        'message': 'Election created successfully',
-        'election_id': election.id,
-        'election_code': election.election_code
-    }), 201
+    db.session.flush()
+    return safe_commit(
+        (jsonify({
+            'message': 'Election created successfully',
+            'election_id': election.id,
+            'election_code': election.election_code
+        }), 201),
+        'Failed to create election'
+    )
 
 @elections_bp.route('/<int:election_id>', methods=['GET'])
 @require_permission('Elections', 'view')
@@ -221,9 +247,9 @@ def get_election(election_id):
         'turnout_percentage': election.turnout_percentage,
         'audit_enabled': election.audit_enabled,
         'paper_trail_required': election.paper_trail_required,
-        'voting_window_status': election.voting_window_status,
-        'is_active': election.is_active,
-        'is_early_voting_active': election.is_early_voting_active,
+        'voting_window_status': _safe_prop(election, 'voting_window_status', 'unknown'),
+        'is_active': _safe_prop(election, 'is_active', False),
+        'is_early_voting_active': _safe_prop(election, 'is_early_voting_active', False),
         'statistics': {
             'ballot_count': ballot_count,
             'registration_count': registration_count,
@@ -235,6 +261,7 @@ def get_election(election_id):
 
 @elections_bp.route('/<int:election_id>', methods=['PUT'])
 @require_permission('Elections', 'update')
+@audit_action('update_election', module='Elections')
 def update_election(election_id):
     """Update election information"""
     company_id = get_current_company_id()
@@ -242,9 +269,10 @@ def update_election(election_id):
     election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     data = request.get_json()
     
-    # Don't allow updates to active elections unless it's status change
-    if election.status == 'active' and data.get('status') != 'active':
-        return jsonify({'error': 'Cannot modify active elections except to change status'}), 400
+    # Only block date changes on active elections
+    if election.status == 'active':
+        if any(k in data for k in ['start_date', 'end_date', 'registration_deadline']):
+            return jsonify({'error': 'Cannot modify election dates while election is active'}), 400
     
     # Update basic fields
     if data.get('title'):
@@ -302,14 +330,16 @@ def update_election(election_id):
     if data.get('status'):
         election.status = data['status']
     
-    election.updated_by = current_user.id if current_user else None
-    election.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(election, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Election updated successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Election updated successfully'}), 200),
+        'Failed to update election'
+    )
 
 @elections_bp.route('/<int:election_id>', methods=['DELETE'])
 @require_permission('Elections', 'delete')
+@audit_action('delete_election', module='Elections')
 def delete_election(election_id):
     """Delete election (soft delete)"""
     company_id = get_current_company_id()
@@ -326,13 +356,16 @@ def delete_election(election_id):
     
     # Soft delete by updating status
     election.status = 'cancelled'
-    election.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(election, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Election deleted successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Election deleted successfully'}), 200),
+        'Failed to delete election'
+    )
 
 @elections_bp.route('/<int:election_id>/activate', methods=['POST'])
 @require_permission('Elections', 'update')
+@audit_action('activate_election', module='Elections')
 def activate_election(election_id):
     """Activate an election for voting"""
     company_id = get_current_company_id()
@@ -354,14 +387,16 @@ def activate_election(election_id):
         return jsonify({'error': 'Election dates are in the past'}), 400
     
     election.status = 'active'
-    election.updated_by = current_user.id if current_user else None
-    election.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(election, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Election activated successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Election activated successfully'}), 200),
+        'Failed to activate election'
+    )
 
 @elections_bp.route('/<int:election_id>/publish-results', methods=['POST'])
 @require_permission('Elections', 'update')
+@audit_action('publish_results', module='Elections')
 def publish_results(election_id):
     """Publish election results"""
     company_id = get_current_company_id()
@@ -379,14 +414,16 @@ def publish_results(election_id):
     election.results_published = True
     election.results_published_at = datetime.now(timezone.utc)
     election.status = 'completed'
-    election.updated_by = current_user.id if current_user else None
-    election.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(election, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Election results published successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Election results published successfully'}), 200),
+        'Failed to publish election results'
+    )
 
 @elections_bp.route('/<int:election_id>/change-status', methods=['POST'])
 @require_permission('Elections', 'update')
+@audit_action('change_election_status', module='Elections')
 def change_election_status(election_id):
     """Change election status"""
     company_id = get_current_company_id()
@@ -412,11 +449,12 @@ def change_election_status(election_id):
     
     # Allow status change (this bypasses the normal update restrictions)
     election.status = new_status
-    election.updated_by = current_user.id if current_user else None
-    election.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(election, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': f'Election status changed to {new_status} successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': f'Election status changed to {new_status} successfully'}), 200),
+        'Failed to change election status'
+    )
 
 @elections_bp.route('/<int:election_id>/ballots', methods=['GET'])
 @require_permission('Elections', 'view')
@@ -449,11 +487,12 @@ def get_election_registrations(election_id):
     company_id = get_current_company_id()
     election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 10))
+    page, per_page, error = parse_pagination(request)
+    if error:
+        return error
     status = request.args.get('status')
     
-    query = VoterRegistration.query.filter_by(election_id=election_id)
+    query = get_election_registrations_query(election_id, company_id)
     
     if status:
         query = query.filter(VoterRegistration.status == status)
@@ -466,7 +505,7 @@ def get_election_registrations(election_id):
             'id': r.id,
             'registration_id': r.registration_id,
             'voter_id': r.voter_id,
-            'voter_name': r.voter.user.name,
+            'voter_name': r.voter.display_name,
             'status': r.status,
             'registration_type': r.registration_type,
             'registered_at': r.registered_at.isoformat(),
@@ -487,6 +526,15 @@ def get_election_stats():
     total_elections = Election.query.filter_by(company_id=company_id).count()
     active_elections = Election.query.filter_by(company_id=company_id, status='active').count()
     
+    # Upcoming and completed counts
+    now = datetime.now(timezone.utc)
+    upcoming = Election.query.filter(
+        Election.company_id == company_id,
+        Election.start_date > now,
+        Election.status != 'cancelled'
+    ).count()
+    completed = Election.query.filter_by(company_id=company_id, status='completed').count()
+    
     # Election types
     election_types = db.session.query(
         Election.election_type,
@@ -502,6 +550,8 @@ def get_election_stats():
     return jsonify({
         'total_elections': total_elections,
         'active_elections': active_elections,
+        'upcoming_elections': upcoming,
+        'completed_elections': completed,
         'election_types': {etype: count for etype, count in election_types},
         'election_statuses': {status: count for status, count in election_statuses}
     })

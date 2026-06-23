@@ -22,6 +22,21 @@ def get_active_voters_query(company_id):
         Voter.status != STATUS_INACTIVE
     )
 
+def get_active_elections_query(company_id):
+    from app.models.election import Election
+    return Election.query.filter(
+        Election.company_id == company_id,
+        Election.status != 'cancelled'
+    )
+
+def get_election_registrations_query(election_id, company_id):
+    from app.models.voter_registration import VoterRegistration
+    return VoterRegistration.query.filter(
+        VoterRegistration.election_id == election_id,
+        VoterRegistration.company_id == company_id,
+        VoterRegistration.status != 'deleted'
+    )
+
 
 def get_active_roles_query(company_id):
     """
