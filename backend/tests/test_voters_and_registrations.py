@@ -136,7 +136,7 @@ def test_voter_create_standalone(client, setup_data):
     assert vid.startswith('V')
 
 def test_voter_create_linked(client, setup_data):
-    res = client.post('/api/voters/', json={'name': 'Jane Doe', 'email': 'jane@example.com', 'password': 'pass', 'phone_number': '0987654321'}, headers=setup_data['headers'])
+    res = client.post('/api/voters/', json={'name': 'Jane Doe', 'email': 'jane@example.com', 'password': 'Secure1pass', 'phone_number': '0987654321'}, headers=setup_data['headers'])
     assert res.status_code == 201
     with client.application.app_context():
         user = User.query.filter_by(email='jane@example.com').first()
@@ -149,13 +149,13 @@ def test_voter_create_missing_phone(client, setup_data):
 
 def test_voter_create_invalid_voter_type(client, setup_data):
     res = client.post('/api/voters/', json={'name': 'Alien', 'phone_number': '111', 'voter_type': 'alien'}, headers=setup_data['headers'])
-    # The backend accepts any voter_type string without validation, so it succeeds with 201
-    assert res.status_code == 201
+    # validate_voter_input rejects voter_type not in ['standard','overseas','military','disabled']
+    assert res.status_code == 400
 
 def test_voter_create_invalid_dob(client, setup_data):
     res = client.post('/api/voters/', json={'name': 'Bad DOB', 'phone_number': '222', 'date_of_birth': '31-12-1990'}, headers=setup_data['headers'])
-    # The backend raises ValueError on invalid format which bubbles up as 500
-    assert res.status_code == 500
+    # validate_voter_input catches bad date format and returns 400
+    assert res.status_code == 400
 
 def test_voter_list(client, setup_data):
     client.post('/api/voters/', json={'name': 'John', 'phone_number': '111'}, headers=setup_data['headers'])
@@ -171,9 +171,10 @@ def test_voter_get_standalone(client, setup_data):
     res_post = client.post('/api/voters/', json={'name': 'Standalone', 'phone_number': '1234567890'}, headers=setup_data['headers'])
     voter_id = res_post.json['voter_id']
     res = client.get(f'/api/voters/{voter_id}', headers=setup_data['headers'])
-    # Standalone voters do not have a linked user; since the backend does an inner join(User)
-    # in get_voter, it returns 404 Not Found.
-    assert res.status_code == 404
+    # get_voter uses outerjoin(User), so standalone voters are found and returned
+    assert res.status_code == 200
+    assert res.json['user_id'] is None
+    assert res.json['name'] is not None
 
 def test_voter_get_not_found(client, setup_data):
     res = client.get('/api/voters/999999', headers=setup_data['headers'])
@@ -190,12 +191,13 @@ def test_voter_update_standalone(client, setup_data):
         assert v.phone_number == '456'
 
 def test_voter_update_linked(client, setup_data):
-    res_post = client.post('/api/voters/', json={'name': 'User Name', 'email': 'user@ex.com', 'password': 'pw', 'phone_number': '111'}, headers=setup_data['headers'])
+    res_post = client.post('/api/voters/', json={'name': 'User Name', 'email': 'user@ex.com', 'password': 'Secure1pass', 'phone_number': '111'}, headers=setup_data['headers'])
     voter_id = res_post.json['voter_id']
     res = client.put(f'/api/voters/{voter_id}', json={'name': 'Changed Name'}, headers=setup_data['headers'])
     assert res.status_code == 200
     with client.application.app_context():
         voter = Voter.query.get(voter_id)
+        # Linked voter: name is stored on User, not Voter; Voter.name stays None
         assert getattr(voter, 'name', None) is None
 
 def test_voter_verify_phone(client, setup_data):
@@ -213,8 +215,8 @@ def test_voter_verify_invalid_type(client, setup_data):
     res_post = client.post('/api/voters/', json={'name': 'Verify Me Not', 'phone_number': '123'}, headers=setup_data['headers'])
     voter_id = res_post.json['voter_id']
     res = client.post(f'/api/voters/{voter_id}/verify', json={'verification_type': 'magic'}, headers=setup_data['headers'])
-    # The backend does not reject invalid verification_type and returns 200
-    assert res.status_code == 200
+    # verify_voter validates verification_type against ['phone','identity','biometric']
+    assert res.status_code == 400
 
 def test_voter_delete(client, setup_data):
     res_post = client.post('/api/voters/', json={'name': 'Delete Me', 'phone_number': '123'}, headers=setup_data['headers'])
@@ -231,8 +233,8 @@ def test_voter_delete_twice(client, setup_data):
     voter_id = res_post.json['voter_id']
     client.delete(f'/api/voters/{voter_id}', headers=setup_data['headers'])
     res2 = client.delete(f'/api/voters/{voter_id}', headers=setup_data['headers'])
-    # Since the backend does not filter out deleted status, deleting twice returns 200
-    assert res2.status_code == 200
+    # get_active_voters_query filters status != STATUS_INACTIVE, so 2nd delete returns 404
+    assert res2.status_code == 404
 
 # --- VoterRegistrations Tests ---
 
