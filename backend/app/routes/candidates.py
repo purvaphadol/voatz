@@ -212,7 +212,7 @@ def get_candidate(candidate_id):
     candidate = Candidate.query.join(Ballot).join(Election).filter(
         Candidate.id == candidate_id,
         Candidate.company_id == company_id,
-        Candidate.is_active == True
+        or_(Candidate.is_active == True, Candidate.is_withdrawn == True)
     ).first_or_404()
     
     return jsonify({
@@ -390,7 +390,7 @@ def withdraw_candidate(candidate_id):
     """Withdraw a candidate from the election"""
     company_id = get_current_company_id()
     candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id, is_active=True).first_or_404()
-    data = request.get_json()
+    data = request.get_json(silent=True)
     
     # Check if election is active
     if candidate.ballot.election.status == 'active':
@@ -417,7 +417,11 @@ def withdraw_candidate(candidate_id):
 def reinstate_candidate(candidate_id):
     """Reinstate a withdrawn candidate"""
     company_id = get_current_company_id()
-    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id, is_withdrawn=True).first_or_404()
+    candidate = Candidate.query.filter(
+        Candidate.id == candidate_id,
+        Candidate.company_id == company_id,
+        or_(Candidate.is_active == True, Candidate.is_withdrawn == True)
+    ).first_or_404()
     
     # Check if election is active
     if candidate.ballot.election.status == 'active':

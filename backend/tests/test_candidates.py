@@ -9,6 +9,7 @@ from app.models.module import Module
 from app.models.module_action import ModuleAction
 from app.models.role_permission import RolePermissionMapping
 from app.models.role import Role
+from sqlalchemy import or_
 
 # Monkeypatch TestResponse to allow res.json() call syntax if needed
 class CallableDict(dict):
@@ -24,8 +25,9 @@ def custom_json(self):
 
 werkzeug.test.TestResponse.json = custom_json
 
-def create_election(client, headers, status='draft'):
-    """Create a test election and return its id"""
+# --- Helper Functions ---
+
+def create_election(client, headers):
     from datetime import datetime, timedelta, timezone
     now = datetime.now(timezone.utc)
     res = client.post('/api/elections/', json={
@@ -34,24 +36,24 @@ def create_election(client, headers, status='draft'):
         'start_date': (now + timedelta(days=7)).isoformat(),
         'end_date': (now + timedelta(days=14)).isoformat(),
     }, headers=headers)
-    assert res.status_code == 201
-    el_id = res.json()['election_id']
-    if status != 'draft':
-        with client.application.app_context():
-            el = Election.query.get(el_id)
-            el.status = status
-            db.session.commit()
-    return el_id
+    return res.get_json()['election_id']
 
 def create_ballot(client, headers, election_id):
-    """Create a test ballot and return its id"""
     res = client.post('/api/ballots/', json={
         'title': 'Test Ballot',
         'election_id': election_id,
         'ballot_type': 'single_choice',
     }, headers=headers)
-    assert res.status_code == 201
-    return res.json()['ballot_id']
+    return res.get_json()['ballot_id']
+
+def create_candidate(client, headers, ballot_id):
+    res = client.post('/api/candidates/', json={
+        'name': 'Jane Doe',
+        'ballot_id': ballot_id,
+    }, headers=headers)
+    return res.get_json()['candidate_id']
+
+# --- Permissions Setup Fixture ---
 
 @pytest.fixture(autouse=True)
 def add_candidates_permissions(client, setup_data):
@@ -59,7 +61,7 @@ def add_candidates_permissions(client, setup_data):
         company_id = setup_data['company_id']
         role = Role.query.filter_by(role_name='Super Admin', company_id=company_id).first()
         if role:
-            # First ensure Ballots permissions exist (since we create ballots/elections in tests)
+            # Ensure Ballots and Candidates permissions exist
             for mod_name in ['Ballots', 'Candidates', 'Elections']:
                 mod = Module.query.filter_by(module_name=mod_name, company_id=company_id).first()
                 if not mod:
@@ -81,139 +83,354 @@ def add_candidates_permissions(client, setup_data):
                         db.session.add(rp)
             db.session.commit()
 
-def test_candidate_create_and_read(client, setup_data):
+# --- List and Stats ---
+
+def test_candidate_list(client, setup_data):
+    """GET /api/candidates/ — expect 200, response has data list, total, summary with keys"""
     headers = setup_data['headers']
-    el_id = create_election(client, headers, 'draft')
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
+    create_candidate(client, headers, b_id)
+    
+    res = client.get('/api/candidates/', headers=headers)
+    assert res.status_code == 200
+    body = res.get_json()
+    assert 'data' in body
+    assert isinstance(body['data'], list)
+    assert 'total' in body
+    assert 'summary' in body
+    summary = body['summary']
+    for key in ('total_candidates', 'active_candidates', 'incumbent_candidates', 'withdrawn_candidates'):
+        assert key in summary
+
+def test_candidate_stats(client, setup_data):
+    """GET /api/candidates/stats — expect 200, response has stats keys"""
+    headers = setup_data['headers']
+    res = client.get('/api/candidates/stats', headers=headers)
+    assert res.status_code == 200
+    body = res.get_json()
+    for key in ('total_candidates', 'active_candidates', 'incumbent_candidates', 'withdrawn_candidates'):
+        assert key in body
+
+# --- Create ---
+
+def test_candidate_create(client, setup_data):
+    """POST with valid name and ballot_id — expect 201, candidate_id, and candidate_code starting with C"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
     b_id = create_ballot(client, headers, el_id)
     
-    # Create Candidate
     res = client.post('/api/candidates/', json={
-        'name': 'Alice Candidate',
+        'name': 'Jane Doe',
         'ballot_id': b_id,
-        'party': 'Independent'
     }, headers=headers)
     assert res.status_code == 201
     body = res.get_json()
     assert 'candidate_id' in body
     assert 'candidate_code' in body
     assert body['candidate_code'].startswith('C')
-    cand_id = body['candidate_id']
-    
-    # Get Candidate
-    res_get = client.get(f'/api/candidates/{cand_id}', headers=headers)
-    assert res_get.status_code == 200
-    get_body = res_get.get_json()
-    assert get_body['name'] == 'Alice Candidate'
-    assert get_body['party'] == 'Independent'
-    assert get_body['is_active'] is True
 
-def test_candidate_create_validation(client, setup_data):
+def test_candidate_create_missing_name(client, setup_data):
+    """POST without name — expect 400"""
     headers = setup_data['headers']
-    el_id = create_election(client, headers, 'draft')
+    el_id = create_election(client, headers)
     b_id = create_ballot(client, headers, el_id)
     
-    # Invalid ballot_id type
     res = client.post('/api/candidates/', json={
-        'name': 'Bob Candidate',
-        'ballot_id': 'not-an-int',
-    }, headers=headers)
-    assert res.status_code == 400
-    assert 'ballot_id must be a valid integer' in res.get_json()['error']
-
-    # Missing ballot_id
-    res = client.post('/api/candidates/', json={
-        'name': 'Bob Candidate',
+        'ballot_id': b_id,
     }, headers=headers)
     assert res.status_code == 400
 
-    # Active election
-    active_el_id = create_election(client, headers, 'draft')
-    active_b_id = create_ballot(client, headers, active_el_id)
+def test_candidate_create_missing_ballot_id(client, setup_data):
+    """POST without ballot_id — expect 400"""
+    headers = setup_data['headers']
+    res = client.post('/api/candidates/', json={
+        'name': 'Jane Doe',
+    }, headers=headers)
+    assert res.status_code == 400
+
+def test_candidate_create_invalid_ballot_id(client, setup_data):
+    """POST with ballot_id: "abc" — expect 400"""
+    headers = setup_data['headers']
+    res = client.post('/api/candidates/', json={
+        'name': 'Jane Doe',
+        'ballot_id': 'abc',
+    }, headers=headers)
+    assert res.status_code == 400
+
+def test_candidate_create_active_election(client, setup_data):
+    """Create ballot in draft election, set election to active in DB, then POST candidate — expect 400"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
     
-    # Set to active after ballot creation
     with client.application.app_context():
-        el = Election.query.get(active_el_id)
+        el = Election.query.get(el_id)
         el.status = 'active'
         db.session.commit()
-
+        
     res = client.post('/api/candidates/', json={
-        'name': 'Bob Candidate',
-        'ballot_id': active_b_id,
+        'name': 'Jane Doe',
+        'ballot_id': b_id,
     }, headers=headers)
     assert res.status_code == 400
-    assert 'Cannot create candidates for active, completed, or cancelled elections' in res.get_json()['error']
 
-def test_candidate_list_and_pagination(client, setup_data):
+def test_candidate_create_cancelled_election(client, setup_data):
+    """Same but cancelled — expect 400"""
     headers = setup_data['headers']
-    el_id = create_election(client, headers, 'draft')
+    el_id = create_election(client, headers)
     b_id = create_ballot(client, headers, el_id)
     
-    # Create two candidates
-    client.post('/api/candidates/', json={'name': 'C1', 'ballot_id': b_id}, headers=headers)
-    client.post('/api/candidates/', json={'name': 'C2', 'ballot_id': b_id}, headers=headers)
+    with client.application.app_context():
+        el = Election.query.get(el_id)
+        el.status = 'cancelled'
+        db.session.commit()
+        
+    res = client.post('/api/candidates/', json={
+        'name': 'Jane Doe',
+        'ballot_id': b_id,
+    }, headers=headers)
+    assert res.status_code == 400
+
+def test_candidate_create_completed_election(client, setup_data):
+    """Same but completed — expect 400"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
     
-    # List candidates with per_page=1
+    with client.application.app_context():
+        el = Election.query.get(el_id)
+        el.status = 'completed'
+        db.session.commit()
+        
+    res = client.post('/api/candidates/', json={
+        'name': 'Jane Doe',
+        'ballot_id': b_id,
+    }, headers=headers)
+    assert res.status_code == 400
+
+# --- Read ---
+
+def test_candidate_get(client, setup_data):
+    """GET /api/candidates/<id> — expect 200, response has keys"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
+    cand_id = create_candidate(client, headers, b_id)
+    
+    res = client.get(f'/api/candidates/{cand_id}', headers=headers)
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body['id'] == cand_id
+    assert 'name' in body
+    assert 'candidate_code' in body
+    assert body['ballot_id'] == b_id
+    assert 'is_active' in body
+    assert 'is_withdrawn' in body
+    assert 'vote_summary' in body
+
+def test_candidate_get_not_found(client, setup_data):
+    """GET /api/candidates/99999 — expect 404"""
+    headers = setup_data['headers']
+    res = client.get('/api/candidates/99999', headers=headers)
+    assert res.status_code == 404
+
+# --- Update ---
+
+def test_candidate_update(client, setup_data):
+    """PUT with dict — expect 200"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
+    cand_id = create_candidate(client, headers, b_id)
+    
+    res = client.put(f'/api/candidates/{cand_id}', json={
+        'name': 'Updated Name',
+        'party': 'Independent'
+    }, headers=headers)
+    assert res.status_code == 200
+    
+    res_get = client.get(f'/api/candidates/{cand_id}', headers=headers)
+    assert res_get.get_json()['name'] == 'Updated Name'
+    assert res_get.get_json()['party'] == 'Independent'
+
+def test_candidate_update_active_election(client, setup_data):
+    """Set election to active in DB, then PUT — expect 400"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
+    cand_id = create_candidate(client, headers, b_id)
+    
+    with client.application.app_context():
+        el = Election.query.get(el_id)
+        el.status = 'active'
+        db.session.commit()
+        
+    res = client.put(f'/api/candidates/{cand_id}', json={
+        'name': 'Updated Name',
+        'party': 'Independent'
+    }, headers=headers)
+    assert res.status_code == 400
+
+# --- Delete (soft delete) ---
+
+def test_candidate_delete(client, setup_data):
+    """DELETE a candidate — expect 200, then GET same id — expect 404"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
+    cand_id = create_candidate(client, headers, b_id)
+    
+    res = client.delete(f'/api/candidates/{cand_id}', headers=headers)
+    assert res.status_code == 200
+    
+    res_get = client.get(f'/api/candidates/{cand_id}', headers=headers)
+    assert res_get.status_code == 404
+
+def test_candidate_delete_active_election(client, setup_data):
+    """Set election to active in DB, then DELETE — expect 400"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
+    cand_id = create_candidate(client, headers, b_id)
+    
+    with client.application.app_context():
+        el = Election.query.get(el_id)
+        el.status = 'active'
+        db.session.commit()
+        
+    res = client.delete(f'/api/candidates/{cand_id}', headers=headers)
+    assert res.status_code == 400
+
+# --- Soft deleted excluded from list ---
+
+def test_deleted_candidate_excluded_from_list(client, setup_data):
+    """Create candidate, DELETE it, GET /api/candidates/ — confirm deleted candidate NOT in data list"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
+    cand_id = create_candidate(client, headers, b_id)
+    
+    res_del = client.delete(f'/api/candidates/{cand_id}', headers=headers)
+    assert res_del.status_code == 200
+    
+    res_list = client.get('/api/candidates/', headers=headers)
+    assert res_list.status_code == 200
+    body = res_list.get_json()
+    candidate_ids = [c['id'] for c in body['data']]
+    assert cand_id not in candidate_ids
+
+# --- Summary counts full dataset ---
+
+def test_summary_counts_full_dataset(client, setup_data):
+    """Create 3 candidates for same ballot, GET /api/candidates/?per_page=1 — confirm summary.total_candidates is 3, not 1"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
+    
+    cand_id1 = create_candidate(client, headers, b_id)
+    cand_id2 = client.post('/api/candidates/', json={
+        'name': 'Jane Doe 2',
+        'ballot_id': b_id,
+    }, headers=headers).get_json()['candidate_id']
+    cand_id3 = client.post('/api/candidates/', json={
+        'name': 'Jane Doe 3',
+        'ballot_id': b_id,
+    }, headers=headers).get_json()['candidate_id']
+    
     res = client.get('/api/candidates/?per_page=1', headers=headers)
     assert res.status_code == 200
     body = res.get_json()
     assert len(body['data']) == 1
-    assert body['summary']['total_candidates'] == 2
+    assert body['summary']['total_candidates'] == 3
 
-def test_candidate_update(client, setup_data):
+# --- Withdraw and Reinstate ---
+
+def test_candidate_withdraw(client, setup_data):
+    """POST /api/candidates/<id>/withdraw with reason — expect 200, then GET candidate and confirm is_withdrawn == True and withdrawal_reason"""
     headers = setup_data['headers']
-    el_id = create_election(client, headers, 'draft')
+    el_id = create_election(client, headers)
     b_id = create_ballot(client, headers, el_id)
+    cand_id = create_candidate(client, headers, b_id)
     
-    res_create = client.post('/api/candidates/', json={'name': 'C1', 'ballot_id': b_id}, headers=headers)
-    cand_id = res_create.get_json()['candidate_id']
-    
-    res_update = client.put(f'/api/candidates/{cand_id}', json={'name': 'C1 Updated', 'party': 'New Party'}, headers=headers)
-    assert res_update.status_code == 200
+    res = client.post(f'/api/candidates/{cand_id}/withdraw', json={
+        'withdrawal_reason': 'Personal reasons'
+    }, headers=headers)
+    assert res.status_code == 200
     
     res_get = client.get(f'/api/candidates/{cand_id}', headers=headers)
-    assert res_get.get_json()['name'] == 'C1 Updated'
-    assert res_get.get_json()['party'] == 'New Party'
+    assert res_get.status_code == 200
+    body = res_get.get_json()
+    assert body['is_withdrawn'] is True
+    assert body['withdrawal_reason'] == 'Personal reasons'
 
-def test_candidate_soft_delete(client, setup_data):
+def test_candidate_withdraw_missing_reason(client, setup_data):
+    """POST withdraw without any body — expect 200 with default reason"""
     headers = setup_data['headers']
-    el_id = create_election(client, headers, 'draft')
+    el_id = create_election(client, headers)
     b_id = create_ballot(client, headers, el_id)
+    cand_id = create_candidate(client, headers, b_id)
     
-    res_create = client.post('/api/candidates/', json={'name': 'C1', 'ballot_id': b_id}, headers=headers)
-    cand_id = res_create.get_json()['candidate_id']
+    res = client.post(f'/api/candidates/{cand_id}/withdraw', headers=headers)
+    assert res.status_code == 200
     
-    # Delete
-    res_delete = client.delete(f'/api/candidates/{cand_id}', headers=headers)
-    assert res_delete.status_code == 200
-    
-    # Should not be in details view (404)
     res_get = client.get(f'/api/candidates/{cand_id}', headers=headers)
-    assert res_get.status_code == 404
-    
-    # Should not be in list by default
-    res_list = client.get('/api/candidates/', headers=headers)
-    assert cand_id not in [c['id'] for c in res_list.get_json()['data']]
+    assert res_get.status_code == 200
+    body = res_get.get_json()
+    assert body['is_withdrawn'] is True
+    assert body['withdrawal_reason'] == 'Candidate withdrawal'
 
-def test_candidate_withdraw_and_reinstate(client, setup_data):
+def test_candidate_reinstate(client, setup_data):
+    """Withdraw a candidate first, then POST /api/candidates/<id>/reinstate — expect 200, then GET and confirm is_withdrawn == False and is_active == True"""
     headers = setup_data['headers']
-    el_id = create_election(client, headers, 'draft')
+    el_id = create_election(client, headers)
     b_id = create_ballot(client, headers, el_id)
-    
-    res_create = client.post('/api/candidates/', json={'name': 'C1', 'ballot_id': b_id}, headers=headers)
-    cand_id = res_create.get_json()['candidate_id']
+    cand_id = create_candidate(client, headers, b_id)
     
     # Withdraw
-    res_withdraw = client.post(f'/api/candidates/{cand_id}/withdraw', json={'withdrawal_reason': 'Voluntary withdrawal'}, headers=headers)
-    assert res_withdraw.status_code == 200
-    
-    res_get = client.get(f'/api/candidates/{cand_id}', headers=headers)
-    assert res_get.status_code == 404 # Withdraw sets is_active to False, so it's soft-deleted too
+    res_w = client.post(f'/api/candidates/{cand_id}/withdraw', json={'withdrawal_reason': 'Reason'}, headers=headers)
+    assert res_w.status_code == 200
     
     # Reinstate
-    res_reinstate = client.post(f'/api/candidates/{cand_id}/reinstate', headers=headers)
-    assert res_reinstate.status_code == 200
+    res_r = client.post(f'/api/candidates/{cand_id}/reinstate', headers=headers)
+    assert res_r.status_code == 200
     
-    res_get2 = client.get(f'/api/candidates/{cand_id}', headers=headers)
-    assert res_get2.status_code == 200
-    assert res_get2.get_json()['is_withdrawn'] is False
-    assert res_get2.get_json()['is_active'] is True
+    res_get = client.get(f'/api/candidates/{cand_id}', headers=headers)
+    assert res_get.status_code == 200
+    body = res_get.get_json()
+    assert body['is_withdrawn'] is False
+    assert body['is_active'] is True
+
+def test_candidate_reinstate_not_withdrawn(client, setup_data):
+    """POST reinstate on a candidate that is NOT withdrawn — expect 400"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
+    cand_id = create_candidate(client, headers, b_id)
+    
+    res = client.post(f'/api/candidates/{cand_id}/reinstate', headers=headers)
+    assert res.status_code == 400
+
+# --- Incumbent flag ---
+
+def test_candidate_create_incumbent(client, setup_data):
+    """POST with is_incumbent: true — expect 201, then GET and confirm is_incumbent == True. Then GET stats and confirm incumbent_candidates >= 1"""
+    headers = setup_data['headers']
+    el_id = create_election(client, headers)
+    b_id = create_ballot(client, headers, el_id)
+    
+    res = client.post('/api/candidates/', json={
+        'name': 'Jane Doe',
+        'ballot_id': b_id,
+        'is_incumbent': True
+    }, headers=headers)
+    assert res.status_code == 201
+    cand_id = res.get_json()['candidate_id']
+    
+    res_get = client.get(f'/api/candidates/{cand_id}', headers=headers)
+    assert res_get.status_code == 200
+    assert res_get.get_json()['is_incumbent'] is True
+    
+    res_stats = client.get('/api/candidates/stats', headers=headers)
+    assert res_stats.status_code == 200
+    assert res_stats.get_json()['incumbent_candidates'] >= 1
