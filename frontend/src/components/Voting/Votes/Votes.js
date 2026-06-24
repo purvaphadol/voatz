@@ -320,7 +320,7 @@ const Votes = () => {
 
   const handleConfirmVerification = async () => {
     try {
-      await votesAPI.verify(selectedVote.id, verificationData);
+      await votesAPI.verify(selectedVote.id, { verification_type: 'all' });
       setSuccess('Vote verification completed');
       setVerificationDialogOpen(false);
       loadVotes();
@@ -341,7 +341,7 @@ const Votes = () => {
 
   const handleConfirmFlag = async () => {
     try {
-      await votesAPI.flag(selectedVote.id, flagData);
+      await votesAPI.flag(selectedVote.id, { reason: flagData.flag_description || flagData.flag_reason || 'Manual flag' });
       setSuccess('Vote flagged successfully');
       setFlagDialogOpen(false);
       loadVotes();
@@ -366,16 +366,16 @@ const Votes = () => {
   };
 
   const getVoteStatusColor = (vote) => {
-    if (vote.is_flagged) return 'error';
-    if (vote.is_verified) return 'success';
-    if (vote.verification_status === 'pending') return 'warning';
+    if (vote.vote_status === 'flagged' || vote.is_flagged) return 'error';
+    if (vote.vote_status === 'verified' || vote.is_verified) return 'success';
+    if (vote.processing_status === 'pending') return 'warning';
     return 'default';
   };
 
   const getVoteStatusText = (vote) => {
-    if (vote.is_flagged) return 'Flagged';
-    if (vote.is_verified) return 'Verified';
-    if (vote.verification_status === 'pending') return 'Pending';
+    if (vote.vote_status === 'flagged' || vote.is_flagged) return 'Flagged';
+    if (vote.vote_status === 'verified' || vote.is_verified) return 'Verified';
+    if (vote.processing_status === 'pending') return 'Pending';
     return 'Unverified';
   };
 
@@ -436,13 +436,13 @@ const Votes = () => {
         let StatusIcon = PendingIcon;
         let tooltipText = 'Vote status unknown';
         
-        if (vote.is_flagged) {
+        if (vote.vote_status === 'flagged' || vote.is_flagged) {
           StatusIcon = FlagIcon;
           tooltipText = 'Vote has been flagged for manual review and investigation';
-        } else if (vote.is_verified) {
+        } else if (vote.vote_status === 'verified' || vote.is_verified) {
           StatusIcon = VerifiedIcon;
           tooltipText = 'Vote has been verified and is eligible for counting';
-        } else if (vote.verification_status === 'pending') {
+        } else if (vote.processing_status === 'pending') {
           StatusIcon = PendingIcon;
           tooltipText = 'Vote is pending verification checks';
         }

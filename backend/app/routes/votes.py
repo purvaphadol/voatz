@@ -15,6 +15,10 @@ import string
 import json
 import logging
 
+from app.utils.validators import parse_pagination
+from app.utils.db_utils import safe_commit
+from app.utils.audit import set_audit_fields, audit_action
+
 logger = logging.getLogger(__name__)
 
 votes_bp = Blueprint('votes', __name__)
@@ -30,8 +34,9 @@ def list_votes():
     voter_id = request.args.get('voter_id')
     vote_status = request.args.get('vote_status')
     vote_method = request.args.get('vote_method')
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 10))
+    page, per_page, error = parse_pagination(request)
+    if error:
+        return error
 
     query = Vote.query.join(Voter).join(Election).join(Ballot).filter(Vote.company_id == company_id)
     
@@ -60,13 +65,21 @@ def list_votes():
     pagination = query.order_by(Vote.vote_cast_time.desc()).paginate(page=page, per_page=per_page, error_out=False)
     votes = pagination.items
     
+    base = Vote.query.filter_by(company_id=company_id)
+    summary = {
+        'total_votes': pagination.total,
+        'verified_votes': base.filter_by(vote_status='verified').count(),
+        'counted_votes': base.filter_by(is_counted=True).count(),
+        'pending_votes': base.filter_by(processing_status='pending').count()
+    }
+    
     return jsonify({
         'data': [{
             'id': v.id,
             'vote_id': v.vote_id,
             'tracking_code': v.tracking_code,
             'voter_id': v.voter_id,
-            'voter_name': v.voter.user.name,
+            'voter_name': v.voter.display_name,
             'election_id': v.election_id,
             'election_title': v.election.title,
             'ballot_id': v.ballot_id,
@@ -87,30 +100,28 @@ def list_votes():
         'total': pagination.total,
         'page': pagination.page,
         'pages': pagination.pages,
-        'summary': {
-            'total_votes': pagination.total,
-            'verified_votes': sum(1 for v in votes if v.is_verified),
-            'counted_votes': sum(1 for v in votes if v.is_counted),
-            'pending_votes': sum(1 for v in votes if v.processing_status == 'pending')
-        }
+        'summary': summary
     })
 
 @votes_bp.route('/', methods=['POST'])
 @require_permission('Votes', 'create')
+@audit_action('cast_vote', module='Votes')
 def cast_vote():
     """Cast a vote (for testing or admin purposes)"""
     company_id = get_current_company_id()
     current_user = get_current_user()
     data = request.get_json()
 
-    logger.debug(f"cast_vote: company_id={company_id}, user_id={current_user.id if current_user else None}")
-
     if not data or not data.get('voter_id') or not data.get('ballot_id') or not data.get('vote_data'):
         return jsonify({'error': 'voter_id, ballot_id, and vote_data are required'}), 400
 
+    try:
+        ballot_id = int(data['ballot_id'])
+    except (ValueError, TypeError, KeyError):
+        return jsonify({'error': 'ballot_id must be a valid integer'}), 400
+
     # voter_id can be either the string voter_id field or the integer id field
     voter_id = data['voter_id']
-    logger.debug(f"cast_vote: voter lookup — voter_id={voter_id}, type={type(voter_id).__name__}")
 
     if isinstance(voter_id, str):
         voter = Voter.query.filter_by(voter_id=voter_id, company_id=company_id).first()
@@ -118,19 +129,20 @@ def cast_vote():
         voter = Voter.query.filter_by(id=voter_id, company_id=company_id).first()
 
     if not voter:
-        logger.debug(f"cast_vote: voter not found for voter_id={voter_id}, company_id={company_id}")
         return jsonify({'error': 'Voter not found'}), 404
 
-    logger.debug(f"cast_vote: found voter id={voter.id}, voter_id={voter.voter_id}")
-
     # Validate ballot exists and belongs to company
-    ballot = Ballot.query.filter_by(id=data['ballot_id'], company_id=company_id).first()
+    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first()
     if not ballot:
-        logger.debug(f"cast_vote: ballot not found — ballot_id={data['ballot_id']}, company_id={company_id}")
         return jsonify({'error': 'Ballot not found'}), 404
 
+    if not ballot.is_active:
+        return jsonify({'error': 'Ballot is not available'}), 400
+    if not ballot.is_published:
+        return jsonify({'error': 'Ballot is not published'}), 400
+
     # Check if voter has already voted for this ballot
-    existing_vote = Vote.query.filter_by(voter_id=voter.id, ballot_id=data['ballot_id']).first()
+    existing_vote = Vote.query.filter_by(voter_id=voter.id, ballot_id=ballot_id).first()
     if existing_vote:
         return jsonify({'error': 'Voter has already voted for this ballot'}), 400
 
@@ -145,16 +157,11 @@ def cast_vote():
         status='approved'
     ).first()
     if not registration:
-        logger.debug(f"cast_vote: voter {voter.id} not registered for election {ballot.election_id}")
         return jsonify({'error': 'Voter is not registered for this election'}), 400
 
     # Enforce ballot jurisdiction restriction
     if ballot.jurisdiction_restriction:
         if not voter.jurisdiction or voter.jurisdiction.strip().lower() != ballot.jurisdiction_restriction.strip().lower():
-            logger.debug(
-                f"cast_vote: jurisdiction mismatch — voter.jurisdiction={voter.jurisdiction!r}, "
-                f"ballot.jurisdiction_restriction={ballot.jurisdiction_restriction!r}"
-            )
             return jsonify({
                 'error': f"This ballot is restricted to voters in '{ballot.jurisdiction_restriction}'"
             }), 403
@@ -163,10 +170,6 @@ def cast_vote():
     if ballot.voter_type_restriction:
         allowed_types = {t.strip().lower() for t in ballot.voter_type_restriction.split(',') if t.strip()}
         if allowed_types and (voter.voter_type or '').strip().lower() not in allowed_types:
-            logger.debug(
-                f"cast_vote: voter-type mismatch — voter.voter_type={voter.voter_type!r}, "
-                f"allowed={allowed_types}"
-            )
             return jsonify({
                 'error': f"This ballot is restricted to voter types: {ballot.voter_type_restriction}"
             }), 403
@@ -180,7 +183,7 @@ def cast_vote():
     vote = Vote()
     vote.company_id = company_id
     vote.election_id = ballot.election_id
-    vote.ballot_id = data['ballot_id']
+    vote.ballot_id = ballot_id
     vote.voter_id = voter.id
     vote.vote_id = vote_id
     vote.vote_data = data['vote_data']
@@ -216,7 +219,6 @@ def cast_vote():
     # Explicitly set ballot relationship for validation
     vote.ballot = ballot
     is_valid, error_message = vote.validate_vote_data()
-    logger.debug(f"cast_vote: validation result — is_valid={is_valid}, error={error_message}")
     if not is_valid:
         return jsonify({'error': error_message}), 400
 
@@ -232,16 +234,19 @@ def cast_vote():
         'write_ins': len(vote.get_write_in_candidates())
     })
 
-    vote.created_by = current_user.id if current_user else None
+    set_audit_fields(vote, is_create=True)
 
     db.session.add(vote)
-    db.session.commit()
+    db.session.flush()
 
-    return jsonify({
-        'message': 'Vote cast successfully',
-        'vote_id': vote.vote_id,
-        'tracking_code': vote.tracking_code
-    }), 201
+    return safe_commit(
+        (jsonify({
+            'message': 'Vote cast successfully',
+            'vote_id': vote.vote_id,
+            'tracking_code': vote.tracking_code
+        }), 201),
+        'Failed to cast vote'
+    )
 
 @votes_bp.route('/<int:vote_id>', methods=['GET'])
 @require_permission('Votes', 'view')
@@ -270,7 +275,7 @@ def get_vote(vote_id):
         'vote_id': vote.vote_id,
         'tracking_code': vote.tracking_code,
         'voter_id': vote.voter_id,
-        'voter_name': vote.voter.user.name,
+        'voter_name': vote.voter.display_name,
         'election_id': vote.election_id,
         'election_title': vote.election.title,
         'ballot_id': vote.ballot_id,
@@ -309,6 +314,7 @@ def get_vote(vote_id):
 
 @votes_bp.route('/<int:vote_id>/verify', methods=['POST'])
 @require_permission('Votes', 'update')
+@audit_action('verify_vote', module='Votes')
 def verify_vote(vote_id):
     """Verify a vote (admin function)"""
     company_id = get_current_company_id()
@@ -334,20 +340,25 @@ def verify_vote(vote_id):
         vote.add_audit_event('full_verification', 'All verification types completed')
     
     # Update vote status if fully verified
-    if vote.is_verified:
+    is_fully_verified = (vote.biometric_verified and 
+                         vote.device_verified and 
+                         vote.identity_verified)
+    if is_fully_verified:
         vote.vote_status = 'verified'
         vote.processing_status = 'processed'
         vote.vote_processing_time = datetime.now(timezone.utc)
         vote.add_audit_event('vote_verified', 'Vote fully verified and processed')
     
-    vote.updated_by = current_user.id if current_user else None
-    vote.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(vote, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': f'Vote {verification_type} verification updated successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': f'Vote {verification_type} verification updated successfully'}), 200),
+        'Failed to verify vote'
+    )
 
 @votes_bp.route('/<int:vote_id>/count', methods=['POST'])
 @require_permission('Votes', 'update')
+@audit_action('count_vote', module='Votes')
 def count_vote(vote_id):
     """Count a vote (include in final tally)"""
     company_id = get_current_company_id()
@@ -369,30 +380,32 @@ def count_vote(vote_id):
     
     # Update candidate vote counts
     for candidate_id in vote.get_selected_candidates():
-        candidate = Candidate.query.get(candidate_id)
+        candidate = db.session.get(Candidate, candidate_id)
         if candidate:
             candidate.total_votes_received += 1
     
     # Update ballot vote count
-    ballot = Ballot.query.get(vote.ballot_id)
+    ballot = db.session.get(Ballot, vote.ballot_id)
     if ballot:
         ballot.total_votes_cast += 1
     
     # Update election vote count
-    election = Election.query.get(vote.election_id)
+    election = db.session.get(Election, vote.election_id)
     if election:
         election.total_votes_cast += 1
     
     vote.add_audit_event('vote_counted', 'Vote included in final tally')
     
-    vote.updated_by = current_user.id if current_user else None
-    vote.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(vote, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Vote counted successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Vote counted successfully'}), 200),
+        'Failed to count vote'
+    )
 
 @votes_bp.route('/<int:vote_id>/flag', methods=['POST'])
 @require_permission('Votes', 'update')
+@audit_action('flag_vote', module='Votes')
 def flag_vote(vote_id):
     """Flag a vote for review"""
     company_id = get_current_company_id()
@@ -418,11 +431,12 @@ def flag_vote(vote_id):
     
     vote.add_audit_event('vote_flagged', f'Vote flagged for review: {reason}')
     
-    vote.updated_by = current_user.id if current_user else None
-    vote.updated_at = datetime.now(timezone.utc)
+    set_audit_fields(vote, is_create=False)
     
-    db.session.commit()
-    return jsonify({'message': 'Vote flagged successfully'}), 200
+    return safe_commit(
+        (jsonify({'message': 'Vote flagged successfully'}), 200),
+        'Failed to flag vote'
+    )
 
 @votes_bp.route('/tracking/<tracking_code>', methods=['GET'])
 def track_vote(tracking_code):
@@ -491,6 +505,7 @@ def get_vote_stats():
 
 @votes_bp.route('/bulk-verify', methods=['POST'])
 @require_permission('Votes', 'update')
+@audit_action('bulk_verify_votes', module='Votes')
 def bulk_verify_votes():
     """Bulk verify votes"""
     company_id = get_current_company_id()
@@ -514,23 +529,26 @@ def bulk_verify_votes():
         if verification_type in ['identity', 'all']:
             vote.identity_verified = True
         
-        if vote.is_verified:
+        is_fully_verified = (vote.biometric_verified and 
+                             vote.device_verified and 
+                             vote.identity_verified)
+        if is_fully_verified:
             vote.vote_status = 'verified'
             vote.processing_status = 'processed'
             vote.vote_processing_time = datetime.now(timezone.utc)
         
         vote.add_audit_event('bulk_verified', f'Bulk {verification_type} verification')
-        vote.updated_by = current_user.id if current_user else None
-        vote.updated_at = datetime.now(timezone.utc)
+        set_audit_fields(vote, is_create=False)
         updated_count += 1
     
-    db.session.commit()
-    
-    return jsonify({
-        'message': f'Bulk verification completed',
-        'updated_count': updated_count,
-        'total_requested': len(vote_ids)
-    }), 200
+    return safe_commit(
+        (jsonify({
+            'message': f'Bulk verification completed',
+            'updated_count': updated_count,
+            'total_requested': len(vote_ids)
+        }), 200),
+        'Failed to bulk verify votes'
+    )
 
 @votes_bp.route('/history', methods=['GET'])
 @jwt_required()
@@ -548,8 +566,10 @@ def get_user_vote_history():
         return jsonify({'error': 'Voter profile not found'}), 404
     
     # Get pagination parameters
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 10))
+    page, per_page, error = parse_pagination(request)
+    if error:
+        return error
+        
     election_id = request.args.get('election_id')
     
     # Build query for user's votes
@@ -567,6 +587,15 @@ def get_user_vote_history():
         page=page, per_page=per_page, error_out=False
     )
     votes = pagination.items
+    
+    voter_base = Vote.query.filter_by(voter_id=voter.id, company_id=company_id)
+    summary = {
+        'total_votes_cast': pagination.total,
+        'verified_votes': voter_base.filter_by(vote_status='verified').count(),
+        'counted_votes': voter_base.filter_by(is_counted=True).count(),
+        'pending_votes': voter_base.filter_by(processing_status='pending').count(),
+        'elections_participated': db.session.query(db.func.count(db.distinct(Vote.election_id))).filter_by(voter_id=voter.id, company_id=company_id).scalar()
+    }
     
     # Return user's voting history (without sensitive vote data)
     return jsonify({
@@ -603,13 +632,7 @@ def get_user_vote_history():
             'verification_level': voter.verification_level,
             'is_verified': voter.is_verified
         },
-        'summary': {
-            'total_votes_cast': pagination.total,
-            'verified_votes': sum(1 for v in votes if v.is_verified),
-            'counted_votes': sum(1 for v in votes if v.is_counted),
-            'pending_votes': sum(1 for v in votes if v.processing_status == 'pending'),
-            'elections_participated': len(set(v.election_id for v in votes))
-        }
+        'summary': summary
     })
 
 def generate_vote_id():
