@@ -10,6 +10,7 @@ from flask import jsonify
 from app import db
 from werkzeug.exceptions import NotFound, HTTPException
 import logging
+import warnings
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -40,40 +41,126 @@ def get_current_company_id():
     user = get_current_user()
     return user.company_id if user else None
 
-def is_current_user_super_admin():
+
+def is_administrator():
+    """Check whether the current JWT identity corresponds to a platform Administrator.
+
+    A platform Administrator is identified by a row in the ``administrators``
+    table whose email matches the current User's email.  Administrators are
+    **not** scoped to any company — they have platform-wide privileges such as
+    creating or deleting companies.
+
+    This is intentionally distinct from :func:`is_company_super_admin`, which
+    checks whether a user holds the Company Super Admin *role* inside their
+    own company.  Conflating the two was the root cause of several privilege-
+    escalation bugs (a Company Super Admin could perform platform-level
+    operations).
+
+    Returns:
+        bool: True only when the authenticated user has a matching
+              ``administrators`` row; False otherwise.
     """
-    Returns True if the currently authenticated user has the Super Admin role.
-    Super Admin is identified by a role named 'super admin' (case-insensitive).
-    Returns False if user not found, no company context, or not Super Admin.
+    try:
+        from app.models.administrator import Administrator
+
+        user = get_current_user()
+        if not user:
+            return False
+
+        return db.session.query(
+            Administrator.query.filter_by(email=user.email).exists()
+        ).scalar()
+
+    except Exception as e:
+        logger.error(f"Error in is_administrator: {str(e)}")
+        return False
+
+
+def is_company_super_admin():
+    """Check whether the current user holds the Company Super Admin role.
+
+    The Company Super Admin is a protected ``Role`` row with
+    ``Role.is_super_admin = True`` within the user's own company.  This grants
+    full access **within that company only** — it does *not* confer any
+    platform-level privileges (use :func:`is_administrator` for that).
+
+    The check uses the boolean ``Role.is_super_admin`` column rather than
+    matching on a role-name string, which avoids false positives from
+    similarly-named regular roles.
+
+    Returns:
+        bool: True if the current user is mapped to an active super-admin
+              role in their own company; False otherwise.
     """
     try:
         from app.models.role import Role
-        from app.models.user_role import UserRoleMapping
-        
+
         user = get_current_user()
         if not user or not user.company_id:
             return False
-        
+
         super_admin_role = Role.query.filter(
-            Role.role_name.ilike('super admin'),
+            Role.is_super_admin.is_(True),
             Role.company_id == user.company_id,
             Role.status != 0
         ).first()
-        
+
         if not super_admin_role:
             return False
-        
+
         mapping = UserRoleMapping.query.filter_by(
             user_id=user.id,
             role_id=super_admin_role.id,
             status=1
         ).first()
-        
+
         return mapping is not None
-        
+
     except Exception as e:
-        logger.error(f"Error in is_current_user_super_admin: {str(e)}")
+        logger.error(f"Error in is_company_super_admin: {str(e)}")
         return False
+
+
+def is_current_user_super_admin():
+    """**Deprecated** — use :func:`is_company_super_admin` or
+    :func:`is_administrator` instead.
+
+    Kept as a thin wrapper around :func:`is_company_super_admin` so that
+    call-sites not yet migrated continue to work without silently breaking.
+    """
+    warnings.warn(
+        "is_current_user_super_admin() is deprecated. "
+        "Use is_company_super_admin() or is_administrator() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return is_company_super_admin()
+
+
+def require_same_company_or_administrator(target_company_id):
+    """Return a (response, status_code) tuple if the caller is neither a
+    platform Administrator nor a member of *target_company_id*.
+
+    Use this at the top of any route that needs the "same company unless
+    you're a platform admin" guard.  If the check passes, the function
+    returns ``None`` and the caller should continue normally.
+
+    Args:
+        target_company_id: The company_id the action is being performed on.
+
+    Returns:
+        None on success, or a ``(jsonify({...}), 403)`` tuple to return
+        directly from the calling route on failure.
+    """
+    if is_administrator():
+        return None
+
+    current_company = get_current_company_id()
+    if current_company != target_company_id:
+        return jsonify({'error': 'Forbidden: you can only access your own company'}), 403
+
+    return None
+
 
 def require_company_context(f):
     """Decorator to ensure the user has a valid company context"""

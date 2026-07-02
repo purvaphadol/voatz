@@ -2,7 +2,10 @@ from flask import Blueprint, request, jsonify
 from app import db
 from app.models.company import Company
 from app.models.user import User
-from app.utils import require_permission, get_current_company_id, is_current_user_super_admin
+from app.utils import (
+    require_permission, get_current_company_id,
+    is_administrator, require_same_company_or_administrator,
+)
 from app.utils.db_utils import safe_commit
 from app.utils.audit import audit_action, set_audit_fields
 from app.utils.validators import parse_pagination, validate_company_input
@@ -28,8 +31,12 @@ def _serialize_company(c):
 @companies_bp.route('/', methods=['GET'])
 @require_permission('Companies', 'view')
 def list_companies():
-    is_super = is_current_user_super_admin()
-    if is_super:
+    """List companies visible to the current user.
+
+    Platform Administrators see every active company (with pagination and
+    search).  All other users see only their own company.
+    """
+    if is_administrator():
         query = get_active_companies_query()
         search = request.args.get('search', '').strip()
         if search:
@@ -65,8 +72,9 @@ def list_companies():
 @require_permission('Companies', 'create')
 @audit_action('create_company', module='Companies', description='Created a company')
 def create_company():
-    if not is_current_user_super_admin():
-        return jsonify({'error': 'Forbidden: Only Super Admins can create companies'}), 403
+    """Create a new company.  Platform Administrators only."""
+    if not is_administrator():
+        return jsonify({'error': 'Forbidden: Only platform Administrators can create companies'}), 403
         
     data = request.get_json()
     cleaned_data, error = validate_company_input(data, is_create=True)
@@ -103,9 +111,14 @@ def create_company():
 @companies_bp.route('/<int:company_id>', methods=['GET'])
 @require_permission('Companies', 'view')
 def get_company(company_id):
-    is_super = is_current_user_super_admin()
-    if not is_super and company_id != get_current_company_id():
-        return jsonify({'error': 'Forbidden'}), 403
+    """Retrieve a single company.
+
+    Users may only view their own company unless they are a platform
+    Administrator.
+    """
+    denied = require_same_company_or_administrator(company_id)
+    if denied:
+        return denied
         
     company = Company.query.filter_by(id=company_id).filter(Company.status != STATUS_INACTIVE).first()
     if not company:
@@ -117,9 +130,14 @@ def get_company(company_id):
 @require_permission('Companies', 'update')
 @audit_action('update_company', module='Companies', description='Updated a company', get_target_id=lambda *a, **kw: kw.get('company_id'))
 def update_company(company_id):
-    is_super = is_current_user_super_admin()
-    if not is_super and company_id != get_current_company_id():
-        return jsonify({'error': 'Forbidden'}), 403
+    """Update company details.
+
+    Users may only update their own company unless they are a platform
+    Administrator.
+    """
+    denied = require_same_company_or_administrator(company_id)
+    if denied:
+        return denied
         
     company = Company.query.filter_by(id=company_id).filter(Company.status != STATUS_INACTIVE).first()
     if not company:
@@ -158,8 +176,21 @@ def update_company(company_id):
 @require_permission('Companies', 'delete')
 @audit_action('delete_company', module='Companies', description='Deleted a company', get_target_id=lambda *a, **kw: kw.get('company_id'))
 def delete_company(company_id):
-    if not is_current_user_super_admin():
-        return jsonify({'error': 'Forbidden: Only Super Admins can delete companies'}), 403
+    """Soft-delete a company.  Platform Administrators only.
+
+    Defense-in-depth: even after the Administrator check, we explicitly
+    verify the caller's own company matches the target unless the caller
+    is an Administrator (prevents bugs in future permission changes from
+    silently widening the blast radius).
+    """
+    if not is_administrator():
+        return jsonify({'error': 'Forbidden: Only platform Administrators can delete companies'}), 403
+
+    # Defense-in-depth: non-administrators must target their own company
+    # (already blocked above, but kept as an explicit second gate).
+    denied = require_same_company_or_administrator(company_id)
+    if denied:
+        return denied
         
     company = Company.query.filter_by(id=company_id).filter(Company.status != STATUS_INACTIVE).first()
     if not company:
