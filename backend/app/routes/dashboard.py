@@ -5,7 +5,7 @@ from app.models.election import Election
 from app.models.vote import Vote
 from app.models.ballot import Ballot
 from app.models.voter_registration import VoterRegistration
-from app.utils import get_current_company_id, require_permission
+from app.utils import get_current_company_id, require_permission, is_administrator
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_, or_
 
@@ -281,7 +281,14 @@ def get_recent_activity():
 @dashboard_bp.route('/mobile', methods=['GET'])
 @jwt_required()
 def get_mobile_dashboard():
-    """Mobile-specific endpoint that returns all dashboard data in one request to avoid parallel request issues"""
+    """Mobile-specific endpoint that returns all dashboard data in one request to avoid parallel request issues.
+
+    Administrators do not have a User row or company context, so this
+    user-centric endpoint returns 404 for administrator tokens.
+    """
+    if is_administrator():
+        return jsonify({'error': 'Administrators do not have a user profile'}), 404
+
     try:
         from app.models import Election, Vote, Ballot, VoterRegistration, Voter, User
         from flask_jwt_extended import get_jwt_identity

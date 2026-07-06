@@ -64,7 +64,23 @@ def _build_user_permissions(user_id, company_id):
 @require_company_context
 def get_current_user_permissions():
     """Get permissions for the current authenticated user"""
-    from app.utils import get_current_user
+    from app.utils import get_current_user, is_administrator
+
+    if is_administrator():
+        modules = Module.query.filter(Module.status != STATUS_INACTIVE).all()
+        results = []
+        for m in modules:
+            actions = ModuleAction.query.filter(ModuleAction.module_id == m.id, ModuleAction.status != STATUS_INACTIVE).all()
+            for a in actions:
+                results.append({
+                    'module': m.module_name,
+                    'action': a.action_name,
+                    'url': a.action_url,
+                    'source': 'administrator',
+                    'module_id': m.id,
+                    'action_id': a.id
+                })
+        return jsonify(results)
 
     user = get_current_user()
     if not user:
@@ -78,7 +94,15 @@ def get_current_user_permissions():
 @permissions_bp.route('/user/<int:user_id>', methods=['GET'])
 @require_permission('Permissions', 'view')
 def get_user_permissions(user_id):
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    if is_administrator():
+        from app.models.user import User
+        user = User.query.filter_by(id=user_id).filter(User.status != STATUS_INACTIVE).first_or_404()
+        company_id = user.company_id
+    else:
+        company_id = get_current_company_id()
+        from app.models.user import User
+        user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
     results = _build_user_permissions(user_id, company_id)
     return jsonify(results)
 
@@ -86,7 +110,15 @@ def get_user_permissions(user_id):
 @permissions_bp.route('/user/<int:user_id>/roles', methods=['GET'])
 @require_permission('Permissions', 'view')
 def get_user_roles(user_id):
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    if is_administrator():
+        from app.models.user import User
+        user = User.query.filter_by(id=user_id).filter(User.status != STATUS_INACTIVE).first_or_404()
+        company_id = user.company_id
+    else:
+        company_id = get_current_company_id()
+        from app.models.user import User
+        user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
 
     user_roles = db.session.query(
         UserRoleMapping,
@@ -111,15 +143,28 @@ def get_user_roles(user_id):
 @permissions_bp.route('/modules', methods=['GET'])
 @require_permission('Permissions', 'view')
 def get_modules_with_actions():
-    company_id = get_current_company_id()
-
-    modules = Module.query.filter_by(company_id=company_id).all()
+    from app.utils import is_administrator
+    filter_company_id = request.args.get('company_id')
+    
+    if is_administrator():
+        if filter_company_id:
+            try:
+                company_id = int(filter_company_id)
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Invalid company_id parameter'}), 400
+            modules = Module.query.filter_by(company_id=company_id).all()
+        else:
+            modules = Module.query.all()
+    else:
+        company_id = get_current_company_id()
+        modules = Module.query.filter_by(company_id=company_id).all()
+        
     result = []
 
     for module in modules:
         actions = ModuleAction.query.filter_by(
             module_id=module.id,
-            company_id=company_id
+            company_id=module.company_id
         ).all()
 
         result.append({
@@ -146,7 +191,13 @@ def get_module_actions():
 @require_permission('Permissions', 'view')
 def get_role_permissions(role_id):
     """Get permissions for a specific role"""
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    if is_administrator():
+        role = Role.query.filter_by(id=role_id).filter(Role.status != STATUS_INACTIVE).first_or_404()
+        company_id = role.company_id
+    else:
+        company_id = get_current_company_id()
+        role = Role.query.filter_by(id=role_id, company_id=company_id).filter(Role.status != STATUS_INACTIVE).first_or_404()
 
     role_permissions = RolePermissionMapping.query.filter(
         RolePermissionMapping.role_id == role_id,
@@ -178,16 +229,19 @@ def get_role_permissions(role_id):
 @require_permission('Permissions', 'update')
 def update_role_permissions(role_id):
     """Update permissions for a specific role"""
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    if is_administrator():
+        role = Role.query.filter_by(id=role_id).first_or_404()
+        company_id = role.company_id
+    else:
+        company_id = get_current_company_id()
+        role = Role.query.filter_by(id=role_id, company_id=company_id).first_or_404()
+        
     data = request.get_json()
 
     if not data or 'permissions' not in data:
         return jsonify({'error': 'Missing permissions data'}), 400
 
-    # Validate the role belongs to the company and is active
-    role = Role.query.filter_by(id=role_id, company_id=company_id).first()
-    if not role:
-        return jsonify({'error': 'Role not found'}), 404
     if role.status == STATUS_INACTIVE:
         return jsonify({'error': 'Role is inactive'}), 400
 
@@ -226,17 +280,21 @@ def update_role_permissions(role_id):
 @require_permission('Permissions', 'update')
 def update_user_permissions(user_id):
     """Update permissions for a specific user - only creates overrides that differ from role permissions"""
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    if is_administrator():
+        from app.models.user import User
+        user = User.query.filter_by(id=user_id).first_or_404()
+        company_id = user.company_id
+    else:
+        company_id = get_current_company_id()
+        from app.models.user import User
+        user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
+        
     data = request.get_json()
 
     if not data or 'permissions' not in data:
         return jsonify({'error': 'Missing permissions data'}), 400
 
-    # Validate the user belongs to the company and is active
-    from app.models.user import User
-    user = User.query.filter_by(id=user_id, company_id=company_id).first()
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
     if user.status == STATUS_INACTIVE:
         return jsonify({'error': 'User is inactive'}), 400
 
@@ -346,7 +404,15 @@ def update_user_permissions(user_id):
 @require_permission('Permissions', 'view')
 def get_user_permissions_for_management(user_id):
     """Get user permissions in management format - shows all actions with current effective state"""
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    if is_administrator():
+        from app.models.user import User
+        user = User.query.filter_by(id=user_id).first_or_404()
+        company_id = user.company_id
+    else:
+        company_id = get_current_company_id()
+        from app.models.user import User
+        user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
 
     modules = Module.query.filter_by(company_id=company_id).all()
 

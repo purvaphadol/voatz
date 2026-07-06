@@ -1,4 +1,4 @@
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import get_jwt_identity, get_jwt, jwt_required
 from app.models.user import User
 from app.models.user_role import UserRoleMapping
 from app.models.role_permission import RolePermissionMapping
@@ -43,37 +43,56 @@ def get_current_company_id():
 
 
 def is_administrator():
-    """Check whether the current JWT identity corresponds to a platform Administrator.
+    """Check whether the current JWT corresponds to a platform Administrator.
 
-    A platform Administrator is identified by a row in the ``administrators``
-    table whose email matches the current User's email.  Administrators are
-    **not** scoped to any company — they have platform-wide privileges such as
-    creating or deleting companies.
+    Administrator tokens carry an ``is_administrator: true`` custom claim
+    set at login time (see ``POST /api/auth/administrator/login``).  This
+    function inspects that claim directly — no database query is needed.
 
     This is intentionally distinct from :func:`is_company_super_admin`, which
-    checks whether a user holds the Company Super Admin *role* inside their
+    checks whether a *User* holds the Company Super Admin *role* inside their
     own company.  Conflating the two was the root cause of several privilege-
     escalation bugs (a Company Super Admin could perform platform-level
     operations).
 
     Returns:
-        bool: True only when the authenticated user has a matching
-              ``administrators`` row; False otherwise.
+        bool: True only when the current JWT carries the administrator
+              claim; False otherwise.
     """
     try:
+        claims = get_jwt()
+        return claims.get('is_administrator', False) is True
+    except Exception:
+        return False
+
+
+def get_current_administrator():
+    """Load the :class:`Administrator` row for the current JWT identity.
+
+    Administrator tokens use an identity string of the form ``"admin:<id>"``.
+    This helper parses the numeric id out of that string and returns the
+    corresponding ``Administrator`` row, or ``None`` if the current token is
+    not an administrator token or the row cannot be found.
+
+    Returns:
+        Administrator | None
+    """
+    try:
+        if not is_administrator():
+            return None
+
         from app.models.administrator import Administrator
 
-        user = get_current_user()
-        if not user:
-            return False
+        identity = get_jwt_identity()
+        if not identity or not isinstance(identity, str) or not identity.startswith('admin:'):
+            return None
 
-        return db.session.query(
-            Administrator.query.filter_by(email=user.email).exists()
-        ).scalar()
-
+        admin_id_str = identity.split(':', 1)[1]
+        admin_id = int(admin_id_str)
+        return Administrator.query.get(admin_id)
     except Exception as e:
-        logger.error(f"Error in is_administrator: {str(e)}")
-        return False
+        logger.error(f"Error in get_current_administrator: {str(e)}")
+        return None
 
 
 def is_company_super_admin():
@@ -168,6 +187,8 @@ def require_company_context(f):
     @jwt_required()
     def decorated_function(*args, **kwargs):
         try:
+            if is_administrator():
+                return f(*args, **kwargs)
             user = get_current_user()
             if not user or not user.company_id:
                 return jsonify({'error': 'Invalid company context'}), 403
@@ -258,12 +279,27 @@ def check_user_permission(module_name, action_name):
         return False
 
 def require_permission(module_name, action_name):
-    """Decorator to require specific permission for accessing an endpoint"""
+    """Decorator to require specific permission for accessing an endpoint.
+
+    Platform Administrators (identified by the ``is_administrator`` JWT claim)
+    bypass the company-context and module/action permission checks entirely,
+    since their privileges are unconditional and not backed by company-scoped
+    Module/ModuleAction/RolePermission rows.
+
+    For all other identities the existing RBAC check is applied unchanged.
+    """
     def decorator(f):
         @wraps(f)
         @jwt_required()
         def decorated_function(*args, **kwargs):
             try:
+                # Administrators have unconditional access — they carry no
+                # company-scoped permission rows, so the normal RBAC path
+                # would always reject them.
+                if is_administrator():
+                    logger.info(f"Administrator granted access to {module_name}.{action_name}")
+                    return f(*args, **kwargs)
+
                 user = get_current_user()
                 if not user:
                     logger.warning(f"No user found for {module_name}.{action_name} endpoint")
@@ -299,6 +335,20 @@ def require_permission(module_name, action_name):
 
 def get_user_permissions_summary():
     """Get comprehensive permissions summary for current user"""
+    if is_administrator():
+        modules = Module.query.filter(Module.status != 0).all()
+        permissions = {}
+        for m in modules:
+            if m.module_name not in permissions:
+                permissions[m.module_name] = []
+                for action_name in ['view', 'create', 'update', 'delete']:
+                    permissions[m.module_name].append({
+                        'action': action_name,
+                        'source': 'administrator',
+                        'url': f'/{action_name}'
+                    })
+        return permissions
+
     from app.utils.query_helpers import get_active_user_role_mappings, get_active_role_permissions
     user = get_current_user()
     if not user:

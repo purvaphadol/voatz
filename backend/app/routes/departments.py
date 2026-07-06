@@ -1,21 +1,40 @@
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required
 from app import db
 from app.models.department import Department
 from app.models.company import Company
 from app.utils import get_current_company_id, require_permission, \
-    is_current_user_super_admin
+    is_administrator, is_company_super_admin
 from app.utils.query_helpers import get_active_departments_query
 from app.utils.db_utils import safe_commit
 from app.utils.audit import audit_action, set_audit_fields
 from app.utils.validators import parse_pagination, validate_department_input
-from app.utils.constants import STATUS_INACTIVE
+from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE, STATUS_DEACTIVATED
 
 departments_bp = Blueprint('departments', __name__)
+
+# ---------------------------------------------------------------------------
+# Allowed values for the ``?status=`` query-string filter on list endpoints.
+# STATUS_DEACTIVATED records are *never* returned regardless of filter value.
+# ---------------------------------------------------------------------------
+_STATUS_FILTER_MAP = {
+    'active': [STATUS_ACTIVE],
+    'inactive': [STATUS_INACTIVE],
+    'all': [STATUS_ACTIVE, STATUS_INACTIVE],
+}
 
 
 @departments_bp.route('/', methods=['GET'])
 @require_permission('Departments', 'view')
 def list_departments():
+    """List departments.
+
+    Company Super Admins see departments across all companies (optionally
+    filtered by ``company_id``).  Regular users see only their own company.
+
+    Supports ``?status=active|inactive|all`` (default ``active``).
+    STATUS_DEACTIVATED records are never returned.
+    """
     search = request.args.get('search')
     filter_company_id = request.args.get('company_id')
 
@@ -23,12 +42,17 @@ def list_departments():
     if error:
         return error
 
-    is_admin = is_current_user_super_admin()
+    # --- status filter ---
+    status_param = request.args.get('status', 'active').lower()
+    if status_param not in _STATUS_FILTER_MAP:
+        return jsonify({'error': 'Invalid status filter'}), 400
+    allowed = _STATUS_FILTER_MAP[status_param]
 
-    if is_admin:
+    if is_administrator():
         # Super Admin: query across all companies, optionally filtered
         query = Department.query.filter(
-            Department.status != STATUS_INACTIVE
+            Department.status.in_(allowed),
+            Department.status != STATUS_DEACTIVATED,
         ).outerjoin(Company)
 
         if filter_company_id:
@@ -39,9 +63,14 @@ def list_departments():
             except (ValueError, TypeError):
                 return jsonify({'error': 'Invalid company_id parameter'}), 400
     else:
-        # Regular user: scoped to own company only
+        # Regular user & Company Super Admin: scoped to own company only
         company_id = get_current_company_id()
-        query = get_active_departments_query(company_id).outerjoin(Company)
+        query = Department.query.join(Company).filter(
+            Department.company_id == company_id,
+            Department.status.in_(allowed),
+            Department.status != STATUS_DEACTIVATED,
+            Company.status == STATUS_ACTIVE,
+        )
 
     if search:
         query = query.filter(
@@ -81,7 +110,7 @@ def create_department():
 
     # Super Admin can create for any company via request body
     # Regular users always use their JWT company
-    if is_current_user_super_admin():
+    if is_administrator():
         body_company_id = data.get('company_id') if data else None
         if body_company_id:
             try:
@@ -133,19 +162,20 @@ def create_department():
 @departments_bp.route('/<int:department_id>', methods=['GET'])
 @require_permission('Departments', 'view')
 def get_department(department_id):
-    is_admin = is_current_user_super_admin()
-
-    if is_admin:
+    """Retrieve a single department.  STATUS_DEACTIVATED records are never returned."""
+    if is_administrator():
         department = Department.query.outerjoin(Company).filter(
             Department.id == department_id,
-            Department.status != STATUS_INACTIVE
+            Department.status != STATUS_INACTIVE,
+            Department.status != STATUS_DEACTIVATED,
         ).first_or_404()
     else:
         company_id = get_current_company_id()
         department = Department.query.outerjoin(Company).filter(
             Department.id == department_id,
             Department.company_id == company_id,
-            Department.status != STATUS_INACTIVE
+            Department.status != STATUS_INACTIVE,
+            Department.status != STATUS_DEACTIVATED,
         ).first_or_404()
     return jsonify({
         'id': department.id,
@@ -165,9 +195,7 @@ def get_department(department_id):
               description='Updated a department',
               get_target_id=lambda *a, **kw: kw.get('department_id'))
 def update_department(department_id):
-    is_admin = is_current_user_super_admin()
-
-    if is_admin:
+    if is_administrator():
         department = Department.query.filter(
             Department.id == department_id,
             Department.status != STATUS_INACTIVE
@@ -217,9 +245,7 @@ def update_department(department_id):
               description='Deleted a department',
               get_target_id=lambda *a, **kw: kw.get('department_id'))
 def delete_department(department_id):
-    is_admin = is_current_user_super_admin()
-
-    if is_admin:
+    if is_administrator():
         department = Department.query.filter(
             Department.id == department_id,
             Department.status != STATUS_INACTIVE
@@ -248,4 +274,33 @@ def delete_department(department_id):
     return safe_commit(
         (jsonify({'message': 'Department deleted'}), 200),
         'Internal server error during department deletion'
+    )
+
+
+@departments_bp.route('/<int:department_id>/permanent', methods=['DELETE'])
+@require_permission('Departments', 'delete')
+@audit_action('permanent_delete_department', module='Departments',
+              description='Permanently deleted a department',
+              get_target_id=lambda *a, **kw: kw.get('department_id'))
+def permanent_delete_department(department_id):
+    """Permanently delete a department (set status to STATUS_DEACTIVATED).
+
+    Platform Administrators only.  The department must already be soft-deleted
+    (STATUS_INACTIVE) before it can be permanently deleted.
+    """
+    if not is_administrator():
+        return jsonify({'error': 'Forbidden: Only platform Administrators can permanently delete departments'}), 403
+
+    department = Department.query.filter_by(id=department_id).first()
+    if not department or department.status == STATUS_DEACTIVATED:
+        return jsonify({'error': 'Department not found'}), 404
+
+    if department.status != STATUS_INACTIVE:
+        return jsonify({'error': 'Deactivate this record before permanently deleting it'}), 400
+
+    department.status = STATUS_DEACTIVATED
+    set_audit_fields(department, is_create=False)
+    return safe_commit(
+        (jsonify({'message': 'Department permanently deleted'}), 200),
+        'Internal server error during permanent department deletion'
     )

@@ -193,12 +193,13 @@ def log_permission_check(module, action, allowed, user_id=None, company_id=None)
 
 def get_user_activity(user_id=None, company_id=None, limit=50, action_filter=None, success_filter=None):
     """Get user activity logs with filtering"""
-    if company_id is None:
+    from app.utils import is_administrator
+    if company_id is None and not is_administrator():
         return []
         
     query = AuditLog.query
     
-    if company_id:
+    if company_id is not None:
         query = query.filter_by(company_id=company_id)
     
     if user_id:
@@ -218,10 +219,10 @@ def get_audit_summary(company_id, days=30):
     
     start_date = datetime.now() - timedelta(days=days)
     
-    logs = AuditLog.query.filter(
-        AuditLog.company_id == company_id,
-        AuditLog.created_at >= start_date
-    ).all()
+    query = AuditLog.query.filter(AuditLog.created_at >= start_date)
+    if company_id is not None:
+        query = query.filter(AuditLog.company_id == company_id)
+    logs = query.all()
     
     summary = {
         'total_activities': len(logs),

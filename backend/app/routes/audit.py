@@ -13,10 +13,13 @@ audit_bp = Blueprint('audit', __name__)
 @require_permission('AuditLogs', 'view')
 def get_audit_logs():
     """Get audit logs with filtering and pagination"""
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    filter_company_id = request.args.get('company_id', type=int)
     
     # Query parameters
-    page, per_page = parse_pagination(request)
+    page, per_page, error = parse_pagination(request)
+    if error:
+        return error
     user_id = request.args.get('user_id', type=int)
     action = request.args.get('action')
     module = request.args.get('module')
@@ -27,7 +30,14 @@ def get_audit_logs():
         return jsonify({'error': 'Invalid days parameter'}), 400
     
     # Build query
-    query = AuditLog.query.filter_by(company_id=company_id)
+    if is_administrator():
+        if filter_company_id:
+            query = AuditLog.query.filter_by(company_id=filter_company_id)
+        else:
+            query = AuditLog.query
+    else:
+        company_id = get_current_company_id()
+        query = AuditLog.query.filter_by(company_id=company_id)
     
     # Apply filters
     if user_id:
@@ -108,12 +118,18 @@ def get_audit_logs():
 @require_permission('AuditLogs', 'view')
 def get_audit_summary_api():
     """Get audit summary statistics"""
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    filter_company_id = request.args.get('company_id', type=int)
     try:
         days = int(request.args.get('days', 30))
     except ValueError:
         return jsonify({'error': 'Invalid days parameter'}), 400
     
+    if is_administrator():
+        company_id = filter_company_id
+    else:
+        company_id = get_current_company_id()
+        
     summary = get_audit_summary(company_id, days)
     
     return jsonify({
@@ -126,7 +142,14 @@ def get_audit_summary_api():
 @require_permission('Users', 'view')
 def get_user_audit_logs(user_id):
     """Get audit logs for specific user"""
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    if is_administrator():
+        user = User.query.filter_by(id=user_id).first_or_404()
+        company_id = user.company_id
+    else:
+        company_id = get_current_company_id()
+        user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
+        
     try:
         limit = int(request.args.get('limit', 50))
         limit = min(limit, MAX_PER_PAGE)
@@ -183,17 +206,33 @@ def get_user_audit_logs(user_id):
 @require_permission('AuditLogs', 'view')
 def export_audit_logs():
     """Export audit logs as CSV"""
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    filter_company_id = request.args.get('company_id', type=int)
     try:
         days = int(request.args.get('days', 30))
     except ValueError:
         return jsonify({'error': 'Invalid days parameter'}), 400
     
     start_date = datetime.now() - timedelta(days=days)
-    logs = AuditLog.query.filter(
-        AuditLog.company_id == company_id,
-        AuditLog.created_at >= start_date
-    ).order_by(AuditLog.created_at.desc()).all()
+    
+    if is_administrator():
+        if filter_company_id:
+            query = AuditLog.query.filter(
+                AuditLog.company_id == filter_company_id,
+                AuditLog.created_at >= start_date
+            )
+        else:
+            query = AuditLog.query.filter(
+                AuditLog.created_at >= start_date
+            )
+    else:
+        company_id = get_current_company_id()
+        query = AuditLog.query.filter(
+            AuditLog.company_id == company_id,
+            AuditLog.created_at >= start_date
+        )
+        
+    logs = query.order_by(AuditLog.created_at.desc()).all()
     
     # Create CSV data
     csv_data = []
@@ -234,7 +273,8 @@ def export_audit_logs():
 @require_permission('AuditLogs', 'view')
 def get_audit_stats():
     """Get detailed audit statistics"""
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
+    filter_company_id = request.args.get('company_id', type=int)
     try:
         days = int(request.args.get('days', 7))
     except ValueError:
@@ -243,10 +283,24 @@ def get_audit_stats():
     start_date = datetime.now() - timedelta(days=days)
     
     # Get logs for the period
-    logs = AuditLog.query.filter(
-        AuditLog.company_id == company_id,
-        AuditLog.created_at >= start_date
-    ).all()
+    if is_administrator():
+        if filter_company_id:
+            query = AuditLog.query.filter(
+                AuditLog.company_id == filter_company_id,
+                AuditLog.created_at >= start_date
+            )
+        else:
+            query = AuditLog.query.filter(
+                AuditLog.created_at >= start_date
+            )
+    else:
+        company_id = get_current_company_id()
+        query = AuditLog.query.filter(
+            AuditLog.company_id == company_id,
+            AuditLog.created_at >= start_date
+        )
+        
+    logs = query.all()
     
     # Calculate statistics
     stats = {

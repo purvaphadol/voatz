@@ -6,7 +6,7 @@ from app.models.user import User
 from app.models.user_role import UserRoleMapping
 from app.models.company import Company
 from app.models.role import Role
-from app.utils import get_current_company_id, require_company_context, require_permission, is_current_user_super_admin
+from app.utils import get_current_company_id, require_company_context, require_permission, is_administrator
 from app.utils.audit import audit_action, set_audit_fields
 from app.models.department import Department
 from sqlalchemy.orm import joinedload
@@ -19,26 +19,75 @@ from app.utils.validators import (
     validate_department,
     parse_pagination
 )
-from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE
+from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE, STATUS_DEACTIVATED
 from app.utils.db_utils import safe_commit
 from app.utils.query_helpers import get_active_users_query
 
 users_bp = Blueprint('users', __name__)
 
+# ---------------------------------------------------------------------------
+# Allowed values for the ``?status=`` query-string filter on list endpoints.
+# STATUS_DEACTIVATED records are *never* returned regardless of filter value.
+# ---------------------------------------------------------------------------
+_STATUS_FILTER_MAP = {
+    'active': [STATUS_ACTIVE],
+    'inactive': [STATUS_INACTIVE],
+    'all': [STATUS_ACTIVE, STATUS_INACTIVE],
+}
+
 @users_bp.route('/', methods=['GET'])
 @require_permission('Users', 'view')
 def list_users():
-    company_id = get_current_company_id()
+    """List users.
+
+    Platform Administrators see users across all companies (optionally
+    filtered by ``company_id``). Regular users see only their own company.
+
+    Supports ``?status=active|inactive|all`` (default ``active``).
+    STATUS_DEACTIVATED records are never returned.
+    """
     search = request.args.get('search')
+    filter_company_id = request.args.get('company_id')
     
     page, per_page, error = parse_pagination(request)
     if error:
         return error[0], error[1]
 
-    query = get_active_users_query(company_id).join(Company).options(
-        joinedload(User.company), 
-        joinedload(User.department)
-    ).filter(Company.status != STATUS_INACTIVE).order_by(User.updated_at.desc(), User.created_at.desc())
+    # --- status filter ---
+    status_param = request.args.get('status', 'active').lower()
+    if status_param not in _STATUS_FILTER_MAP:
+        return jsonify({'error': 'Invalid status filter'}), 400
+    allowed = _STATUS_FILTER_MAP[status_param]
+
+    if is_administrator():
+        # Administrator: query across all companies
+        query = User.query.filter(
+            User.status.in_(allowed),
+            User.status != STATUS_DEACTIVATED,
+        ).join(Company).options(
+            joinedload(User.company), 
+            joinedload(User.department)
+        ).filter(Company.status != STATUS_INACTIVE)
+
+        if filter_company_id:
+            try:
+                query = query.filter(User.company_id == int(filter_company_id))
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Invalid company_id parameter'}), 400
+    else:
+        # Regular user: scoped to own company only
+        company_id = get_current_company_id()
+        query = User.query.filter(
+            User.company_id == company_id,
+            User.status.in_(allowed),
+            User.status != STATUS_DEACTIVATED,
+        ).join(Company).options(
+            joinedload(User.company), 
+            joinedload(User.department)
+        ).filter(Company.status != STATUS_INACTIVE)
+
+    query = query.order_by(User.updated_at.desc(), User.created_at.desc())
+
     if search:
         query = query.filter(or_(User.name.ilike(f'%{search}%'), User.email.ilike(f'%{search}%')))
 
@@ -69,10 +118,10 @@ def list_users():
 def create_user():
     data = request.get_json()
     
-    if is_current_user_super_admin():
+    if is_administrator():
         company_id = data.get('company_id')
         if not company_id:
-            return jsonify({'error': 'company_id is required for Super Admin'}), 400
+            return jsonify({'error': 'company_id is required for platform Administrators'}), 400
         try:
             company_id = int(company_id)
         except (ValueError, TypeError):
@@ -113,6 +162,7 @@ def create_user():
     
     db.session.add(user)
     set_audit_fields(user, is_create=True)
+    db.session.flush()
     return safe_commit(
         (jsonify({'message': 'User created', 'user_id': user.id}), 201),
         'Internal server error during user creation'
@@ -121,13 +171,23 @@ def create_user():
 @users_bp.route('/<int:user_id>', methods=['GET'])
 @require_permission('Users', 'view')
 def get_user(user_id):
-    company_id = get_current_company_id()
-    user = User.query.join(Company).filter(
-        User.id == user_id, 
-        User.company_id == company_id,
-        User.status != STATUS_INACTIVE,
-        Company.status != STATUS_INACTIVE
-    ).first_or_404()
+    """Retrieve a single user.  STATUS_DEACTIVATED records are never returned."""
+    if is_administrator():
+        user = User.query.join(Company).filter(
+            User.id == user_id, 
+            User.status != STATUS_INACTIVE,
+            User.status != STATUS_DEACTIVATED,
+            Company.status != STATUS_INACTIVE
+        ).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        user = User.query.join(Company).filter(
+            User.id == user_id, 
+            User.company_id == company_id,
+            User.status != STATUS_INACTIVE,
+            User.status != STATUS_DEACTIVATED,
+            Company.status != STATUS_INACTIVE
+        ).first_or_404()
     
     return jsonify({
         'id': user.id,
@@ -146,8 +206,12 @@ def get_user(user_id):
 @require_permission('Users', 'update')
 @audit_action('update_user', module='Users', description='Updated a user', get_target_id=lambda *args, **kwargs: kwargs.get('user_id'))
 def update_user(user_id):
-    company_id = get_current_company_id()
-    user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
+    if is_administrator():
+        user = User.query.filter_by(id=user_id).filter(User.status != STATUS_INACTIVE).first_or_404()
+        company_id = user.company_id
+    else:
+        company_id = get_current_company_id()
+        user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
     data = request.get_json()
     
     cleaned_data, error = validate_user_input(data, is_create=False)
@@ -197,13 +261,25 @@ def update_user(user_id):
 @require_permission('Users', 'delete')
 @audit_action('delete_user', module='Users', description='Deleted a user', get_target_id=lambda *args, **kwargs: kwargs.get('user_id'))
 def delete_user(user_id):
-    # Self-delete guard — before any DB queries
-    current_user_id = int(get_jwt_identity())
-    if current_user_id == user_id:
-        return jsonify({"error": "You cannot delete your own account"}), 403
+    """Soft-delete a user by setting status to inactive.
 
-    company_id = get_current_company_id()
-    user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
+    The self-delete guard is skipped for platform Administrators because
+    an Administrator is not a User row — they cannot be "deleting
+    themselves" via this endpoint.
+    """
+    # Self-delete guard — before any DB queries.
+    # Administrators are not User rows, so this check is irrelevant for them.
+    if not is_administrator():
+        current_user_id = int(get_jwt_identity())
+        if current_user_id == user_id:
+            return jsonify({"error": "You cannot delete your own account"}), 403
+
+    if is_administrator():
+        user = User.query.filter_by(id=user_id).filter(User.status != STATUS_INACTIVE).first_or_404()
+        company_id = user.company_id
+    else:
+        company_id = get_current_company_id()
+        user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
     
     # Check if target user has Super Admin role
     super_admin_role = Role.query.filter(
@@ -228,10 +304,48 @@ def delete_user(user_id):
     
     return safe_commit((jsonify({'message': 'User deleted'}), 200), 'Internal server error during user deletion')
 
+
+@users_bp.route('/<int:user_id>/permanent', methods=['DELETE'])
+@require_permission('Users', 'delete')
+@audit_action('permanent_delete_user', module='Users',
+              description='Permanently deleted a user',
+              get_target_id=lambda *a, **kw: kw.get('user_id'))
+def permanent_delete_user(user_id):
+    """Permanently delete a user (set status to STATUS_DEACTIVATED).
+
+    Platform Administrators only.  The user must already be soft-deleted
+    (STATUS_INACTIVE) before they can be permanently deleted.
+    """
+    if not is_administrator():
+        return jsonify({'error': 'Forbidden: Only platform Administrators can permanently delete users'}), 403
+
+    user = User.query.filter_by(id=user_id).first()
+    if not user or user.status == STATUS_DEACTIVATED:
+        return jsonify({'error': 'User not found'}), 404
+
+    if user.status != STATUS_INACTIVE:
+        return jsonify({'error': 'Deactivate this record before permanently deleting it'}), 400
+
+    user.status = STATUS_DEACTIVATED
+    set_audit_fields(user, is_create=False)
+
+    return safe_commit(
+        (jsonify({'message': 'User permanently deleted'}), 200),
+        'Internal server error during permanent user deletion'
+    )
+
+
 @users_bp.route('/profile', methods=['GET'])
 @jwt_required()
 def get_current_user_profile():
-    """Get current user's profile information"""
+    """Get current user's profile information.
+
+    Administrators do not have a User row, so this endpoint returns 404
+    for administrator tokens.
+    """
+    if is_administrator():
+        return jsonify({'error': 'Administrators do not have a user profile'}), 404
+
     from flask_jwt_extended import get_jwt_identity
     from app.models.voter import Voter
     from app.models.vote import Vote
@@ -293,7 +407,14 @@ def get_current_user_profile():
 @users_bp.route('/profile', methods=['PUT'])
 @jwt_required()
 def update_current_user_profile():
-    """Update current user's profile information"""
+    """Update current user's profile information.
+
+    Administrators do not have a User row, so this endpoint returns 404
+    for administrator tokens.
+    """
+    if is_administrator():
+        return jsonify({'error': 'Administrators do not have a user profile'}), 404
+
     from flask_jwt_extended import get_jwt_identity
     from app.models.voter import Voter
     

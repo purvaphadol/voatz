@@ -17,9 +17,17 @@ module_actions_bp = Blueprint('module_actions', __name__)
 @module_actions_bp.route('/module/<int:module_id>/actions', methods=['GET'])
 @require_permission('Modules', 'view')
 def get_module_actions(module_id):
-    company_id = get_current_company_id()
-    
-    actions = get_active_module_actions_query(module_id, company_id).all()
+    from app.utils import is_administrator
+    if is_administrator():
+        Module.query.filter_by(id=module_id).first_or_404()
+        actions = ModuleAction.query.filter(
+            ModuleAction.module_id == module_id,
+            ModuleAction.status == STATUS_ACTIVE
+        ).all()
+    else:
+        company_id = get_current_company_id()
+        Module.query.filter_by(id=module_id, company_id=company_id).first_or_404()
+        actions = get_active_module_actions_query(module_id, company_id).all()
     
     return jsonify({
         'data': [{
@@ -36,13 +44,20 @@ def get_module_actions(module_id):
 @module_actions_bp.route('/module/<int:module_id>/actions', methods=['POST'])
 @require_permission('Modules', 'create')
 def create_module_action(module_id):
-    company_id = get_current_company_id()
-    
-    module = Module.query.filter(
-        Module.id == module_id,
-        Module.company_id == company_id,
-        Module.status == STATUS_ACTIVE
-    ).first_or_404()
+    from app.utils import is_administrator
+    if is_administrator():
+        module = Module.query.filter(
+            Module.id == module_id,
+            Module.status == STATUS_ACTIVE
+        ).first_or_404()
+        company_id = module.company_id
+    else:
+        company_id = get_current_company_id()
+        module = Module.query.filter(
+            Module.id == module_id,
+            Module.company_id == company_id,
+            Module.status == STATUS_ACTIVE
+        ).first_or_404()
     
     data = request.get_json()
     cleaned_data, error = validate_module_action_input(data, is_create=True)
@@ -81,6 +96,7 @@ def create_module_action(module_id):
 @module_actions_bp.route('/actions/bulk', methods=['POST'])
 @require_permission('Modules', 'create')
 def create_bulk_module_actions():
+    from app.utils import is_administrator
     company_id = get_current_company_id()
     data = request.get_json()
     
@@ -90,11 +106,19 @@ def create_bulk_module_actions():
     module_id = data['module_id']
     actions_data = data['actions']
     
-    module = Module.query.filter(
-        Module.id == module_id,
-        Module.company_id == company_id,
-        Module.status == STATUS_ACTIVE
-    ).first_or_404()
+    if is_administrator():
+        module = Module.query.filter(
+            Module.id == module_id,
+            Module.status == STATUS_ACTIVE
+        ).first_or_404()
+        company_id = module.company_id
+    else:
+        company_id = get_current_company_id()
+        module = Module.query.filter(
+            Module.id == module_id,
+            Module.company_id == company_id,
+            Module.status == STATUS_ACTIVE
+        ).first_or_404()
     
     created_actions = []
     skipped_duplicates = []
@@ -140,13 +164,20 @@ def create_bulk_module_actions():
 @module_actions_bp.route('/action/<int:action_id>', methods=['PUT'])
 @require_permission('Modules', 'update')
 def update_module_action(action_id):
-    company_id = get_current_company_id()
-    
-    action = ModuleAction.query.filter(
-        ModuleAction.id == action_id,
-        ModuleAction.company_id == company_id,
-        ModuleAction.status != STATUS_INACTIVE
-    ).first_or_404()
+    from app.utils import is_administrator
+    if is_administrator():
+        action = ModuleAction.query.filter(
+            ModuleAction.id == action_id,
+            ModuleAction.status != STATUS_INACTIVE
+        ).first_or_404()
+        company_id = action.company_id
+    else:
+        company_id = get_current_company_id()
+        action = ModuleAction.query.filter(
+            ModuleAction.id == action_id,
+            ModuleAction.company_id == company_id,
+            ModuleAction.status != STATUS_INACTIVE
+        ).first_or_404()
     
     data = request.get_json()
     cleaned_data, error = validate_module_action_input(data, is_create=False)
@@ -179,13 +210,20 @@ def update_module_action(action_id):
 @module_actions_bp.route('/action/<int:action_id>', methods=['DELETE'])
 @require_permission('Modules', 'delete')
 def delete_module_action(action_id):
-    company_id = get_current_company_id()
-    
-    action = ModuleAction.query.filter(
-        ModuleAction.id == action_id,
-        ModuleAction.company_id == company_id,
-        ModuleAction.status != STATUS_INACTIVE
-    ).first_or_404()
+    from app.utils import is_administrator
+    if is_administrator():
+        action = ModuleAction.query.filter(
+            ModuleAction.id == action_id,
+            ModuleAction.status != STATUS_INACTIVE
+        ).first_or_404()
+        company_id = action.company_id
+    else:
+        company_id = get_current_company_id()
+        action = ModuleAction.query.filter(
+            ModuleAction.id == action_id,
+            ModuleAction.company_id == company_id,
+            ModuleAction.status != STATUS_INACTIVE
+        ).first_or_404()
     
     role_perms = RolePermissionMapping.query.filter(
         RolePermissionMapping.action_id == action_id,

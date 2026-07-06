@@ -15,8 +15,60 @@ from app.utils.db_utils import safe_commit
 logger = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__)
 
+
+@auth_bp.route('/administrator/login', methods=['POST'])
+def administrator_login():
+    """Authenticate a platform Administrator.
+
+    Looks up the email in the ``administrators`` table (not ``users``),
+    verifies the password, and issues a JWT with:
+
+    - ``identity`` = ``"admin:<administrator.id>"``
+    - ``additional_claims`` = ``{"is_administrator": True}``
+
+    The custom claim is what :func:`app.utils.is_administrator` checks on
+    every subsequent request.  The ``"admin:"`` prefix in the identity lets
+    :func:`app.utils.get_current_administrator` load the correct row.
+
+    Returns 401 with a generic message on any failure (wrong email, wrong
+    password, missing fields) to avoid leaking whether an email exists.
+    """
+    from app.models.administrator import Administrator
+
+    data, error = safe_get_json(request)
+    if error:
+        return error
+
+    if not data or not data.get('email') or not data.get('password'):
+        return jsonify({'error': 'Invalid credentials'}), 401
+
+    administrator = Administrator.query.filter_by(email=data['email']).first()
+
+    if not administrator or not check_password_hash(
+        administrator.password_hash, str(data['password'])
+    ):
+        return jsonify({'error': 'Invalid credentials'}), 401
+
+    access_token = create_access_token(
+        identity=f"admin:{administrator.id}",
+        additional_claims={"is_administrator": True},
+    )
+
+    return jsonify({
+        'access_token': access_token,
+        'administrator': {
+            'id': administrator.id,
+            'name': administrator.name,
+            'email': administrator.email,
+        }
+    }), 200
+
+
+
 @auth_bp.route('/login', methods=['POST'])
 def login():
+    from app.models.administrator import Administrator
+
     data, error = safe_get_json(request)
     if error:
         return error
@@ -24,11 +76,31 @@ def login():
     if not data or not data.get('email') or not data.get('password'):
         return jsonify({'error': 'Email and password are required'}), 400
     
-    # Find user by email
+    # 1. First check the administrators table for the given email
+    administrator = Administrator.query.filter_by(email=data['email']).first()
+    if administrator:
+        if not check_password_hash(administrator.password_hash, str(data['password'])):
+            return jsonify({'error': 'Invalid credentials'}), 401
+        
+        access_token = create_access_token(
+            identity=f"admin:{administrator.id}",
+            additional_claims={"is_administrator": True},
+        )
+        return jsonify({
+            'is_administrator': True,
+            'access_token': access_token,
+            'administrator': {
+                'id': administrator.id,
+                'name': administrator.name,
+                'email': administrator.email,
+            }
+        }), 200
+        
+    # 2. If not found in administrators, fall through to User table lookup
     user = User.query.filter_by(email=data['email']).first()
     
     if not user or getattr(user, 'status', 1) == STATUS_INACTIVE:
-        return jsonify({'error': 'Account inactive or not found'}), 401
+        return jsonify({'error': 'Invalid credentials'}), 401
         
     if not check_password_hash(user.password_hash, str(data['password'])):
         return jsonify({'error': 'Invalid credentials'}), 401
