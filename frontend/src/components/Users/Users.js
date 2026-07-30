@@ -100,10 +100,8 @@ const Users = () => {
   }, [isPlatformAdmin]);
 
   useEffect(() => {
-    if (!isPlatformAdmin) {
-      loadDepartments();
-    }
-  }, [isPlatformAdmin]);
+    loadDepartments();
+  }, []);
 
   const loadUsers = async () => {
     try {
@@ -267,7 +265,7 @@ const Users = () => {
       width: 150,
       renderCell: (params) => (
         <Chip
-          label={getDepartmentName(params.value)}
+          label={params.row.department_name || getDepartmentName(params.value)}
           size="small"
           variant="outlined"
         />

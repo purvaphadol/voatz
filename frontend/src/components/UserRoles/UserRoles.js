@@ -276,7 +276,7 @@ const UserRoles = () => {
       width: 150,
       renderCell: (params) => (
         <Chip
-          label={getDepartmentName(params.value)}
+          label={params.row.department_name || getDepartmentName(params.value)}
           size="small"
           variant="outlined"
           icon={<BusinessIcon />}

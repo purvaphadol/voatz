@@ -118,7 +118,7 @@ export const authAPI = {
 
 // Users API
 export const usersAPI = {
-  getAll: (params = {}) => api.get('/users/', { params }),
+  getAll: (params = {}) => api.get('/users/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/users/${id}`),
   create: (data) => api.post('/users/', data),
   update: (id, data) => api.put(`/users/${id}`, data),
@@ -127,7 +127,7 @@ export const usersAPI = {
 
 // Roles API
 export const rolesAPI = {
-  getAll: (params = {}) => api.get('/roles/', { params }),
+  getAll: (params = {}) => api.get('/roles/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/roles/${id}`),
   create: (data) => api.post('/roles/', data),
   update: (id, data) => api.put(`/roles/${id}`, data),
@@ -136,7 +136,7 @@ export const rolesAPI = {
 
 // Departments API
 export const departmentsAPI = {
-  getAll: (params = {}) => api.get('/departments/', { params }),
+  getAll: (params = {}) => api.get('/departments/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/departments/${id}`),
   create: (data) => api.post('/departments/', data),
   update: (id, data) => api.put(`/departments/${id}`, data),
@@ -145,7 +145,7 @@ export const departmentsAPI = {
 
 // Companies API
 export const companiesAPI = {
-  getAll: (params = {}) => api.get('/companies/', { params }),
+  getAll: (params = {}) => api.get('/companies/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/companies/${id}`),
   create: (data) => api.post('/companies/', data),
   update: (id, data) => api.put(`/companies/${id}`, data),
@@ -154,7 +154,7 @@ export const companiesAPI = {
 
 // Modules API
 export const modulesAPI = {
-  getAll: (params = {}) => api.get('/modules/', { params }),
+  getAll: (params = {}) => api.get('/modules/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/modules/${id}`),
   create: (data) => api.post('/modules/', data),
   update: (id, data) => api.put(`/modules/${id}`, data),
@@ -188,7 +188,7 @@ export const permissionsAPI = {
 
 // User Roles API
 export const userRolesAPI = {
-  getAll: (params = {}) => api.get('/user-roles/', { params }),
+  getAll: (params = {}) => api.get('/user-roles/', { params: { per_page: 500, ...params } }),
   assign: (data) => api.post(`/user-roles/user/${data.user_id}/roles`, data),
   unassign: (mappingId) => api.delete(`/user-roles/user-role/${mappingId}`),
   getUserRoles: (userId) => api.get(`/user-roles/user/${userId}/roles`),
@@ -203,10 +203,10 @@ export const menuAPI = {
 
 // Audit API
 export const auditAPI = {
-  getLogs: (params = {}) => api.get('/audit/logs', { params }),
+  getLogs: (params = {}) => api.get('/audit/logs', { params: { per_page: 500, ...params } }),
   getStats: () => api.get('/audit/stats'),
-  getFailures: (params = {}) => api.get('/audit/failures', { params }),
-  exportLogs: (params = {}) => api.get('/audit/export', { params, responseType: 'blob' }),
+  getFailures: (params = {}) => api.get('/audit/failures', { params: { per_page: 500, ...params } }),
+  exportLogs: (params = {}) => api.get('/audit/export', { params: { per_page: 500, ...params }, responseType: 'blob' }),
 };
 
 // Health API
@@ -220,7 +220,7 @@ export const healthAPI = {
 
 // Voters API
 export const votersAPI = {
-  getAll: (params = {}) => api.get('/voters/', { params }),
+  getAll: (params = {}) => api.get('/voters/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/voters/${id}`),
   create: (data) => api.post('/voters/', data),
   update: (id, data) => api.put(`/voters/${id}`, data),
@@ -233,7 +233,7 @@ export const votersAPI = {
 
 // Elections API
 export const electionsAPI = {
-  getAll: (params = {}) => api.get('/elections/', { params }),
+  getAll: (params = {}) => api.get('/elections/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/elections/${id}`),
   create: (data) => api.post('/elections/', data),
   update: (id, data) => api.put(`/elections/${id}`, data),
@@ -242,13 +242,13 @@ export const electionsAPI = {
   publishResults: (id) => api.post(`/elections/${id}/publish-results`),
   changeStatus: (id, status) => api.post(`/elections/${id}/change-status`, { status }),
   getBallots: (id) => api.get(`/elections/${id}/ballots`),
-  getRegistrations: (id, params = {}) => api.get(`/elections/${id}/registrations`, { params }),
+  getRegistrations: (id, params = {}) => api.get(`/elections/${id}/registrations`, { params: { per_page: 500, ...params } }),
   getStats: () => api.get('/elections/stats'),
 };
 
 // Ballots API
 export const ballotsAPI = {
-  getAll: (params = {}) => api.get('/ballots/', { params }),
+  getAll: (params = {}) => api.get('/ballots/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/ballots/${id}`),
   create: (data) => api.post('/ballots/', data),
   update: (id, data) => api.put(`/ballots/${id}`, data),
@@ -263,7 +263,7 @@ export const ballotsAPI = {
 
 // Candidates API
 export const candidatesAPI = {
-  getAll: (params = {}) => api.get('/candidates/', { params }),
+  getAll: (params = {}) => api.get('/candidates/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/candidates/${id}`),
   create: (data) => api.post('/candidates/', data),
   update: (id, data) => api.put(`/candidates/${id}`, data),
@@ -282,7 +282,7 @@ export const candidatesAPI = {
 
 // Votes API
 export const votesAPI = {
-  getAll: (params = {}) => api.get('/votes/', { params }),
+  getAll: (params = {}) => api.get('/votes/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/votes/${id}`),
   cast: (data) => api.post('/votes/', data),
   verify: (id, data) => api.post(`/votes/${id}/verify`, data),
@@ -295,7 +295,7 @@ export const votesAPI = {
 
 // Voter Registrations API
 export const voterRegistrationsAPI = {
-  getAll: (params = {}) => api.get('/voter-registrations/', { params }),
+  getAll: (params = {}) => api.get('/voter-registrations/', { params: { per_page: 500, ...params } }),
   getById: (id) => api.get(`/voter-registrations/${id}`),
   create: (data) => api.post('/voter-registrations/', data),
   update: (id, data) => api.put(`/voter-registrations/${id}`, data),

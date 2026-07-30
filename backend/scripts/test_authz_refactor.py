@@ -521,7 +521,7 @@ r7 = requests.get(f"{BASE}/menu/sidebar", headers=ah(A_SUPER_TOKEN))
 record("10.16", "Regular user get-sidebar loads successfully → 200", 200, r7,
        lambda b: "menu" in b and isinstance(b["menu"], list))
 
-r8 = requests.get(f"{BASE}/users/", headers=ah(ADMIN_TOKEN))
+r8 = requests.get(f"{BASE}/users/?per_page=100", headers=ah(ADMIN_TOKEN))
 record("10.17", "Admin list-users (across all companies) → 200, contains multiple company records", 200, r8,
        lambda b: "data" in b and len(b["data"]) > 0 and any(u.get("company_id") == A_COMPANY_ID for u in b["data"]))
 

@@ -1,0 +1,193 @@
+Connecting to database: postgresql:****@localhost:5432/voatz
+
+══════════════════════════════════════════════════════════════════════
+  AUTH REFACTOR TEST SUITE
+══════════════════════════════════════════════════════════════════════
+
+── Section 0: Pre-flight ──────────────────────────────────────────────
+  [PASS] 0.1: Health check returns 200  (expected 200, got 200)
+
+── Acquiring tokens ───────────────────────────────────────────────────
+  [OK] Logged in as Administrator (admin@gmail.com)
+  [OK] Logged in as A_SUPER (rushiraj) (rushiraj@datagrid.co.in)
+  [OK] Logged in as A_REG   (john) (john@datagrid.co.in)
+  Company A id = 14, user_id = 17
+
+── Seeding Company B (direct DB) ──────────────────────────────────────
+✅ Seeded company 'Company B Test 340387' (id=35, super_user_id=39, dept_id=91)
+  Company B id = 35, dept_id = 91
+  [OK] Logged in as B_SUPER (b_super_340387@companyb.test)
+  Company A dept_id = 90
+
+── Section 1: Administrator Login ────────────────────────────────────
+  [PASS] 1.1: Admin login → 200 + access_token  (expected 200, got 200)
+  [PASS] 1.2: Admin login wrong password → 401  (expected 401, got 401)
+  [PASS] 1.3: Admin login unknown email → 401  (expected 401, got 401)
+
+── Section 2: Company Creation ───────────────────────────────────────
+  [PASS] 2.1: Admin creates company → 201  (expected 201, got 201)
+  [PASS] 2.2: Company Super Admin cannot create company → 403  (expected 403, got 403)
+  [PASS] 2.3: Regular user cannot create company → 403  (expected 403, got 403)
+
+── Section 3: Company Listing ────────────────────────────────────────
+  [PASS] 3.1: Admin sees ≥2 companies  (expected 200, got 200)
+  [PASS] 3.2: Company A Super Admin sees only own company  (expected 200, got 200)
+  [PASS] 3.3: Company B Super Admin sees only Company B  (expected 200, got 200)
+
+── Section 4: Department Creation ────────────────────────────────────
+  [PASS] 4.1: Admin creates dept for Company A → 201  (expected 201, got 201)
+  [PASS] 4.2: Company A Super Admin creates own dept → 201  (expected 201, got 201)
+  [PASS] 4.3: Company B Super Admin creates own dept → 201  (expected 201, got 201)
+
+── Section 5: Role Creation ──────────────────────────────────────────
+  [PASS] 5.1: Company A Super Admin creates role → 201  (expected 201, got 201)
+  [PASS] 5.2: Regular user (no create perm) role create → 403  (expected 403, got 403)
+  [PASS] 5.3: Admin creates role in Company A with explicit company_id → 201  (expected 201, got 201)
+  [PASS] 5.4: Admin creates role in Company B with explicit company_id → 201  (expected 201, got 201)
+  [PASS] 5.5: Admin omits company_id → 400 'company_id is required for platform Administrators'  (expected 400, got 400)
+  [PASS] 5.6: Company A Super Admin cross-tenant → 201 but role landed in Company A (override ignored)  (expected 201, got 201)
+
+── Section 6: Super Admin Role Guards ────────────────────────────────
+  [PASS] 6.1: Rename Company Super Admin role → 403  (expected 403, got 403)
+  [PASS] 6.2: Delete Company Super Admin role → 403  (expected 403, got 403)
+
+── Section 7: Permanent Delete — Departments ─────────────────────────
+  [PASS] 7.1: Non-admin cannot perm-delete dept → 403  (expected 403, got 403)
+  [PASS] 7.2: Admin perm-deletes soft-deleted dept → 200  (expected 200, got 200)
+  [PASS] 7.3: Perm-deleted dept is 404  (expected 404, got 404)
+  [PASS] 7.4: Admin perm-delete active dept → 400  (expected 400, got 400)
+
+── Section 8: Permanent Delete — Roles [BUG FIX] ────────────────────
+  [PASS] 8.1: Non-admin cannot perm-delete role → 403  (expected 403, got 403)
+  [PASS] 8.2: Admin perm-delete active role → 400  (expected 400, got 400)
+  [PASS] 8.3: Admin perm-deletes soft-deleted role from Company A → 200  [BUG FIX]  (expected 200, got 200)
+  [PASS] 8.4: Second perm-delete same role → 404  (expected 404, got 404)
+  [PASS] 8.5: Admin cannot perm-delete Company Super Admin role → 400 or 403  (expected 403, got 403)
+
+── Section 9: Permanent Delete — Users [BUG FIX] ────────────────────
+  [PASS] 9.1: Non-admin cannot perm-delete user → 403  (expected 403, got 403)
+  [PASS] 9.2: Admin perm-delete active user → 400  (expected 400, got 400)
+  [PASS] 9.3: Admin perm-deletes soft-deleted user from Company A → 200  [BUG FIX]  (expected 200, got 200)
+  [PASS] 9.4: Second perm-delete same user → 404  (expected 404, got 404)
+
+── Section 10: Cross-company Isolation ───────────────────────────────
+  [PASS] 10.1: Company B Super Admin list-users → 200, no Company A rows  (expected 200, got 200)
+  [PASS] 10.2: Company B Super Admin list-roles → 200, no Company A rows  (expected 200, got 200)
+  [PASS] 10.3: Company A Super Admin cannot view Company B → 403 or 404  (expected 403, got 403)
+  [PASS] 10.4: Unauthenticated request → 401  (expected 401, got 401)
+  [PASS] 10.5: Admin can view Company B → 200  (expected 200, got 200)
+  [PASS] 10.6: Admin views user in Company A → 200  (expected 200, got 200)
+  [PASS] 10.7: Admin updates user in Company A → 200  (expected 200, got 200)
+  [PASS] 10.8: Admin views role in Company A → 200  (expected 200, got 200)
+  [PASS] 10.9: Admin updates role in Company A → 200  (expected 200, got 200)
+  [PASS] 10.10: Admin login wrong password via unified route → 401  (expected 401, got 401)
+  [PASS] 10.11: Nonexistent email login via unified route → 401 (identical body)  (expected 401, got 401)
+  [PASS] 10.12: Unified admin login → 200 with is_administrator: true  (expected 200, got 200)
+  [PASS] 10.13: Admin token from unified login allows admin access → 200  (expected 200, got 200)
+  [PASS] 10.14: Regular user unified login regression check → 200  (expected 200, got 200)
+  [PASS] 10.15: Regular user get-permissions loads successfully (no UnboundLocalError) → 200  (expected 200, got 200)
+  [PASS] 10.16: Regular user get-sidebar loads successfully → 200  (expected 200, got 200)
+  [PASS] 10.17: Admin list-users (across all companies) → 200, contains multiple company records  (expected 200, got 200)
+  [PASS] 10.18: Admin list-roles (across all companies) → 200, contains multiple company records  (expected 200, got 200)
+  [PASS] 10.19: Company A Super Admin list-depts → 200, no Company B rows  (expected 200, got 200)
+  [PASS] 10.20: Company B Super Admin list-depts → 200, no Company A rows  (expected 200, got 200)
+  [PASS] 10.21: Company A Super Admin cannot get Company B dept → 404  (expected 404, got 404)
+  [PASS] 10.22: Company A Super Admin cannot update Company B dept → 404  (expected 404, got 404)
+  [PASS] 10.23: Company A Super Admin cannot delete Company B dept → 404  (expected 404, got 404)
+
+── Section 11: Extra Cross-company isolation checks ───────────────────
+  [PASS] 11.1: Company A Super Admin list-modules → 200, no Company B rows  (expected 200, got 200)
+  [PASS] 11.2: Company B Super Admin list-modules → 200, no Company A rows  (expected 200, got 200)
+  [PASS] 11.3: Company A Super Admin cannot get Company B module → 404  (expected 404, got 404)
+  [PASS] 11.4: Company A Super Admin cannot update Company B module → 404  (expected 404, got 404)
+  [PASS] 11.5: Company A Super Admin cannot delete Company B module → 404  (expected 404, got 404)
+  [PASS] 11.6: Company A Super Admin get-module-actions for own module → 200  (expected 200, got 200)
+  [PASS] 11.7: Company A Super Admin cannot get Company B module actions → 404  (expected 404, got 404)
+  [PASS] 11.8: Company A Super Admin cannot update Company B module action → 404  (expected 404, got 404)
+  [PASS] 11.9: Company A Super Admin cannot view Company B user permissions → 404  (expected 404, got 404)
+  [PASS] 11.10: Company A Super Admin cannot update Company B user permissions → 404  (expected 404, got 404)
+  [PASS] 11.11: Company A Super Admin cannot assign Company B role permission → 404  (expected 404, got 404)
+  [PASS] 11.12: Company A Super Admin cannot update Company B user-role mapping → 404  (expected 404, got 404)
+  [PASS] 11.13: Company A Super Admin cannot assign Company B role → 404  (expected 404, got 404)
+  [PASS] 11.14: Company A Super Admin list-audit-logs → 200, no Company B logs  (expected 200, got 200)
+  [PASS] 11.15: Company A Super Admin cannot view Company B user audit logs → 404  (expected 404, got 404)
+
+══════════════════════════════════════════════════════════════════════
+  RESULTS: 72/72 PASSED   0 FAILED
+══════════════════════════════════════════════════════════════════════
+  TEST     EXP    ACT    STATUS      DESCRIPTION
+  ────     ───    ───    ──────      ───────────
+  0.1      200    200    ✅ PASS       Health check returns 200
+  1.1      200    200    ✅ PASS       Admin login → 200 + access_token
+  1.2      401    401    ✅ PASS       Admin login wrong password → 401
+  1.3      401    401    ✅ PASS       Admin login unknown email → 401
+  2.1      201    201    ✅ PASS       Admin creates company → 201
+  2.2      403    403    ✅ PASS       Company Super Admin cannot create company → 403
+  2.3      403    403    ✅ PASS       Regular user cannot create company → 403
+  3.1      200    200    ✅ PASS       Admin sees ≥2 companies
+  3.2      200    200    ✅ PASS       Company A Super Admin sees only own company
+  3.3      200    200    ✅ PASS       Company B Super Admin sees only Company B
+  4.1      201    201    ✅ PASS       Admin creates dept for Company A → 201
+  4.2      201    201    ✅ PASS       Company A Super Admin creates own dept → 201
+  4.3      201    201    ✅ PASS       Company B Super Admin creates own dept → 201
+  5.1      201    201    ✅ PASS       Company A Super Admin creates role → 201
+  5.2      403    403    ✅ PASS       Regular user (no create perm) role create → 403
+  5.3      201    201    ✅ PASS       Admin creates role in Company A with explicit company_id → 201
+  5.4      201    201    ✅ PASS       Admin creates role in Company B with explicit company_id → 201
+  5.5      400    400    ✅ PASS       Admin omits company_id → 400 'company_id is required for platform Administrators'
+  5.6      201    201    ✅ PASS       Company A Super Admin cross-tenant → 201 but role landed in Company A (override ignored)
+  6.1      403    403    ✅ PASS       Rename Company Super Admin role → 403
+  6.2      403    403    ✅ PASS       Delete Company Super Admin role → 403
+  7.1      403    403    ✅ PASS       Non-admin cannot perm-delete dept → 403
+  7.2      200    200    ✅ PASS       Admin perm-deletes soft-deleted dept → 200
+  7.3      404    404    ✅ PASS       Perm-deleted dept is 404
+  7.4      400    400    ✅ PASS       Admin perm-delete active dept → 400
+  8.1      403    403    ✅ PASS       Non-admin cannot perm-delete role → 403
+  8.2      400    400    ✅ PASS       Admin perm-delete active role → 400
+  8.3      200    200    ✅ PASS       Admin perm-deletes soft-deleted role from Company A → 200  [BUG FIX]
+  8.4      404    404    ✅ PASS       Second perm-delete same role → 404
+  8.5      403    403    ✅ PASS       Admin cannot perm-delete Company Super Admin role → 400 or 403
+  9.1      403    403    ✅ PASS       Non-admin cannot perm-delete user → 403
+  9.2      400    400    ✅ PASS       Admin perm-delete active user → 400
+  9.3      200    200    ✅ PASS       Admin perm-deletes soft-deleted user from Company A → 200  [BUG FIX]
+  9.4      404    404    ✅ PASS       Second perm-delete same user → 404
+  10.1     200    200    ✅ PASS       Company B Super Admin list-users → 200, no Company A rows
+  10.2     200    200    ✅ PASS       Company B Super Admin list-roles → 200, no Company A rows
+  10.3     403    403    ✅ PASS       Company A Super Admin cannot view Company B → 403 or 404
+  10.4     401    401    ✅ PASS       Unauthenticated request → 401
+  10.5     200    200    ✅ PASS       Admin can view Company B → 200
+  10.6     200    200    ✅ PASS       Admin views user in Company A → 200
+  10.7     200    200    ✅ PASS       Admin updates user in Company A → 200
+  10.8     200    200    ✅ PASS       Admin views role in Company A → 200
+  10.9     200    200    ✅ PASS       Admin updates role in Company A → 200
+  10.10    401    401    ✅ PASS       Admin login wrong password via unified route → 401
+  10.11    401    401    ✅ PASS       Nonexistent email login via unified route → 401 (identical body)
+  10.12    200    200    ✅ PASS       Unified admin login → 200 with is_administrator: true
+  10.13    200    200    ✅ PASS       Admin token from unified login allows admin access → 200
+  10.14    200    200    ✅ PASS       Regular user unified login regression check → 200
+  10.15    200    200    ✅ PASS       Regular user get-permissions loads successfully (no UnboundLocalError) → 200
+  10.16    200    200    ✅ PASS       Regular user get-sidebar loads successfully → 200
+  10.17    200    200    ✅ PASS       Admin list-users (across all companies) → 200, contains multiple company records
+  10.18    200    200    ✅ PASS       Admin list-roles (across all companies) → 200, contains multiple company records
+  10.19    200    200    ✅ PASS       Company A Super Admin list-depts → 200, no Company B rows
+  10.20    200    200    ✅ PASS       Company B Super Admin list-depts → 200, no Company A rows
+  10.21    404    404    ✅ PASS       Company A Super Admin cannot get Company B dept → 404
+  10.22    404    404    ✅ PASS       Company A Super Admin cannot update Company B dept → 404
+  10.23    404    404    ✅ PASS       Company A Super Admin cannot delete Company B dept → 404
+  11.1     200    200    ✅ PASS       Company A Super Admin list-modules → 200, no Company B rows
+  11.2     200    200    ✅ PASS       Company B Super Admin list-modules → 200, no Company A rows
+  11.3     404    404    ✅ PASS       Company A Super Admin cannot get Company B module → 404
+  11.4     404    404    ✅ PASS       Company A Super Admin cannot update Company B module → 404
+  11.5     404    404    ✅ PASS       Company A Super Admin cannot delete Company B module → 404
+  11.6     200    200    ✅ PASS       Company A Super Admin get-module-actions for own module → 200
+  11.7     404    404    ✅ PASS       Company A Super Admin cannot get Company B module actions → 404
+  11.8     404    404    ✅ PASS       Company A Super Admin cannot update Company B module action → 404
+  11.9     404    404    ✅ PASS       Company A Super Admin cannot view Company B user permissions → 404
+  11.10    404    404    ✅ PASS       Company A Super Admin cannot update Company B user permissions → 404
+  11.11    404    404    ✅ PASS       Company A Super Admin cannot assign Company B role permission → 404
+  11.12    404    404    ✅ PASS       Company A Super Admin cannot update Company B user-role mapping → 404
+  11.13    404    404    ✅ PASS       Company A Super Admin cannot assign Company B role → 404
+  11.14    200    200    ✅ PASS       Company A Super Admin list-audit-logs → 200, no Company B logs
+  11.15    404    404    ✅ PASS       Company A Super Admin cannot view Company B user audit logs → 404
+
+══════════════════════════════════════════════════════════════════════
