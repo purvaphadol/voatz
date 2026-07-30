@@ -1,15 +1,25 @@
+"""
+seed_data.py — Bootstrap the Voatz database with an Administrator and at
+least one demo company (Datagrid / Company A).
+
+The core seeding logic is factored into seed_company(), which can be
+reused directly by test scripts to seed additional companies against the
+live database without going through the HTTP API (which would fail for
+Administrator-issued role-creation calls because create_role() uses
+get_current_company_id() → None for admin tokens).
+"""
+
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import sessionmaker
 from werkzeug.security import generate_password_hash
 from datetime import datetime
-
-# DB config (note: %40 is URL encoded '@')
 import os
-from dotenv import load_dotenv
-load_dotenv()
-DATABASE_URI = os.environ["DATABASE_URL"]  # reads from backend/.env automatically
-
 import re
+import getpass
+from dotenv import load_dotenv
+
+load_dotenv()
+DATABASE_URI = os.environ["DATABASE_URL"]
 masked_uri = re.sub(r':([^@]+)@', ':****@', DATABASE_URI)
 print(f"Connecting to database: {masked_uri}")
 
@@ -17,164 +27,276 @@ engine = create_engine(DATABASE_URI)
 metadata = MetaData()
 metadata.reflect(bind=engine)
 Session = sessionmaker(bind=engine)
-session = Session()
 
-# Table references
-try:
-    company = metadata.tables['companies']
-except KeyError:
-    print(f"Error: 'companies' table not found. Reflected tables: {list(metadata.tables.keys())}")
-    raise
-department = metadata.tables['departments']
-role = metadata.tables['roles']
-user = metadata.tables['users']
-module = metadata.tables['modules']
-module_action = metadata.tables['module_action']
-role_permission = metadata.tables['role_permission_mapping']
-user_role_mapping = metadata.tables['user_role_mapping']
 
-# Insert Company
-company_id = session.execute(company.insert().values(
-    company_name='Datagrid',
-    created_at=datetime.now(),
-    updated_at=datetime.now(),
-    status=1
-).returning(company.c.id)).scalar()
+# ---------------------------------------------------------------------------
+# Reusable company-seeding function
+# ---------------------------------------------------------------------------
 
-# Insert Department
-department_id = session.execute(department.insert().values(
-    department_name='Admin',
-    company_id=company_id,
-    created_at=datetime.now(),
-    updated_at=datetime.now(),
-    status=1
-).returning(department.c.id)).scalar()
-
-# Insert Roles
-super_admin_id = session.execute(role.insert().values(
-    role_name='Super Admin',
-    department_id=department_id,
-    company_id=company_id,
-    created_at=datetime.now(),
-    updated_at=datetime.now(),
-    status=1
-).returning(role.c.id)).scalar()
-
-admin_id = session.execute(role.insert().values(
-    role_name='Admin',
-    department_id=department_id,
-    company_id=company_id,
-    created_at=datetime.now(),
-    updated_at=datetime.now(),
-    status=1
-).returning(role.c.id)).scalar()
-
-# Insert Users
-user_1_id = session.execute(user.insert().values(
-    name="Rushiraj",
-    email="rushiraj@datagrid.co.in",
-    password_hash=generate_password_hash("admin123"),
-    company_id=company_id,
-    created_at=datetime.now(),
-    updated_at=datetime.now(),
-    status=1
-).returning(user.c.id)).scalar()
-
-user_2_id = session.execute(user.insert().values(
-    name="John Admin",
-    email="john@datagrid.co.in",
-    password_hash=generate_password_hash("admin123"),
-    company_id=company_id,
-    created_at=datetime.now(),
-    updated_at=datetime.now(),
-    status=1
-).returning(user.c.id)).scalar()
-
-# Insert User-Role Mappings
-session.execute(user_role_mapping.insert().values([
-    {
-        "user_id": user_1_id,
-        "role_id": super_admin_id,
-        "department_id": department_id,
-        "company_id": company_id,
-        "status": 1,
-        "created_at": datetime.now(),
-        "updated_at": datetime.now()
-    },
-    {
-        "user_id": user_2_id,
-        "role_id": admin_id,
-        "department_id": department_id,
-        "company_id": company_id,
-        "status": 1,
-        "created_at": datetime.now(),
-        "updated_at": datetime.now()
-    }
-]))
-
-# Insert Modules
-modules = [
-    {"module_name": "Dashboard", "company_id": company_id, "status": 1, "order_index": 1},
-    {"module_name": "Users", "company_id": company_id, "status": 1, "order_index": 2},
-    {"module_name": "Roles", "company_id": company_id, "status": 1, "order_index": 3},
-    {"module_name": "Departments", "company_id": company_id, "status": 1, "order_index": 4},
-    {"module_name": "Companies", "company_id": company_id, "status": 1, "order_index": 5},
-    {"module_name": "Modules", "company_id": company_id, "status": 1, "order_index": 6},
-    {"module_name": "Permissions", "company_id": company_id, "status": 1, "order_index": 7},
-    {"module_name": "UserRoles", "company_id": company_id, "status": 1, "order_index": 8},
-    {"module_name": "Settings", "company_id": company_id, "status": 1, "order_index": 9},
-    # Voting system modules
-    {"module_name": "Voters", "company_id": company_id, "status": 1, "order_index": 10},
-    {"module_name": "Elections", "company_id": company_id, "status": 1, "order_index": 11},
-    {"module_name": "Ballots", "company_id": company_id, "status": 1, "order_index": 12},
-    {"module_name": "Candidates", "company_id": company_id, "status": 1, "order_index": 13},
-    {"module_name": "Votes", "company_id": company_id, "status": 1, "order_index": 14},
-    {"module_name": "VoterRegistrations", "company_id": company_id, "status": 1, "order_index": 15}
+MODULE_NAMES = [
+    ("Dashboard",           1),
+    ("Users",               2),
+    ("Roles",               3),
+    ("Departments",         4),
+    ("Companies",           5),
+    ("Modules",             6),
+    ("Permissions",         7),
+    ("UserRoles",           8),
+    ("Settings",            9),
+    ("Voters",              10),
+    ("Elections",           11),
+    ("Ballots",             12),
+    ("Candidates",          13),
+    ("Votes",               14),
+    ("VoterRegistrations",  15),
+    ("AuditLogs",           16),
 ]
 
-for m in modules:
-    m["created_at"] = m["updated_at"] = datetime.now()
-
-module_ids = session.execute(module.insert().returning(module.c.id), modules).scalars().all()
-
-# Insert Module Actions
-actions = [
-    {'name': 'view', 'url': '/view'},
-    {'name': 'create', 'url': '/create'},
-    {'name': 'update', 'url': '/update'},
-    {'name': 'delete', 'url': '/delete'}
+ACTIONS = [
+    {"name": "view",   "url": "/view"},
+    {"name": "create", "url": "/create"},
+    {"name": "update", "url": "/update"},
+    {"name": "delete", "url": "/delete"},
 ]
-module_action_rows = []
 
-for mod_id in module_ids:
-    for act in actions:
-        module_action_rows.append({
-            "module_id": mod_id,
-            "action_name": act['name'],
-            "action_url": act['url'],
+
+def seed_company(
+    session,
+    company_name,
+    super_admin_email,
+    super_admin_password,
+    super_admin_name="Super Admin",
+    regular_admin_email=None,
+    regular_admin_password=None,
+    regular_admin_name="Admin",
+):
+    """Seed a complete company, including:
+
+    - Company row
+    - 'Admin' department
+    - Protected 'Company Super Admin' role (is_super_admin=True, no dept)
+    - Optional regular 'Admin' role (department-linked)
+    - One super-admin user mapped to the super-admin role
+    - Optional regular admin user mapped to the regular role
+    - Full Modules / ModuleActions fan-out for this company
+    - Full RolePermissionMapping grant for the super-admin role
+
+    Returns a dict of all created IDs so callers can reference them later.
+    """
+    t = metadata.tables
+
+    now = datetime.now()
+
+    # 1. Company
+    company_id = session.execute(
+        t["companies"].insert().values(
+            company_name=company_name,
+            created_at=now,
+            updated_at=now,
+            status=1,
+        ).returning(t["companies"].c.id)
+    ).scalar()
+
+    # 2. Department
+    department_id = session.execute(
+        t["departments"].insert().values(
+            department_name="Admin",
+            company_id=company_id,
+            created_at=now,
+            updated_at=now,
+            status=1,
+        ).returning(t["departments"].c.id)
+    ).scalar()
+
+    # 3a. Protected Company Super Admin role (no department)
+    super_admin_role_id = session.execute(
+        t["roles"].insert().values(
+            role_name="Company Super Admin",
+            department_id=None,
+            is_super_admin=True,
+            company_id=company_id,
+            created_at=now,
+            updated_at=now,
+            status=1,
+        ).returning(t["roles"].c.id)
+    ).scalar()
+
+    # 3b. Regular Admin role (optional, but always created for completeness)
+    regular_role_id = session.execute(
+        t["roles"].insert().values(
+            role_name="Admin",
+            department_id=department_id,
+            is_super_admin=False,
+            company_id=company_id,
+            created_at=now,
+            updated_at=now,
+            status=1,
+        ).returning(t["roles"].c.id)
+    ).scalar()
+
+    # 4a. Super-admin user
+    super_user_id = session.execute(
+        t["users"].insert().values(
+            name=super_admin_name,
+            email=super_admin_email,
+            password_hash=generate_password_hash(super_admin_password),
+            company_id=company_id,
+            created_at=now,
+            updated_at=now,
+            status=1,
+        ).returning(t["users"].c.id)
+    ).scalar()
+
+    session.execute(
+        t["user_role_mapping"].insert().values(
+            user_id=super_user_id,
+            role_id=super_admin_role_id,
+            department_id=department_id,
+            company_id=company_id,
+            status=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    # 4b. Regular admin user (optional)
+    regular_user_id = None
+    if regular_admin_email and regular_admin_password:
+        regular_user_id = session.execute(
+            t["users"].insert().values(
+                name=regular_admin_name,
+                email=regular_admin_email,
+                password_hash=generate_password_hash(regular_admin_password),
+                company_id=company_id,
+                created_at=now,
+                updated_at=now,
+                status=1,
+            ).returning(t["users"].c.id)
+        ).scalar()
+
+        session.execute(
+            t["user_role_mapping"].insert().values(
+                user_id=regular_user_id,
+                role_id=regular_role_id,
+                department_id=department_id,
+                company_id=company_id,
+                status=1,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    # 5. Modules
+    module_rows = [
+        {
+            "module_name": name,
             "company_id": company_id,
             "status": 1,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
-        })
+            "order_index": idx,
+            "created_at": now,
+            "updated_at": now,
+        }
+        for name, idx in MODULE_NAMES
+    ]
+    module_ids = session.execute(
+        t["modules"].insert().returning(t["modules"].c.id),
+        module_rows,
+    ).scalars().all()
 
-session.execute(module_action.insert(), module_action_rows)
+    # 6. ModuleActions (view / create / update / delete for every module)
+    module_action_rows = []
+    for mod_id in module_ids:
+        for act in ACTIONS:
+            module_action_rows.append({
+                "module_id": mod_id,
+                "action_name": act["name"],
+                "action_url": act["url"],
+                "company_id": company_id,
+                "status": 1,
+                "created_at": now,
+                "updated_at": now,
+            })
+    session.execute(t["module_action"].insert(), module_action_rows)
 
-# Assign permissions to Super Admin (get all module actions for this company)
-all_actions = session.execute(
-    module_action.select().where(module_action.c.company_id == company_id)
-).fetchall()
+    # 7. RolePermissionMapping — grant all actions to the super-admin role
+    all_actions = session.execute(
+        t["module_action"].select().where(
+            t["module_action"].c.company_id == company_id
+        )
+    ).fetchall()
 
-session.execute(role_permission.insert(), [{
-    "company_id": company_id,
-    "role_id": super_admin_id,
-    "module_id": row.module_id,
-    "action_id": row.id,
-    "status": 1,
-    "created_at": datetime.now(),
-    "updated_at": datetime.now()
-} for row in all_actions])
+    session.execute(
+        t["role_permission_mapping"].insert(),
+        [
+            {
+                "company_id": company_id,
+                "role_id": super_admin_role_id,
+                "module_id": row.module_id,
+                "action_id": row.id,
+                "status": 1,
+                "created_at": now,
+                "updated_at": now,
+            }
+            for row in all_actions
+        ],
+    )
 
-session.commit()
-session.close()
-print("✅ Seeding complete.")
+    print(
+        f"✅ Seeded company '{company_name}' "
+        f"(id={company_id}, super_user_id={super_user_id}, dept_id={department_id})"
+    )
+
+    return {
+        "company_id":         company_id,
+        "department_id":      department_id,
+        "super_admin_role_id": super_admin_role_id,
+        "regular_role_id":    regular_role_id,
+        "super_user_id":      super_user_id,
+        "regular_user_id":    regular_user_id,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Script entry-point: seed Administrator + Company A (Datagrid)
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    session = Session()
+
+    t = metadata.tables
+
+    # --- 1. Seed the single platform Administrator ---
+    existing = session.execute(t["administrators"].select()).fetchone()
+    if existing:
+        print(f"⚠️  Administrator already exists ({existing.email}) — skipping.")
+    else:
+        admin_email    = input("Administrator email: ").strip()
+        admin_name     = input("Administrator name: ").strip()
+        admin_password = getpass.getpass("Administrator password: ")
+        session.execute(
+            t["administrators"].insert().values(
+                name=admin_name,
+                email=admin_email,
+                password_hash=generate_password_hash(admin_password),
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                status=1,
+            )
+        )
+        print(f"✅ Administrator '{admin_email}' created.")
+
+    # --- 2. Seed Company A (Datagrid) ---
+    seed_company(
+        session,
+        company_name="Datagrid",
+        super_admin_email="rushiraj@datagrid.co.in",
+        super_admin_password="admin123",
+        super_admin_name="Rushiraj",
+        regular_admin_email="john@datagrid.co.in",
+        regular_admin_password="admin123",
+        regular_admin_name="John Admin",
+    )
+
+    session.commit()
+    session.close()
+    print("✅ Seeding complete.")

@@ -51,10 +51,12 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
 const Departments = () => {
   const { hasPermission } = usePermissions();
   const { user } = useAuth();
-  // Check if user has Super Admin role based on roles array from AuthContext user object
-  const isSuperAdmin = user?.roles?.some(
+  
+  const isPlatformAdmin = user?.is_administrator === true;
+  const isCompanySuperAdmin = user?.roles?.some(
     r => r.role_name?.toLowerCase() === 'super admin'
   ) || false;
+
   const [departments, setDepartments] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -100,7 +102,7 @@ const Departments = () => {
       setLoading(true);
       const params = {};
       if (debouncedSearch) params.search = debouncedSearch;
-      if (isSuperAdmin && filterCompany) params.company_id = filterCompany;
+      if (isPlatformAdmin && filterCompany) params.company_id = filterCompany;
       const response = await departmentsAPI.getAll(params);
       setDepartments(response.data.data || []);
     } catch (error) {
@@ -191,7 +193,7 @@ const Departments = () => {
           department_name: formData.department_name,
           description: formData.description,
         };
-        if (isSuperAdmin && formData.company_id) {
+        if (isPlatformAdmin && formData.company_id) {
           createPayload.company_id = formData.company_id;
         }
         await departmentsAPI.create(createPayload);
@@ -327,7 +329,7 @@ const Departments = () => {
         />
       </Box>
 
-      {isSuperAdmin && (
+      {isPlatformAdmin && (
         <Box sx={{ mb: 2 }}>
           <FormControl size="small" sx={{ minWidth: 200 }}>
             <InputLabel>Filter by Company</InputLabel>
@@ -384,7 +386,7 @@ const Departments = () => {
 
             {/* Company field — picker for Super Admin, read-only for others */}
             {!editingDepartment && !viewMode && (
-              isSuperAdmin ? (
+              isPlatformAdmin ? (
                 <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
                   <InputLabel>Company *</InputLabel>
                   <Select

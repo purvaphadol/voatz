@@ -118,7 +118,9 @@ const Dashboard = () => {
         Welcome back, {user && user.name}!
       </Typography>
       <Typography variant="body1" color="text.secondary" gutterBottom>
-        Here's what's happening in your {user && user.company_name} organization
+        {user?.is_administrator 
+          ? "Here's what's happening across the platform (Note: A dedicated Administrator dashboard is separate future work)" 
+          : `Here's what's happening in your ${user && user.company_name} organization`}
       </Typography>
 
       <Grid container spacing={3} sx={{ mt: 2 }}>
@@ -232,7 +234,7 @@ const Dashboard = () => {
             </Typography>
                          <Box>
                <Typography variant="body2" gutterBottom>
-                 <strong>Company:</strong> {user && user.company_name}
+                 <strong>Company:</strong> {user && (user.is_administrator ? 'Platform' : user.company_name)}
                </Typography>
                <Typography variant="body2" gutterBottom>
                  <strong>Email:</strong> {user && user.email}

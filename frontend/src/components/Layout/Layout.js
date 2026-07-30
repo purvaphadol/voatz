@@ -244,7 +244,7 @@ const Layout = ({ children }) => {
             )}
             
             <Typography variant="body2">
-              {user && user.company_name}
+              {user && (user.is_administrator ? 'Platform Administrator' : user.company_name)}
             </Typography>
             
             <IconButton

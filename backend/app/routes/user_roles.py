@@ -9,19 +9,40 @@ from app.utils import get_current_company_id, require_permission
 from app.utils.db_utils import safe_commit
 from app.utils.audit import audit_action, set_audit_fields
 from app.utils.validators import parse_pagination
-from app.utils.constants import STATUS_INACTIVE
+from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE, STATUS_DEACTIVATED
 
 user_roles_bp = Blueprint('user_roles', __name__)
+
+# ---------------------------------------------------------------------------
+# Allowed values for the ``?status=`` query-string filter on list endpoints.
+# STATUS_DEACTIVATED records are *never* returned regardless of filter value.
+# ---------------------------------------------------------------------------
+_STATUS_FILTER_MAP = {
+    'active': [STATUS_ACTIVE],
+    'inactive': [STATUS_INACTIVE],
+    'all': [STATUS_ACTIVE, STATUS_INACTIVE],
+}
 
 @user_roles_bp.route('/', methods=['GET'])
 @require_permission('UserRoles', 'view')
 def list_user_roles():
-    """Get all user-role mappings for the current company"""
-    company_id = get_current_company_id()
+    """Get all user-role mappings for the current company.
+
+    Supports ``?status=active|inactive|all`` (default ``active``).
+    STATUS_DEACTIVATED records are never returned.
+    """
+    from app.utils import is_administrator
+    filter_company_id = request.args.get('company_id')
 
     page, per_page, error = parse_pagination(request)
     if error:
         return error
+
+    # --- status filter ---
+    status_param = request.args.get('status', 'active').lower()
+    if status_param not in _STATUS_FILTER_MAP:
+        return jsonify({'error': 'Invalid status filter'}), 400
+    allowed = _STATUS_FILTER_MAP[status_param]
 
     query = db.session.query(
         UserRoleMapping,
@@ -36,11 +57,21 @@ def list_user_roles():
     ).join(
         Department, UserRoleMapping.department_id == Department.id
     ).filter(
-        UserRoleMapping.company_id == company_id,
-        UserRoleMapping.status != STATUS_INACTIVE,
-        User.status != STATUS_INACTIVE,
-        Role.status != STATUS_INACTIVE
+        UserRoleMapping.status.in_(allowed),
+        UserRoleMapping.status != STATUS_DEACTIVATED,
+        User.status != STATUS_DEACTIVATED,
+        Role.status != STATUS_DEACTIVATED,
     )
+
+    if is_administrator():
+        if filter_company_id:
+            try:
+                query = query.filter(UserRoleMapping.company_id == int(filter_company_id))
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Invalid company_id parameter'}), 400
+    else:
+        company_id = get_current_company_id()
+        query = query.filter(UserRoleMapping.company_id == company_id)
 
     # Apply search and filter params
     search = request.args.get('search', '').strip()
@@ -94,8 +125,14 @@ def list_user_roles():
 @user_roles_bp.route('/user/<int:user_id>/roles', methods=['GET'])
 @require_permission('UserRoles', 'view')
 def get_user_roles(user_id):
-    company_id = get_current_company_id()
-    user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
+    """Get roles for a specific user.  STATUS_DEACTIVATED records are never returned."""
+    from app.utils import is_administrator
+    if is_administrator():
+        user = User.query.filter_by(id=user_id).first_or_404()
+        company_id = user.company_id
+    else:
+        company_id = get_current_company_id()
+        user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
 
     user_roles = db.session.query(
         UserRoleMapping,
@@ -109,8 +146,11 @@ def get_user_roles(user_id):
         UserRoleMapping.user_id == user_id,
         UserRoleMapping.company_id == company_id,
         UserRoleMapping.status != STATUS_INACTIVE,
+        UserRoleMapping.status != STATUS_DEACTIVATED,
         User.status != STATUS_INACTIVE,
-        Role.status != STATUS_INACTIVE
+        User.status != STATUS_DEACTIVATED,
+        Role.status != STATUS_INACTIVE,
+        Role.status != STATUS_DEACTIVATED,
     ).all()
 
     return jsonify([{
@@ -126,20 +166,25 @@ def get_user_roles(user_id):
 @require_permission('UserRoles', 'create')
 @audit_action('assign_role', module='UserRoles', description='Assigned role to user')
 def assign_role_to_user(user_id):
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
     data = request.get_json()
 
     if not data or not data.get('role_id') or not data.get('department_id'):
         return jsonify({'error': 'Role ID and Department ID are required'}), 400
 
-    user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
+    if is_administrator():
+        user = User.query.filter_by(id=user_id).first_or_404()
+        company_id = user.company_id
+    else:
+        company_id = get_current_company_id()
+        user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
 
     role = Role.query.filter_by(id=data['role_id'], company_id=company_id).first()
     if not role:
         return jsonify({'error': 'Role not found in this company'}), 404
 
-    if role.role_name.lower() == 'super admin':
-        return jsonify({'error': 'Super Admin role cannot be assigned via API'}), 403
+    if role.is_super_admin:
+        return jsonify({'error': 'The Company Super Admin role cannot be assigned via API'}), 403
 
     department = Department.query.filter_by(id=data['department_id'], company_id=company_id).first()
     if not department:
@@ -174,12 +219,17 @@ def assign_role_to_user(user_id):
 @audit_action('remove_role', module='UserRoles', description='Removed role from user',
               get_target_id=lambda *a, **kw: kw.get('mapping_id'))
 def remove_role_from_user(mapping_id):
-    company_id = get_current_company_id()
-
-    user_role = UserRoleMapping.query.filter_by(
-        id=mapping_id,
-        company_id=company_id
-    ).first_or_404()
+    from app.utils import is_administrator
+    if is_administrator():
+        user_role = UserRoleMapping.query.filter_by(
+            id=mapping_id
+        ).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        user_role = UserRoleMapping.query.filter_by(
+            id=mapping_id,
+            company_id=company_id
+        ).first_or_404()
 
     user_role.status = STATUS_INACTIVE
     set_audit_fields(user_role, is_create=False)
@@ -193,13 +243,21 @@ def remove_role_from_user(mapping_id):
 @audit_action('update_user_role', module='UserRoles', description='Updated user role',
               get_target_id=lambda *a, **kw: kw.get('mapping_id'))
 def update_user_role(mapping_id):
+    from app.utils import is_administrator
     company_id = get_current_company_id()
     data = request.get_json()
 
-    user_role = UserRoleMapping.query.filter_by(
-        id=mapping_id,
-        company_id=company_id
-    ).first_or_404()
+    if is_administrator():
+        user_role = UserRoleMapping.query.filter_by(
+            id=mapping_id
+        ).first_or_404()
+        company_id = user_role.company_id
+    else:
+        company_id = get_current_company_id()
+        user_role = UserRoleMapping.query.filter_by(
+            id=mapping_id,
+            company_id=company_id
+        ).first_or_404()
 
     if data.get('status') is not None:
         user_role.status = data['status']

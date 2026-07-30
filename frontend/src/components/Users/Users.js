@@ -46,7 +46,9 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
 const Users = () => {
   const { hasPermission } = usePermissions();
   const { user } = useAuth();
-  const isSuperAdmin = user?.roles?.some(
+  
+  const isPlatformAdmin = user?.is_administrator === true;
+  const isCompanySuperAdmin = user?.roles?.some(
     r => r.role_name?.toLowerCase() === 'super admin'
   ) || false;
 
@@ -94,14 +96,12 @@ const Users = () => {
   }, [page, pageSize, debouncedSearch]);
 
   useEffect(() => {
-    if (isSuperAdmin) loadCompanies();
-  }, [isSuperAdmin]);
+    if (isPlatformAdmin) loadCompanies();
+  }, [isPlatformAdmin]);
 
   useEffect(() => {
-    if (!isSuperAdmin) {
-      loadDepartments();
-    }
-  }, [isSuperAdmin]);
+    loadDepartments();
+  }, []);
 
   const loadUsers = async () => {
     try {
@@ -161,6 +161,9 @@ const Users = () => {
       password: '',
       department_id: user.department_id || '',
     });
+    if (isPlatformAdmin && user.company_id) {
+      loadDepartments(user.company_id);
+    }
     setDialogOpen(true);
   };
 
@@ -187,7 +190,7 @@ const Users = () => {
       email: formData.email.trim().toLowerCase(),
     };
 
-    if (isSuperAdmin && !editingUser && !formData.company_id) {
+    if (isPlatformAdmin && !editingUser && !formData.company_id) {
       setError('Please select a company');
       return;
     }
@@ -227,7 +230,7 @@ const Users = () => {
       setIsSubmitting(true);
       
       const payload = { ...cleanedData };
-      if (!isSuperAdmin || editingUser) {
+      if (!isPlatformAdmin || editingUser) {
         delete payload.company_id;
       }
       
@@ -262,7 +265,7 @@ const Users = () => {
       width: 150,
       renderCell: (params) => (
         <Chip
-          label={getDepartmentName(params.value)}
+          label={params.row.department_name || getDepartmentName(params.value)}
           size="small"
           variant="outlined"
         />
@@ -416,7 +419,7 @@ const Users = () => {
               sx={{ mb: 2 }}
             />
             {!editingUser ? (
-              isSuperAdmin ? (
+              isPlatformAdmin ? (
                 <TextField
                   margin="dense"
                   label="Company *"

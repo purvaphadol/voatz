@@ -10,11 +10,22 @@ menu_bp = Blueprint('menu', __name__)
 @require_company_context
 def get_user_sidebar():
     """Generate dynamic sidebar menu based on user permissions"""
+    from app.utils import is_administrator, get_current_user
     permissions = get_user_permissions_summary()
-    company_id = get_current_company_id()
     
-    # Get only active modules with their display routes, ordered by order_index
-    modules = Module.query.filter_by(company_id=company_id).filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
+    if is_administrator():
+        # Get active modules from any company, and de-duplicate by module_name
+        all_modules = Module.query.filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
+        seen = set()
+        modules = []
+        for m in all_modules:
+            if m.module_name not in seen:
+                seen.add(m.module_name)
+                modules.append(m)
+    else:
+        company_id = get_current_company_id()
+        modules = Module.query.filter_by(company_id=company_id).filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
+        
     module_routes = {module.module_name: module.display_route for module in modules}
     module_orders = {module.module_name: module.order_index for module in modules}
     module_icons = {module.module_name: module.icon for module in modules}
@@ -59,12 +70,24 @@ def get_user_sidebar():
     
     menu_items.sort(key=get_module_order)
     
+    current_user = get_current_user()
+    if current_user:
+        user_data = {
+            'id': current_user.id,
+            'name': current_user.name,
+            'email': current_user.email
+        }
+    else:
+        from app.utils import get_current_administrator
+        admin = get_current_administrator()
+        user_data = {
+            'id': f"admin:{admin.id}" if admin else 'admin',
+            'name': admin.name if admin else 'Platform Administrator',
+            'email': admin.email if admin else 'admin@gmail.com'
+        }
+        
     return jsonify({
-        'user': {
-            'id': get_current_user().id,
-            'name': get_current_user().name,
-            'email': get_current_user().email
-        },
+        'user': user_data,
         'menu': menu_items,
         'total_modules': len(menu_items),
         'total_permissions': sum(len(actions) for actions in permissions.values())
@@ -177,13 +200,24 @@ def get_navigation_items():
             
             navigation.append(filtered_item)
     
+    current_user = get_current_user()
+    if current_user:
+        user_context = {
+            'name': current_user.name,
+            'company_id': current_user.company_id
+        }
+    else:
+        from app.utils import get_current_administrator
+        admin = get_current_administrator()
+        user_context = {
+            'name': admin.name if admin else 'Platform Administrator',
+            'company_id': None
+        }
+
     return jsonify({
         'navigation': navigation,
         'breadcrumbs_enabled': True,
-        'user_context': {
-            'name': get_current_user().name,
-            'company_id': get_current_user().company_id
-        }
+        'user_context': user_context
     })
 
 def get_module_icon(module_name):

@@ -18,15 +18,25 @@ modules_bp = Blueprint('modules', __name__)
 @modules_bp.route('/', methods=['GET'])
 @require_permission('Modules', 'view')
 def list_modules():
-    company_id = get_current_company_id()
-    
-    query = get_admin_modules_query(company_id)
-    
+    from app.utils import is_administrator
+    filter_company_id = request.args.get('company_id')
     search = request.args.get('search', '').strip()
+    
+    if is_administrator():
+        query = Module.query.filter(Module.status != STATUS_INACTIVE)
+        if filter_company_id:
+            try:
+                query = query.filter(Module.company_id == int(filter_company_id))
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Invalid company_id parameter'}), 400
+    else:
+        company_id = get_current_company_id()
+        query = get_admin_modules_query(company_id)
+        
     if search:
         query = query.filter(Module.module_name.ilike(f"%{search}%"))
         
-    modules_list = query.all()
+    modules_list = query.order_by(Module.order_index.asc(), Module.module_name.asc()).all()
     
     module_data = []
     for m in modules_list:
@@ -55,8 +65,22 @@ def list_modules():
 @require_permission('Modules', 'create')
 @audit_action('create_module', module='Modules', description='Created a module')
 def create_module():
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
     data = request.get_json()
+    
+    if is_administrator():
+        body_company_id = data.get('company_id') if data else None
+        if not body_company_id:
+            return jsonify({'error': 'company_id is required for platform Administrators'}), 400
+        try:
+            company_id = int(body_company_id)
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid company_id format'}), 400
+        company = Company.query.filter_by(id=company_id).filter(Company.status != STATUS_INACTIVE).first()
+        if not company:
+            return jsonify({'error': 'Company not found or inactive'}), 404
+    else:
+        company_id = get_current_company_id()
     
     cleaned_data, error = validate_module_input(data, is_create=True)
     if error:
@@ -107,12 +131,19 @@ def create_module():
 @modules_bp.route('/<int:module_id>', methods=['GET'])
 @require_permission('Modules', 'view')
 def get_module(module_id):
-    company_id = get_current_company_id()
-    m = Module.query.filter(
-        Module.id == module_id, 
-        Module.company_id == company_id,
-        Module.status != STATUS_INACTIVE
-    ).first_or_404()
+    from app.utils import is_administrator
+    if is_administrator():
+        m = Module.query.filter(
+            Module.id == module_id,
+            Module.status != STATUS_INACTIVE
+        ).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        m = Module.query.filter(
+            Module.id == module_id, 
+            Module.company_id == company_id,
+            Module.status != STATUS_INACTIVE
+        ).first_or_404()
     
     return jsonify({
         'id': m.id, 
@@ -134,12 +165,20 @@ def get_module(module_id):
 @require_permission('Modules', 'update')
 @audit_action('update_module', module='Modules', description='Updated a module', get_target_id=lambda *a, **kw: kw.get('module_id'))
 def update_module(module_id):
-    company_id = get_current_company_id()
-    module = Module.query.filter(
-        Module.id == module_id, 
-        Module.company_id == company_id,
-        Module.status != STATUS_INACTIVE
-    ).first_or_404()
+    from app.utils import is_administrator
+    if is_administrator():
+        module = Module.query.filter(
+            Module.id == module_id,
+            Module.status != STATUS_INACTIVE
+        ).first_or_404()
+        company_id = module.company_id
+    else:
+        company_id = get_current_company_id()
+        module = Module.query.filter(
+            Module.id == module_id, 
+            Module.company_id == company_id,
+            Module.status != STATUS_INACTIVE
+        ).first_or_404()
     
     data = request.get_json()
     
@@ -200,7 +239,7 @@ def update_module(module_id):
 @modules_bp.route('/<int:module_id>/status', methods=['PATCH'])
 @require_permission('Modules', 'update')
 def update_module_status(module_id):
-    company_id = get_current_company_id()
+    from app.utils import is_administrator
     data = request.get_json()
     
     if not data or 'status' not in data:
@@ -210,11 +249,18 @@ def update_module_status(module_id):
     if status not in (1, 9):
         return jsonify({'error': 'Status must be 1 (active) or 9 (deactivated)'}), 400
         
-    module = Module.query.filter(
-        Module.id == module_id, 
-        Module.company_id == company_id,
-        Module.status != STATUS_INACTIVE
-    ).first_or_404()
+    if is_administrator():
+        module = Module.query.filter(
+            Module.id == module_id,
+            Module.status != STATUS_INACTIVE
+        ).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        module = Module.query.filter(
+            Module.id == module_id, 
+            Module.company_id == company_id,
+            Module.status != STATUS_INACTIVE
+        ).first_or_404()
     
     module.status = status
     set_audit_fields(module, is_create=False)
@@ -225,12 +271,20 @@ def update_module_status(module_id):
 @require_permission('Modules', 'delete')
 @audit_action('delete_module', module='Modules', description='Deleted a module', get_target_id=lambda *a, **kw: kw.get('module_id'))
 def delete_module(module_id):
-    company_id = get_current_company_id()
-    module = Module.query.filter(
-        Module.id == module_id, 
-        Module.company_id == company_id,
-        Module.status != STATUS_INACTIVE
-    ).first_or_404()
+    from app.utils import is_administrator
+    if is_administrator():
+        module = Module.query.filter(
+            Module.id == module_id,
+            Module.status != STATUS_INACTIVE
+        ).first_or_404()
+        company_id = module.company_id
+    else:
+        company_id = get_current_company_id()
+        module = Module.query.filter(
+            Module.id == module_id, 
+            Module.company_id == company_id,
+            Module.status != STATUS_INACTIVE
+        ).first_or_404()
     
     # Check active role permissions
     role_perms = RolePermissionMapping.query.filter(

@@ -6,7 +6,8 @@ class Role(db.Model, TimestampAuditMixin):
     id = db.Column(db.Integer, primary_key=True)
     role_name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
-    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=False)
+    department_id    = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+    is_super_admin   = db.Column(db.Boolean, nullable=False, default=False)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
     
     # Relationships

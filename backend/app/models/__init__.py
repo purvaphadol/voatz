@@ -16,3 +16,4 @@ from .candidate import *
 from .vote import *
 from .verification import *
 from .voter_registration import *
+from .administrator import *

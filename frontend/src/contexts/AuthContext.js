@@ -28,7 +28,7 @@ export const AuthProvider = ({ children }) => {
           setToken(savedToken);
           let parsedUser = JSON.parse(savedUser);
           
-          if (!Array.isArray(parsedUser.roles)) {
+          if (!parsedUser.is_administrator && !Array.isArray(parsedUser.roles)) {
             const response = await authAPI.getProfile();
             parsedUser = response.data;
             if (!Array.isArray(parsedUser.roles)) parsedUser.roles = [];
@@ -50,9 +50,19 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await authAPI.login({ email, password });
-      const { access_token, user: userData } = response.data;
+      const { access_token, is_administrator } = response.data;
       
-      if (!Array.isArray(userData.roles)) userData.roles = [];
+      let userData;
+      if (is_administrator) {
+        userData = {
+          ...response.data.administrator,
+          is_administrator: true,
+          roles: []
+        };
+      } else {
+        userData = response.data.user;
+        if (!Array.isArray(userData.roles)) userData.roles = [];
+      }
       
       setToken(access_token);
       setUser(userData);
@@ -61,7 +71,7 @@ export const AuthProvider = ({ children }) => {
       Cookies.set('access_token', access_token, { expires: 1 });
       Cookies.set('user', JSON.stringify(userData), { expires: 1 });
       
-      return { success: true };
+      return { success: true, is_administrator: !!is_administrator };
     } catch (error) {
       console.error('Login error:', error);
       return {

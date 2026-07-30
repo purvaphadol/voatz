@@ -1,4 +1,4 @@
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import get_jwt_identity, get_jwt, jwt_required
 from app.models.user import User
 from app.models.user_role import UserRoleMapping
 from app.models.role_permission import RolePermissionMapping
@@ -10,6 +10,7 @@ from flask import jsonify
 from app import db
 from werkzeug.exceptions import NotFound, HTTPException
 import logging
+import warnings
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -40,40 +41,145 @@ def get_current_company_id():
     user = get_current_user()
     return user.company_id if user else None
 
-def is_current_user_super_admin():
+
+def is_administrator():
+    """Check whether the current JWT corresponds to a platform Administrator.
+
+    Administrator tokens carry an ``is_administrator: true`` custom claim
+    set at login time (see ``POST /api/auth/administrator/login``).  This
+    function inspects that claim directly — no database query is needed.
+
+    This is intentionally distinct from :func:`is_company_super_admin`, which
+    checks whether a *User* holds the Company Super Admin *role* inside their
+    own company.  Conflating the two was the root cause of several privilege-
+    escalation bugs (a Company Super Admin could perform platform-level
+    operations).
+
+    Returns:
+        bool: True only when the current JWT carries the administrator
+              claim; False otherwise.
     """
-    Returns True if the currently authenticated user has the Super Admin role.
-    Super Admin is identified by a role named 'super admin' (case-insensitive).
-    Returns False if user not found, no company context, or not Super Admin.
+    try:
+        claims = get_jwt()
+        return claims.get('is_administrator', False) is True
+    except Exception:
+        return False
+
+
+def get_current_administrator():
+    """Load the :class:`Administrator` row for the current JWT identity.
+
+    Administrator tokens use an identity string of the form ``"admin:<id>"``.
+    This helper parses the numeric id out of that string and returns the
+    corresponding ``Administrator`` row, or ``None`` if the current token is
+    not an administrator token or the row cannot be found.
+
+    Returns:
+        Administrator | None
+    """
+    try:
+        if not is_administrator():
+            return None
+
+        from app.models.administrator import Administrator
+
+        identity = get_jwt_identity()
+        if not identity or not isinstance(identity, str) or not identity.startswith('admin:'):
+            return None
+
+        admin_id_str = identity.split(':', 1)[1]
+        admin_id = int(admin_id_str)
+        return Administrator.query.get(admin_id)
+    except Exception as e:
+        logger.error(f"Error in get_current_administrator: {str(e)}")
+        return None
+
+
+def is_company_super_admin():
+    """Check whether the current user holds the Company Super Admin role.
+
+    The Company Super Admin is a protected ``Role`` row with
+    ``Role.is_super_admin = True`` within the user's own company.  This grants
+    full access **within that company only** — it does *not* confer any
+    platform-level privileges (use :func:`is_administrator` for that).
+
+    The check uses the boolean ``Role.is_super_admin`` column rather than
+    matching on a role-name string, which avoids false positives from
+    similarly-named regular roles.
+
+    Returns:
+        bool: True if the current user is mapped to an active super-admin
+              role in their own company; False otherwise.
     """
     try:
         from app.models.role import Role
-        from app.models.user_role import UserRoleMapping
-        
+
         user = get_current_user()
         if not user or not user.company_id:
             return False
-        
+
         super_admin_role = Role.query.filter(
-            Role.role_name.ilike('super admin'),
+            Role.is_super_admin.is_(True),
             Role.company_id == user.company_id,
             Role.status != 0
         ).first()
-        
+
         if not super_admin_role:
             return False
-        
+
         mapping = UserRoleMapping.query.filter_by(
             user_id=user.id,
             role_id=super_admin_role.id,
             status=1
         ).first()
-        
+
         return mapping is not None
-        
+
     except Exception as e:
-        logger.error(f"Error in is_current_user_super_admin: {str(e)}")
+        logger.error(f"Error in is_company_super_admin: {str(e)}")
         return False
+
+
+def is_current_user_super_admin():
+    """**Deprecated** — use :func:`is_company_super_admin` or
+    :func:`is_administrator` instead.
+
+    Kept as a thin wrapper around :func:`is_company_super_admin` so that
+    call-sites not yet migrated continue to work without silently breaking.
+    """
+    warnings.warn(
+        "is_current_user_super_admin() is deprecated. "
+        "Use is_company_super_admin() or is_administrator() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return is_company_super_admin()
+
+
+def require_same_company_or_administrator(target_company_id):
+    """Return a (response, status_code) tuple if the caller is neither a
+    platform Administrator nor a member of *target_company_id*.
+
+    Use this at the top of any route that needs the "same company unless
+    you're a platform admin" guard.  If the check passes, the function
+    returns ``None`` and the caller should continue normally.
+
+    Args:
+        target_company_id: The company_id the action is being performed on.
+
+    Returns:
+        None on success, or a ``(jsonify({...}), 403)`` tuple to return
+        directly from the calling route on failure.
+    """
+    if is_administrator():
+        return None
+
+    current_company = get_current_company_id()
+    if current_company != target_company_id:
+        return jsonify({'error': 'Forbidden: you can only access your own company'}), 403
+
+    return None
+
 
 def require_company_context(f):
     """Decorator to ensure the user has a valid company context"""
@@ -81,6 +187,8 @@ def require_company_context(f):
     @jwt_required()
     def decorated_function(*args, **kwargs):
         try:
+            if is_administrator():
+                return f(*args, **kwargs)
             user = get_current_user()
             if not user or not user.company_id:
                 return jsonify({'error': 'Invalid company context'}), 403
@@ -171,12 +279,27 @@ def check_user_permission(module_name, action_name):
         return False
 
 def require_permission(module_name, action_name):
-    """Decorator to require specific permission for accessing an endpoint"""
+    """Decorator to require specific permission for accessing an endpoint.
+
+    Platform Administrators (identified by the ``is_administrator`` JWT claim)
+    bypass the company-context and module/action permission checks entirely,
+    since their privileges are unconditional and not backed by company-scoped
+    Module/ModuleAction/RolePermission rows.
+
+    For all other identities the existing RBAC check is applied unchanged.
+    """
     def decorator(f):
         @wraps(f)
         @jwt_required()
         def decorated_function(*args, **kwargs):
             try:
+                # Administrators have unconditional access — they carry no
+                # company-scoped permission rows, so the normal RBAC path
+                # would always reject them.
+                if is_administrator():
+                    logger.info(f"Administrator granted access to {module_name}.{action_name}")
+                    return f(*args, **kwargs)
+
                 user = get_current_user()
                 if not user:
                     logger.warning(f"No user found for {module_name}.{action_name} endpoint")
@@ -212,6 +335,20 @@ def require_permission(module_name, action_name):
 
 def get_user_permissions_summary():
     """Get comprehensive permissions summary for current user"""
+    if is_administrator():
+        modules = Module.query.filter(Module.status != 0).all()
+        permissions = {}
+        for m in modules:
+            if m.module_name not in permissions:
+                permissions[m.module_name] = []
+                for action_name in ['view', 'create', 'update', 'delete']:
+                    permissions[m.module_name].append({
+                        'action': action_name,
+                        'source': 'administrator',
+                        'url': f'/{action_name}'
+                    })
+        return permissions
+
     from app.utils.query_helpers import get_active_user_role_mappings, get_active_role_permissions
     user = get_current_user()
     if not user:
