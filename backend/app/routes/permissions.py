@@ -246,6 +246,27 @@ def update_role_permissions(role_id):
         return jsonify({'error': 'Role is inactive'}), 400
 
     try:
+        permissions_data = data['permissions']
+        valid_module_ids = {m.id for m in Module.query.filter_by(company_id=company_id).filter(Module.status != STATUS_INACTIVE).all()}
+        valid_action_ids = {a.id for a in ModuleAction.query.filter_by(company_id=company_id).filter(ModuleAction.status != STATUS_INACTIVE).all()}
+
+        # Validate all modules and actions belong to this company before mutating any state
+        for module_id_str, actions in permissions_data.items():
+            try:
+                module_id = int(module_id_str)
+            except (ValueError, TypeError):
+                return jsonify({'error': f'Invalid module_id: {module_id_str}'}), 400
+            if module_id not in valid_module_ids:
+                return jsonify({'error': f'Module {module_id} not found in this company'}), 404
+
+            for action_id_str, granted in actions.items():
+                try:
+                    action_id = int(action_id_str)
+                except (ValueError, TypeError):
+                    return jsonify({'error': f'Invalid action_id: {action_id_str}'}), 400
+                if action_id not in valid_action_ids:
+                    return jsonify({'error': f'Module action {action_id} not found in this company'}), 404
+
         # Delete existing permissions for this role
         RolePermissionMapping.query.filter_by(
             role_id=role_id,
@@ -253,7 +274,6 @@ def update_role_permissions(role_id):
         ).delete()
 
         # Add new permissions
-        permissions_data = data['permissions']
         for module_id, actions in permissions_data.items():
             for action_id, granted in actions.items():
                 if granted:
@@ -299,6 +319,27 @@ def update_user_permissions(user_id):
         return jsonify({'error': 'User is inactive'}), 400
 
     try:
+        permissions_data = data['permissions']
+        valid_module_ids = {m.id for m in Module.query.filter_by(company_id=company_id).filter(Module.status != STATUS_INACTIVE).all()}
+        valid_action_ids = {a.id for a in ModuleAction.query.filter_by(company_id=company_id).filter(ModuleAction.status != STATUS_INACTIVE).all()}
+
+        # Validate all modules and actions belong to this company before mutating any state
+        for module_id_str, actions in permissions_data.items():
+            try:
+                module_id = int(module_id_str)
+            except (ValueError, TypeError):
+                return jsonify({'error': f'Invalid module_id: {module_id_str}'}), 400
+            if module_id not in valid_module_ids:
+                return jsonify({'error': f'Module {module_id} not found in this company'}), 404
+
+            for action_id_str, granted in actions.items():
+                try:
+                    action_id = int(action_id_str)
+                except (ValueError, TypeError):
+                    return jsonify({'error': f'Invalid action_id: {action_id_str}'}), 400
+                if action_id not in valid_action_ids:
+                    return jsonify({'error': f'Module action {action_id} not found in this company'}), 404
+
         # Step 1: Get role-based permissions using active mappings only
         active_mappings = get_active_user_role_mappings(user_id, company_id)
         role_ids = [ur.role_id for ur in active_mappings]
@@ -319,7 +360,6 @@ def update_user_permissions(user_id):
         }
 
         # Step 3: Process incoming permissions — diff against existing overrides
-        permissions_data = data['permissions']
         overrides_added = 0
         overrides_removed = 0
         overrides_unchanged = 0

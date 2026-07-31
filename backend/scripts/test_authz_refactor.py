@@ -11,7 +11,7 @@ Assumes Flask dev server already running on localhost:4000.
 Company B is seeded directly via seed_data.seed_company() so it gets the
 full module/action/permission fan-out.
 """
-import sys, os, json, time, requests
+import sys, os, json, time, requests, uuid
 from datetime import datetime
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -559,6 +559,16 @@ try:
     ).first()
     mod_a_id = mod_a.id if mod_a else None
 
+    # Get a role and user from Company A
+    role_a = session.execute(
+        meta.tables["roles"].select().where(meta.tables["roles"].c.company_id == A_COMPANY_ID)
+    ).first()
+    role_a_id = role_a.id if role_a else None
+    user_a = session.execute(
+        meta.tables["users"].select().where(meta.tables["users"].c.company_id == A_COMPANY_ID)
+    ).first()
+    user_a_id = user_a.id if user_a else None
+
     # Get a module from Company B
     mod_b = session.execute(
         meta.tables["modules"].select().where(meta.tables["modules"].c.company_id == COMPANY_B_ID)
@@ -613,6 +623,10 @@ record("11.4", "Company A Super Admin cannot update Company B module → 404", 4
 r_del_mod_b = requests.delete(f"{BASE}/modules/{mod_b_id}", headers=ah(A_SUPER_TOKEN))
 record("11.5", "Company A Super Admin cannot delete Company B module → 404", 404, r_del_mod_b)
 
+# 11.5b - Company A Super Admin cannot patch status on Company B module
+r_patch_mod_b = requests.patch(f"{BASE}/modules/{mod_b_id}/status", headers=ah(A_SUPER_TOKEN), json={"status": 9})
+record("11.5b", "Company A Super Admin cannot patch status on Company B module → 404", 404, r_patch_mod_b)
+
 # 11.6 - Company A Super Admin gets module actions of Company A module
 r_act_a = requests.get(f"{BASE}/module-actions/module/{mod_a_id}/actions", headers=ah(A_SUPER_TOKEN))
 record("11.6", "Company A Super Admin get-module-actions for own module → 200", 200, r_act_a)
@@ -624,6 +638,18 @@ record("11.7", "Company A Super Admin cannot get Company B module actions → 40
 # 11.8 - Company A Super Admin cannot update Company B module action
 r_put_act_b = requests.put(f"{BASE}/module-actions/action/{act_b_id}", headers=ah(A_SUPER_TOKEN), json={"action_name": "HackAct"})
 record("11.8", "Company A Super Admin cannot update Company B module action → 404", 404, r_put_act_b)
+
+# 11.8b - Company A Super Admin cannot create action on Company B module
+r_post_act_b = requests.post(f"{BASE}/module-actions/module/{mod_b_id}/actions", headers=ah(A_SUPER_TOKEN), json={"action_name": "HackAct", "action_url": "/hack"})
+record("11.8b", "Company A Super Admin cannot create action on Company B module → 404", 404, r_post_act_b)
+
+# 11.8c - Company A Super Admin cannot bulk create actions on Company B module
+r_bulk_act_b = requests.post(f"{BASE}/module-actions/actions/bulk", headers=ah(A_SUPER_TOKEN), json={"module_id": mod_b_id, "actions": [{"action_name": "HackBulk", "action_url": "/bulk"}]})
+record("11.8c", "Company A Super Admin cannot bulk create actions on Company B module → 404", 404, r_bulk_act_b)
+
+# 11.8d - Company A Super Admin cannot delete Company B module action
+r_del_act_b = requests.delete(f"{BASE}/module-actions/action/{act_b_id}", headers=ah(A_SUPER_TOKEN))
+record("11.8d", "Company A Super Admin cannot delete Company B module action → 404", 404, r_del_act_b)
 
 # 11.9 - Company A Super Admin cannot view Company B user permissions
 r_perm_b = requests.get(f"{BASE}/permissions/user/{user_b_id}", headers=ah(A_SUPER_TOKEN))
@@ -641,6 +667,18 @@ r_crud_b = requests.post(f"{BASE}/permissions/role", headers=ah(A_SUPER_TOKEN), 
     "company_id": COMPANY_B_ID
 })
 record("11.11", "Company A Super Admin cannot assign Company B role permission → 404", 404, r_crud_b)
+
+# 11.11b - Company A Super Admin cannot reference Company B module/action in update-role-permissions (secondary IDOR)
+r_role_sec = requests.post(f"{BASE}/permissions/role/{role_a_id}", headers=ah(A_SUPER_TOKEN), json={
+    "permissions": {str(mod_b_id): {str(act_b_id): True}}
+})
+record("11.11b", "Company A Super Admin cannot inject Company B module/action in role perms → 404", 404, r_role_sec)
+
+# 11.11c - Company A Super Admin cannot reference Company B module/action in update-user-permissions (secondary IDOR)
+r_user_sec = requests.post(f"{BASE}/permissions/user/{user_a_id}", headers=ah(A_SUPER_TOKEN), json={
+    "permissions": {str(mod_b_id): {str(act_b_id): True}}
+})
+record("11.11c", "Company A Super Admin cannot inject Company B module/action in user perms → 404", 404, r_user_sec)
 
 # 11.12 - Company A Super Admin cannot update Company B user-role mapping
 r_urm_b = requests.put(f"{BASE}/user-roles/user-role/{urm_b_id}", headers=ah(A_SUPER_TOKEN), json={"status": 1})
@@ -661,6 +699,234 @@ record("11.14", "Company A Super Admin list-audit-logs → 200, no Company B log
 # 11.15 - Company A Super Admin cannot view Company B user audit logs
 r_user_audit_b = requests.get(f"{BASE}/audit/user/{user_b_id}", headers=ah(A_SUPER_TOKEN))
 record("11.15", "Company A Super Admin cannot view Company B user audit logs → 404", 404, r_user_audit_b)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+print("\n── Section 12: Voters Cross-company Isolation & Admin Scoping ────────")
+
+# Admin omits company_id when creating a voter -> 400
+r_no_co = requests.post(f"{BASE}/voters/", headers=ah(ADMIN_TOKEN), json={"name": f"AdminVoter {TS}", "phone_number": "1231231234"})
+record("12.1", "Admin omits company_id on create-voter → 400", 400, r_no_co)
+
+# Admin creates voter in Company B -> 201
+r_create_vb = requests.post(f"{BASE}/voters/", headers=ah(ADMIN_TOKEN), json={"name": f"BVoter {TS}", "phone_number": f"{TS}0001", "company_id": COMPANY_B_ID})
+record("12.2", "Admin creates voter in Company B with explicit company_id → 201", 201, r_create_vb)
+voter_b_test_id = r_create_vb.json().get("voter_id") if r_create_vb.status_code == 201 else 1
+
+# Company A Super Admin cannot get Company B voter -> 404
+r_get_vb = requests.get(f"{BASE}/voters/{voter_b_test_id}", headers=ah(A_SUPER_TOKEN))
+record("12.3", "Company A Super Admin cannot get Company B voter → 404", 404, r_get_vb)
+
+# Company A Super Admin cannot update Company B voter -> 404
+r_put_vb = requests.put(f"{BASE}/voters/{voter_b_test_id}", headers=ah(A_SUPER_TOKEN), json={"phone_number": "0000000000"})
+record("12.4", "Company A Super Admin cannot update Company B voter → 404", 404, r_put_vb)
+
+# Company A Super Admin cannot delete Company B voter -> 404
+r_del_vb = requests.delete(f"{BASE}/voters/{voter_b_test_id}", headers=ah(A_SUPER_TOKEN))
+record("12.5", "Company A Super Admin cannot delete Company B voter → 404", 404, r_del_vb)
+
+# 12.6 - Company A Super Admin list-voters -> 200, no Company B rows
+r_list_voters = requests.get(f"{BASE}/voters/?per_page=100", headers=ah(A_SUPER_TOKEN))
+record("12.6", "Company A Super Admin list-voters → 200, no Company B rows", 200, r_list_voters,
+       lambda b: "data" in b and not any(v.get("id") == voter_b_test_id for v in b.get("data", [])))
+
+# 12.7 - Company A Super Admin cannot create voter linked to Company B user_id -> 404
+r_link_user_b = requests.post(f"{BASE}/voters/", headers=ah(A_SUPER_TOKEN), json={"user_id": user_b_id, "phone_number": "9998887777"})
+record("12.7", "Company A Super Admin cannot create voter linked to Company B user_id → 404", 404, r_link_user_b)
+
+# 12.8 - Company A Super Admin cannot verify Company B voter -> 404
+r_verify_vb = requests.post(f"{BASE}/voters/{voter_b_test_id}/verify", headers=ah(A_SUPER_TOKEN), json={"verification_type": "phone"})
+record("12.8", "Company A Super Admin cannot verify Company B voter → 404", 404, r_verify_vb)
+
+# 12.9 - Company A Super Admin cannot view Company B voter registrations -> 404
+r_regs_vb = requests.get(f"{BASE}/voters/{voter_b_test_id}/registrations", headers=ah(A_SUPER_TOKEN))
+record("12.9", "Company A Super Admin cannot view Company B voter registrations → 404", 404, r_regs_vb)
+
+# 12.10 - Company A Super Admin cannot view Company B voter votes -> 404
+r_votes_vb = requests.get(f"{BASE}/voters/{voter_b_test_id}/votes", headers=ah(A_SUPER_TOKEN))
+record("12.10", "Company A Super Admin cannot view Company B voter votes → 404", 404, r_votes_vb)
+
+# 12.11 - Company A Super Admin get-voter-stats -> 200
+r_stats_a = requests.get(f"{BASE}/voters/stats", headers=ah(A_SUPER_TOKEN))
+record("12.11", "Company A Super Admin get-voter-stats → 200", 200, r_stats_a)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+print("\n── Section 13: Voter Registrations Cross-company Isolation ───────────")
+
+db_session = DBSession()
+try:
+    t_elec = meta.tables["elections"]
+    t_vreg = meta.tables["voter_registrations"]
+    now = datetime.now()
+    elec_b_id = db_session.execute(
+        t_elec.insert().values(
+            company_id=COMPANY_B_ID,
+            title=f"Election B {TS}",
+            status='active',
+            election_code=f"EB-{TS}-{uuid.uuid4().hex[:4]}",
+            election_type="general",
+            start_date=now,
+            end_date=now,
+            created_at=now,
+            updated_at=now
+        ).returning(t_elec.c.id)
+    ).scalar()
+    
+    reg_b_id = db_session.execute(
+        t_vreg.insert().values(
+            company_id=COMPANY_B_ID,
+            voter_id=voter_b_test_id,
+            election_id=elec_b_id,
+            registration_id=f"REG-B-{TS}-{uuid.uuid4().hex[:4]}",
+            status="pending",
+            registered_at=now,
+            created_at=now,
+            updated_at=now
+        ).returning(t_vreg.c.id)
+    ).scalar()
+    db_session.commit()
+finally:
+    db_session.close()
+
+# 13.1 - Company A Super Admin list-voter-registrations -> 200, no Company B rows
+r_vr_list = requests.get(f"{BASE}/voter-registrations/?per_page=100", headers=ah(A_SUPER_TOKEN))
+record("13.1", "Company A Super Admin list-voter-registrations → 200, no Company B rows", 200, r_vr_list,
+       lambda b: "data" in b and not any(r.get("id") == reg_b_id for r in b.get("data", [])))
+
+# 13.2 - Company A Super Admin cannot create registration referencing Company B voter/election -> 404
+r_vr_create = requests.post(f"{BASE}/voter-registrations/", headers=ah(A_SUPER_TOKEN), json={
+    "voter_id": voter_b_test_id, "election_id": elec_b_id, "status": "pending"
+})
+record("13.2", "Company A Super Admin cannot create registration with Company B voter/election → 404", 404, r_vr_create)
+
+# 13.3 - Company A Super Admin cannot get Company B registration -> 404 [BUG FIX: previously 500]
+r_vr_get = requests.get(f"{BASE}/voter-registrations/{reg_b_id}", headers=ah(A_SUPER_TOKEN))
+record("13.3", "Company A Super Admin cannot get Company B registration → 404", 404, r_vr_get)
+
+# 13.4 - Company A Super Admin cannot update Company B registration -> 404
+r_vr_put = requests.put(f"{BASE}/voter-registrations/{reg_b_id}", headers=ah(A_SUPER_TOKEN), json={"preferred_language": "en"})
+record("13.4", "Company A Super Admin cannot update Company B registration → 404", 404, r_vr_put)
+
+# 13.5 - Company A Super Admin cannot approve Company B registration -> 404
+r_vr_app = requests.post(f"{BASE}/voter-registrations/{reg_b_id}/approve", headers=ah(A_SUPER_TOKEN), json={"notes": "hack"})
+record("13.5", "Company A Super Admin cannot approve Company B registration → 404", 404, r_vr_app)
+
+# 13.6 - Company A Super Admin cannot reject Company B registration -> 404
+r_vr_rej = requests.post(f"{BASE}/voter-registrations/{reg_b_id}/reject", headers=ah(A_SUPER_TOKEN), json={"reason": "hack"})
+record("13.6", "Company A Super Admin cannot reject Company B registration → 404", 404, r_vr_rej)
+
+# 13.7 - Company A Super Admin cannot bulk approve Company B registration (approved_count is 0) -> 200
+r_vr_bulk = requests.post(f"{BASE}/voter-registrations/bulk-approve", headers=ah(A_SUPER_TOKEN), json={"registration_ids": [reg_b_id]})
+record("13.7", "Company A Super Admin bulk approve ignores Company B registration → 200 (count=0)", 200, r_vr_bulk,
+       lambda b: b.get("approved_count") == 0)
+
+# 13.8 - Company A Super Admin get-voter-registration-stats -> 200
+r_vr_stats = requests.get(f"{BASE}/voter-registrations/stats", headers=ah(A_SUPER_TOKEN))
+record("13.8", "Company A Super Admin get-voter-registration-stats → 200", 200, r_vr_stats)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+print("\n── Section 14: Candidates Cross-company Isolation ────────────────────")
+
+db_session = DBSession()
+try:
+    t_elec = meta.tables["elections"]
+    t_ballots = meta.tables["ballots"]
+    t_candidates = meta.tables["candidates"]
+    now = datetime.now()
+    elec_b_cand_id = db_session.execute(
+        t_elec.insert().values(
+            company_id=COMPANY_B_ID,
+            title=f"Election Cand B {TS}",
+            status='draft',
+            election_code=f"ECB-{TS}-{uuid.uuid4().hex[:4]}",
+            election_type="general",
+            start_date=now,
+            end_date=now,
+            created_at=now,
+            updated_at=now
+        ).returning(t_elec.c.id)
+    ).scalar()
+    
+    ballot_b_id = db_session.execute(
+        t_ballots.insert().values(
+            company_id=COMPANY_B_ID,
+            election_id=elec_b_cand_id,
+            title=f"Ballot B {TS}",
+            ballot_code=f"BAL-{TS}-{uuid.uuid4().hex[:4]}",
+            ballot_type="single_choice",
+            status=1,
+            is_active=True,
+            created_at=now,
+            updated_at=now
+        ).returning(t_ballots.c.id)
+    ).scalar()
+
+    cand_b_id = db_session.execute(
+        t_candidates.insert().values(
+            company_id=COMPANY_B_ID,
+            ballot_id=ballot_b_id,
+            name=f"Cand B {TS}",
+            candidate_code=f"CAN-{TS}-{uuid.uuid4().hex[:4]}",
+            status=1,
+            is_active=True,
+            is_withdrawn=False,
+            order_index=1,
+            created_at=now,
+            updated_at=now
+        ).returning(t_candidates.c.id)
+    ).scalar()
+
+    withdrawn_b_id = db_session.execute(
+        t_candidates.insert().values(
+            company_id=COMPANY_B_ID,
+            ballot_id=ballot_b_id,
+            name=f"Withdrawn B {TS}",
+            candidate_code=f"WD-{TS}-{uuid.uuid4().hex[:4]}",
+            status=1,
+            is_active=False,
+            is_withdrawn=True,
+            order_index=2,
+            created_at=now,
+            updated_at=now
+        ).returning(t_candidates.c.id)
+    ).scalar()
+    db_session.commit()
+finally:
+    db_session.close()
+
+# 14.1 - Company A Super Admin list-candidates -> 200, no Company B rows
+r_cand_list = requests.get(f"{BASE}/candidates/?per_page=100", headers=ah(A_SUPER_TOKEN))
+record("14.1", "Company A Super Admin list-candidates → 200, no Company B rows", 200, r_cand_list,
+       lambda b: "data" in b and not any(r.get("id") in (cand_b_id, withdrawn_b_id) for r in b.get("data", [])))
+
+# 14.2 - Company A Super Admin cannot create candidate on Company B ballot -> 404
+r_cand_create = requests.post(f"{BASE}/candidates/", headers=ah(A_SUPER_TOKEN), json={
+    "name": "Hack Cand", "ballot_id": ballot_b_id
+})
+record("14.2", "Company A Super Admin cannot create candidate on Company B ballot → 404", 404, r_cand_create)
+
+# 14.3 - Company A Super Admin cannot get Company B candidate -> 404
+r_cand_get = requests.get(f"{BASE}/candidates/{cand_b_id}", headers=ah(A_SUPER_TOKEN))
+record("14.3", "Company A Super Admin cannot get Company B candidate → 404", 404, r_cand_get)
+
+# 14.4 - Company A Super Admin cannot update Company B candidate -> 404
+r_cand_put = requests.put(f"{BASE}/candidates/{cand_b_id}", headers=ah(A_SUPER_TOKEN), json={"name": "Hacked"})
+record("14.4", "Company A Super Admin cannot update Company B candidate → 404", 404, r_cand_put)
+
+# 14.5 - Company A Super Admin cannot delete Company B candidate -> 404
+r_cand_del = requests.delete(f"{BASE}/candidates/{cand_b_id}", headers=ah(A_SUPER_TOKEN))
+record("14.5", "Company A Super Admin cannot delete Company B candidate → 404", 404, r_cand_del)
+
+# 14.6 - Company A Super Admin cannot withdraw Company B candidate -> 404
+r_cand_wd = requests.post(f"{BASE}/candidates/{cand_b_id}/withdraw", headers=ah(A_SUPER_TOKEN), json={"reason": "test"})
+record("14.6", "Company A Super Admin cannot withdraw Company B candidate → 404", 404, r_cand_wd)
+
+# 14.7 - Company A Super Admin cannot reinstate Company B withdrawn candidate -> 404
+r_cand_re = requests.post(f"{BASE}/candidates/{withdrawn_b_id}/reinstate", headers=ah(A_SUPER_TOKEN))
+record("14.7", "Company A Super Admin cannot reinstate Company B withdrawn candidate → 404", 404, r_cand_re)
+
+# 14.8 - Company A Super Admin get-candidate-stats -> 200
+r_cand_stats = requests.get(f"{BASE}/candidates/stats", headers=ah(A_SUPER_TOKEN))
+record("14.8", "Company A Super Admin get-candidate-stats → 200", 200, r_cand_stats)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 passed_count = sum(1 for r in results if r["passed"])

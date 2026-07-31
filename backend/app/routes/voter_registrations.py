@@ -201,6 +201,7 @@ def create_voter_registration():
     set_audit_fields(registration, is_create=True)
     
     db.session.add(registration)
+    db.session.flush()
     return safe_commit((jsonify({
         'message': 'Voter registration created successfully',
         'registration_id': registration.registration_id,
@@ -217,7 +218,7 @@ def get_voter_registration(registration_id):
         VoterRegistration.company_id == company_id,
         VoterRegistration.status != 'deleted',
         Voter.status != STATUS_INACTIVE,
-        Election.status != STATUS_INACTIVE
+        Election.status != str(STATUS_INACTIVE)
     ).first_or_404()
     
     return jsonify({

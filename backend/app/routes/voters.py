@@ -3,7 +3,7 @@ from werkzeug.security import generate_password_hash
 from app import db
 from app.models.voter import Voter
 from app.models.user import User
-from app.utils import get_current_company_id, require_permission, get_current_user
+from app.utils import get_current_company_id, require_permission, get_current_user, is_administrator
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
 from app.utils.validators import parse_pagination, validate_voter_input, validate_email
@@ -21,7 +21,6 @@ voters_bp = Blueprint('voters', __name__)
 @require_permission('Voters', 'view')
 def list_voters():
     """List all voters with filtering and pagination"""
-    company_id = get_current_company_id()
     search = request.args.get('search')
     verification_level = request.args.get('verification_level')
     is_verified = request.args.get('is_verified')
@@ -30,7 +29,18 @@ def list_voters():
     if error:
         return error
 
-    query = get_active_voters_query(company_id).outerjoin(User)
+    if is_administrator():
+        req_company_id = request.args.get('company_id', type=int)
+        if req_company_id:
+            query = get_active_voters_query(req_company_id).outerjoin(User)
+            base = get_active_voters_query(req_company_id)
+        else:
+            query = Voter.query.filter(Voter.status != STATUS_INACTIVE).outerjoin(User)
+            base = Voter.query.filter(Voter.status != STATUS_INACTIVE)
+    else:
+        company_id = get_current_company_id()
+        query = get_active_voters_query(company_id).outerjoin(User)
+        base = get_active_voters_query(company_id)
     
     if search:
         query = query.filter(or_(
@@ -51,7 +61,6 @@ def list_voters():
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     voters = pagination.items
     
-    base = get_active_voters_query(company_id)
     summary = {
         'total_voters': pagination.total,
         'verified_voters': base.filter_by(is_verified=True).count(),
@@ -92,8 +101,13 @@ def list_voters():
 @audit_action('create_voter', module='Voters', description='Created voter profile')
 def create_voter():
     """Create a new voter (three paths: link to existing, standalone, or create user + link)"""
-    company_id = get_current_company_id()
     data = request.get_json()
+    if is_administrator():
+        company_id = data.get('company_id')
+        if not company_id:
+            return jsonify({'error': 'company_id is required for platform Administrators'}), 400
+    else:
+        company_id = get_current_company_id()
     
     cleaned_data, error = validate_voter_input(data, is_create=True)
     if error:
@@ -187,10 +201,13 @@ def create_voter():
 @require_permission('Voters', 'view')
 def get_voter(voter_id):
     """Get detailed voter information"""
-    company_id = get_current_company_id()
-    voter = get_active_voters_query(company_id).outerjoin(User).filter(
-        Voter.id == voter_id
-    ).first_or_404()
+    if is_administrator():
+        voter = Voter.query.filter(Voter.id == voter_id, Voter.status != STATUS_INACTIVE).outerjoin(User).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        voter = get_active_voters_query(company_id).outerjoin(User).filter(
+            Voter.id == voter_id
+        ).first_or_404()
     
     return jsonify({
         'id': voter.id,
@@ -221,8 +238,11 @@ def get_voter(voter_id):
 @audit_action('update_voter', module='Voters', description='Updated voter profile')
 def update_voter(voter_id):
     """Update voter information"""
-    company_id = get_current_company_id()
-    voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
+    if is_administrator():
+        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_INACTIVE).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
     data = request.get_json()
     
     cleaned_data, error = validate_voter_input(data, is_create=False)
@@ -264,8 +284,11 @@ def update_voter(voter_id):
 @audit_action('delete_voter', module='Voters', description='Soft deleted voter profile')
 def delete_voter(voter_id):
     """Delete voter profile (soft delete)"""
-    company_id = get_current_company_id()
-    voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
+    if is_administrator():
+        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_INACTIVE).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
     
     # Soft delete by updating status
     voter.status = STATUS_INACTIVE
@@ -281,8 +304,11 @@ def delete_voter(voter_id):
 @audit_action('verify_voter', module='Voters', description='Updated voter verification status')
 def verify_voter(voter_id):
     """Manually verify a voter (admin function)"""
-    company_id = get_current_company_id()
-    voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
+    if is_administrator():
+        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_INACTIVE).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
     data = request.get_json()
     
     if not data:
@@ -324,14 +350,20 @@ def verify_voter(voter_id):
 @require_permission('Voters', 'view')
 def get_voter_registrations(voter_id):
     """Get voter's election registrations"""
-    company_id = get_current_company_id()
-    voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
-    
     from app.models.voter_registration import VoterRegistration
-    registrations = VoterRegistration.query.filter_by(
-        voter_id=voter_id, company_id=company_id
-    ).filter(VoterRegistration.status != 'deleted'
-    ).order_by(VoterRegistration.registered_at.desc()).all()
+    if is_administrator():
+        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_INACTIVE).first_or_404()
+        registrations = VoterRegistration.query.filter_by(
+            voter_id=voter_id
+        ).filter(VoterRegistration.status != 'deleted'
+        ).order_by(VoterRegistration.registered_at.desc()).all()
+    else:
+        company_id = get_current_company_id()
+        voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
+        registrations = VoterRegistration.query.filter_by(
+            voter_id=voter_id, company_id=company_id
+        ).filter(VoterRegistration.status != 'deleted'
+        ).order_by(VoterRegistration.registered_at.desc()).all()
     
     serialized_regs = []
     for reg in registrations:
@@ -354,8 +386,11 @@ def get_voter_registrations(voter_id):
 @require_permission('Voters', 'view')
 def get_voter_votes(voter_id):
     """Get voter's voting history"""
-    company_id = get_current_company_id()
-    voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
+    if is_administrator():
+        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_INACTIVE).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
     
     from app.models.vote import Vote
     votes = Vote.query.filter_by(voter_id=voter_id
@@ -385,23 +420,37 @@ def get_voter_votes(voter_id):
 @require_permission('Voters', 'view')
 def get_voter_stats():
     """Get voter statistics for the company"""
-    company_id = get_current_company_id()
-    
-    total_voters = Voter.query.filter_by(company_id=company_id, status=1).count()
-    verified_voters = Voter.query.filter_by(company_id=company_id, is_verified=True, status=1).count()
-    unverified_voters = total_voters - verified_voters
-    
-    # Verification levels
-    verification_levels = db.session.query(
-        Voter.verification_level,
-        db.func.count(Voter.id).label('count')
-    ).filter_by(company_id=company_id, status=1).group_by(Voter.verification_level).all()
-    
-    # Voter types
-    voter_types = db.session.query(
-        Voter.voter_type,
-        db.func.count(Voter.id).label('count')
-    ).filter_by(company_id=company_id, status=1).group_by(Voter.voter_type).all()
+    if is_administrator():
+        req_company_id = request.args.get('company_id', type=int)
+        query_filter = (Voter.company_id == req_company_id, Voter.status == 1) if req_company_id else (Voter.status == 1,)
+        total_voters = Voter.query.filter(*query_filter).count()
+        verified_voters = Voter.query.filter(*query_filter, Voter.is_verified == True).count()
+        unverified_voters = total_voters - verified_voters
+        
+        verification_levels = db.session.query(
+            Voter.verification_level,
+            db.func.count(Voter.id).label('count')
+        ).filter(*query_filter).group_by(Voter.verification_level).all()
+        
+        voter_types = db.session.query(
+            Voter.voter_type,
+            db.func.count(Voter.id).label('count')
+        ).filter(*query_filter).group_by(Voter.voter_type).all()
+    else:
+        company_id = get_current_company_id()
+        total_voters = Voter.query.filter_by(company_id=company_id, status=1).count()
+        verified_voters = Voter.query.filter_by(company_id=company_id, is_verified=True, status=1).count()
+        unverified_voters = total_voters - verified_voters
+        
+        verification_levels = db.session.query(
+            Voter.verification_level,
+            db.func.count(Voter.id).label('count')
+        ).filter_by(company_id=company_id, status=1).group_by(Voter.verification_level).all()
+        
+        voter_types = db.session.query(
+            Voter.voter_type,
+            db.func.count(Voter.id).label('count')
+        ).filter_by(company_id=company_id, status=1).group_by(Voter.voter_type).all()
     
     return jsonify({
         'total_voters': total_voters,

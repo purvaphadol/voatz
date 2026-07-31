@@ -97,7 +97,6 @@ def create_module_action(module_id):
 @require_permission('Modules', 'create')
 def create_bulk_module_actions():
     from app.utils import is_administrator
-    company_id = get_current_company_id()
     data = request.get_json()
     
     if not data or not data.get('module_id') or not data.get('actions'):

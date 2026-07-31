@@ -31,7 +31,7 @@ const Profile = () => {
           <strong>User ID:</strong> {user && user.id}
         </Typography>
         <Typography variant="body1" gutterBottom>
-          <strong>Company:</strong> {user && user.company_name}
+          <strong>Company:</strong> {user && (user.is_administrator ? 'Platform Administrator' : user.company_name)}
         </Typography>
       </Paper>
     </Box>
