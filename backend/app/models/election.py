@@ -11,7 +11,7 @@ class Election(db.Model, TimestampAuditMixin):
     # Election basic information
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
-    election_code = db.Column(db.String(50), unique=True, nullable=False)  # Unique code for election
+    election_code = db.Column(db.String(50), nullable=False)  # Scoped unique per company
     
     # Election classification
     election_type = db.Column(db.String(50), nullable=False)  # municipal, state, federal, corporate, university, poll
@@ -63,7 +63,8 @@ class Election(db.Model, TimestampAuditMixin):
     
     # Constraints and indexes
     __table_args__ = (
-        db.UniqueConstraint('election_code', 'company_id', name='unique_election_code_per_company'),
+        db.UniqueConstraint('company_id', 'election_code', name='unique_election_code_per_company'),
+        db.Index('idx_election_company_status', 'company_id', 'status'),
         db.Index('idx_election_dates', 'start_date', 'end_date'),
         db.Index('idx_election_status', 'status', 'is_public'),
         db.Index('idx_election_type', 'election_type', 'election_category'),
@@ -76,8 +77,9 @@ class Election(db.Model, TimestampAuditMixin):
     def is_active(self):
         """Check if election is currently active for voting"""
         now = datetime.now(timezone.utc)
-        return (self.status == 'active' and 
-                self.start_date <= now <= self.end_date)
+        start = self.start_date.replace(tzinfo=timezone.utc) if self.start_date and self.start_date.tzinfo is None else self.start_date
+        end = self.end_date.replace(tzinfo=timezone.utc) if self.end_date and self.end_date.tzinfo is None else self.end_date
+        return (self.status == 'active' and start <= now <= end)
     
     @property
     def is_early_voting_active(self):
@@ -85,16 +87,19 @@ class Election(db.Model, TimestampAuditMixin):
         if not self.allow_early_voting or not self.early_voting_start or not self.early_voting_end:
             return False
         now = datetime.now(timezone.utc)
-        return (self.status == 'active' and 
-                self.early_voting_start <= now <= self.early_voting_end)
+        ev_start = self.early_voting_start.replace(tzinfo=timezone.utc) if self.early_voting_start.tzinfo is None else self.early_voting_start
+        ev_end = self.early_voting_end.replace(tzinfo=timezone.utc) if self.early_voting_end.tzinfo is None else self.early_voting_end
+        return (self.status == 'active' and ev_start <= now <= ev_end)
     
     @property
     def voting_window_status(self):
         """Get current voting window status"""
         now = datetime.now(timezone.utc)
-        if now < self.start_date:
+        start = self.start_date.replace(tzinfo=timezone.utc) if self.start_date and self.start_date.tzinfo is None else self.start_date
+        end = self.end_date.replace(tzinfo=timezone.utc) if self.end_date and self.end_date.tzinfo is None else self.end_date
+        if now < start:
             return 'upcoming'
-        elif now > self.end_date:
+        elif now > end:
             return 'ended'
         elif self.is_early_voting_active:
             return 'early_voting'

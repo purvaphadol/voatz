@@ -1,10 +1,19 @@
 from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required
 from app.utils import get_current_user, get_user_permissions_summary, require_company_context, get_current_company_id
-from app.models.module import Module
+from app.models.module import SystemModule, CompanyModule, Module
 from app.utils.constants import STATUS_ACTIVE
 
 menu_bp = Blueprint('menu', __name__)
+
+def format_action_label(action_name):
+    labels = {
+        'view': 'View',
+        'create': 'Create',
+        'update': 'Edit',
+        'delete': 'Delete'
+    }
+    return labels.get(action_name, action_name.capitalize())
 
 @menu_bp.route('/sidebar', methods=['GET'])
 @require_company_context
@@ -14,17 +23,29 @@ def get_user_sidebar():
     permissions = get_user_permissions_summary()
     
     if is_administrator():
-        # Get active modules from any company, and de-duplicate by module_name
-        all_modules = Module.query.filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
-        seen = set()
-        modules = []
-        for m in all_modules:
-            if m.module_name not in seen:
-                seen.add(m.module_name)
-                modules.append(m)
+        modules = SystemModule.query.filter(SystemModule.status == STATUS_ACTIVE).order_by(SystemModule.order_index.asc(), SystemModule.module_name.asc()).all()
+        if not modules:
+            # Fallback to legacy modules if system_modules empty
+            all_modules = Module.query.filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
+            seen = set()
+            modules = []
+            for m in all_modules:
+                if m.module_name not in seen:
+                    seen.add(m.module_name)
+                    modules.append(m)
     else:
         company_id = get_current_company_id()
-        modules = Module.query.filter_by(company_id=company_id).filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
+        modules = SystemModule.query.join(
+            CompanyModule, CompanyModule.system_module_id == SystemModule.id
+        ).filter(
+            CompanyModule.company_id == company_id,
+            CompanyModule.status == STATUS_ACTIVE,
+            SystemModule.status == STATUS_ACTIVE
+        ).order_by(SystemModule.order_index.asc(), SystemModule.module_name.asc()).all()
+
+        if not modules:
+            # Fallback to legacy modules
+            modules = Module.query.filter_by(company_id=company_id).filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
         
     module_routes = {module.module_name: module.display_route for module in modules}
     module_orders = {module.module_name: module.order_index for module in modules}
@@ -32,41 +53,36 @@ def get_user_sidebar():
     
     menu_items = []
     for module_name, actions in permissions.items():
-        # Only include modules that exist and are active
         if module_name not in module_routes:
             continue
             
-        # Get the display route for this module
         display_route = module_routes.get(module_name, module_name.lower())
         
         menu_item = {
             'module': module_name,
-            'route': display_route,  # Add the dynamic route
-            'order_index': module_orders.get(module_name, 999),  # Include order_index
+            'route': display_route,
+            'order_index': module_orders.get(module_name, 999),
             'icon': module_icons.get(module_name, 'folder'),
             'actions': []
         }
         
-        # Group actions for this module
         for action in actions:
             menu_item['actions'].append({
                 'name': action['action'],
                 'label': format_action_label(action['action']),
-                'url': f"/{display_route}{action['url']}",  # Use display_route
+                'url': f"/{display_route}{action['url']}",
                 'source': action['source']
             })
         
-        # Only include modules with at least 'view' permission
         if any(action['action'] == 'view' for action in actions):
             menu_items.append(menu_item)
     
-    # Sort menu items by module order (matching the order in modules query)
     def get_module_order(menu_item):
         module_name = menu_item['module']
         for module in modules:
             if module.module_name == module_name:
                 return module.order_index
-        return 999  # Put unknown modules at the end
+        return 999
     
     menu_items.sort(key=get_module_order)
     

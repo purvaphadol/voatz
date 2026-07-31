@@ -407,9 +407,14 @@ def publish_results(election_id):
     if election.status not in ['completed', 'active']:
         return jsonify({'error': 'Only completed or active elections can have results published'}), 400
     
-    # Check if voting period has ended
-    if election.end_date > datetime.now(timezone.utc):
+    # Check if voting period has ended (unless election status is already completed)
+    end_dt = election.end_date.replace(tzinfo=timezone.utc) if election.end_date and election.end_date.tzinfo is None else election.end_date
+    if election.status != 'completed' and end_dt and end_dt > datetime.now(timezone.utc):
         return jsonify({'error': 'Cannot publish results before voting period ends'}), 400
+    
+    # Auto-tally uncounted votes before publishing
+    from app.routes.votes import tally_election_votes
+    tally_election_votes(election_id)
     
     election.results_published = True
     election.results_published_at = datetime.now(timezone.utc)
@@ -420,6 +425,13 @@ def publish_results(election_id):
         (jsonify({'message': 'Election results published successfully'}), 200),
         'Failed to publish election results'
     )
+
+@elections_bp.route('/<int:election_id>/tally', methods=['POST'])
+@require_permission('Elections', 'update')
+def tally_election(election_id):
+    """Tally votes for an election"""
+    from app.routes.votes import tally_election_votes
+    return tally_election_votes(election_id)
 
 @elections_bp.route('/<int:election_id>/change-status', methods=['POST'])
 @require_permission('Elections', 'update')

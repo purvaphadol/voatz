@@ -131,16 +131,19 @@ def create_role():
         return error[0], error[1]
 
     role_name = cleaned_data['role_name']
-    dept_id = data['department_id']
+    dept_id = data.get('department_id')
+    is_super_admin = bool(data.get('is_super_admin', False))
 
-    department = Department.query.filter_by(id=dept_id, company_id=company_id).first()
-    dept_error = validate_department_active(department)
-    if dept_error:
-        return dept_error[0], dept_error[1]
+    if dept_id:
+        department = Department.query.filter_by(id=dept_id, company_id=company_id).first()
+        dept_error = validate_department_active(department)
+        if dept_error:
+            return dept_error[0], dept_error[1]
 
     if Role.query.filter_by(
         role_name=role_name,
-        department_id=dept_id
+        department_id=dept_id,
+        company_id=company_id
     ).filter(Role.status != STATUS_INACTIVE).first():
         return jsonify({'error': 'Role name already exists in this department'}), 400
 
@@ -149,6 +152,7 @@ def create_role():
     role.description = cleaned_data.get('description', '')
     role.department_id = dept_id
     role.company_id = company_id
+    role.is_super_admin = is_super_admin
     set_audit_fields(role, is_create=True)
     db.session.add(role)
     db.session.flush()  # populate role.id before building the response

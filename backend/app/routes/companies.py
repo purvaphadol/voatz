@@ -129,6 +129,24 @@ def create_company():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': 'Company name already exists'}), 400
+
+    # Automatically provision SystemModules for the new company
+    from app.models.module import SystemModule, CompanyModule
+    system_module_ids = data.get('system_module_ids') if data else None
+    
+    if system_module_ids and isinstance(system_module_ids, list):
+        target_sys_mods = SystemModule.query.filter(SystemModule.id.in_(system_module_ids), SystemModule.status == STATUS_ACTIVE).all()
+    else:
+        target_sys_mods = SystemModule.query.filter(SystemModule.status == STATUS_ACTIVE).all()
+
+    for sys_mod in target_sys_mods:
+        comp_mod = CompanyModule(
+            company_id=company.id,
+            system_module_id=sys_mod.id,
+            status=STATUS_ACTIVE
+        )
+        set_audit_fields(comp_mod, is_create=True)
+        db.session.add(comp_mod)
         
     return safe_commit(
         (jsonify({'message': 'Company created', 'company_id': company.id}), 201),

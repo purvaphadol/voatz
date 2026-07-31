@@ -54,7 +54,7 @@ def list_user_roles():
         User, UserRoleMapping.user_id == User.id
     ).join(
         Role, UserRoleMapping.role_id == Role.id
-    ).join(
+    ).outerjoin(
         Department, UserRoleMapping.department_id == Department.id
     ).filter(
         UserRoleMapping.status.in_(allowed),
@@ -140,15 +140,13 @@ def get_user_roles(user_id):
         Department.department_name
     ).join(
         Role, UserRoleMapping.role_id == Role.id
-    ).join(
+    ).outerjoin(
         Department, UserRoleMapping.department_id == Department.id
     ).filter(
         UserRoleMapping.user_id == user_id,
         UserRoleMapping.company_id == company_id,
         UserRoleMapping.status != STATUS_INACTIVE,
         UserRoleMapping.status != STATUS_DEACTIVATED,
-        User.status != STATUS_INACTIVE,
-        User.status != STATUS_DEACTIVATED,
         Role.status != STATUS_INACTIVE,
         Role.status != STATUS_DEACTIVATED,
     ).all()
@@ -169,8 +167,8 @@ def assign_role_to_user(user_id):
     from app.utils import is_administrator
     data = request.get_json()
 
-    if not data or not data.get('role_id') or not data.get('department_id'):
-        return jsonify({'error': 'Role ID and Department ID are required'}), 400
+    if not data or not data.get('role_id'):
+        return jsonify({'error': 'Role ID is required'}), 400
 
     if is_administrator():
         user = User.query.filter_by(id=user_id).first_or_404()
@@ -183,27 +181,31 @@ def assign_role_to_user(user_id):
     if not role:
         return jsonify({'error': 'Role not found in this company'}), 404
 
-    if role.is_super_admin:
+    if role.is_super_admin and not is_administrator():
         return jsonify({'error': 'The Company Super Admin role cannot be assigned via API'}), 403
 
-    department = Department.query.filter_by(id=data['department_id'], company_id=company_id).first()
-    if not department:
-        return jsonify({'error': 'Department not found in this company'}), 404
+    dept_id = data.get('department_id')
+    if not role.is_super_admin:
+        if not dept_id:
+            return jsonify({'error': 'Department ID is required for non-super admin roles'}), 400
+        department = Department.query.filter_by(id=dept_id, company_id=company_id).first()
+        if not department:
+            return jsonify({'error': 'Department not found in this company'}), 404
 
     existing_mapping = UserRoleMapping.query.filter_by(
         user_id=user_id,
         role_id=data['role_id'],
-        department_id=data['department_id'],
+        department_id=dept_id,
         company_id=company_id
     ).filter(UserRoleMapping.status != STATUS_INACTIVE).first()
 
     if existing_mapping:
-        return jsonify({'error': 'User already has this role in this department'}), 400
+        return jsonify({'error': 'User already has this role'}), 400
 
     user_role = UserRoleMapping()
     user_role.user_id = user_id
     user_role.role_id = data['role_id']
-    user_role.department_id = data['department_id']
+    user_role.department_id = dept_id
     user_role.company_id = company_id
     user_role.status = data.get('status', 1)
 

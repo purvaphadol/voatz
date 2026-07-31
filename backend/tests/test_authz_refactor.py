@@ -114,6 +114,30 @@ record("0.1", "Health check returns 200", 200, r)
 
 print("\n── Acquiring tokens ───────────────────────────────────────────────────")
 ADMIN_TOKEN   = login_admin(ADMIN_EMAIL, ADMIN_PASSWORD)
+
+# Ensure Company A is seeded if running on a clean database
+db_session = DBSession()
+try:
+    meta_test = MetaData()
+    meta_test.reflect(bind=engine)
+    t_users = meta_test.tables["users"]
+    a_user = db_session.execute(t_users.select().where(t_users.c.email == A_SUPER_EMAIL)).first()
+    if not a_user:
+        print("  [INFO] Seeding Company A (Datagrid) for test suite execution...")
+        seed_company(
+            db_session,
+            company_name="Datagrid",
+            super_admin_email=A_SUPER_EMAIL,
+            super_admin_password=A_SUPER_PASS,
+            super_admin_name="Rushiraj",
+            regular_admin_email=A_REG_EMAIL,
+            regular_admin_password=A_REG_PASS,
+            regular_admin_name="John Admin",
+        )
+        db_session.commit()
+finally:
+    db_session.close()
+
 A_SUPER_TOKEN = login_user(A_SUPER_EMAIL, A_SUPER_PASS, "A_SUPER (rushiraj)")
 A_REG_TOKEN   = login_user(A_REG_EMAIL,  A_REG_PASS,   "A_REG   (john)")
 

@@ -335,18 +335,22 @@ def require_permission(module_name, action_name):
 
 def get_user_permissions_summary():
     """Get comprehensive permissions summary for current user"""
+    from app.models.module import SystemModule
     if is_administrator():
-        modules = Module.query.filter(Module.status != 0).all()
+        sys_modules = SystemModule.query.filter(SystemModule.status == 1).order_by(SystemModule.order_index.asc()).all()
         permissions = {}
-        for m in modules:
+        for m in sys_modules:
+            permissions[m.module_name] = [
+                {'action': act, 'source': 'administrator', 'url': f'/{act}'}
+                for act in ['view', 'create', 'update', 'delete']
+            ]
+        legacy_modules = Module.query.filter(Module.status == 1).all()
+        for m in legacy_modules:
             if m.module_name not in permissions:
-                permissions[m.module_name] = []
-                for action_name in ['view', 'create', 'update', 'delete']:
-                    permissions[m.module_name].append({
-                        'action': action_name,
-                        'source': 'administrator',
-                        'url': f'/{action_name}'
-                    })
+                permissions[m.module_name] = [
+                    {'action': act, 'source': 'administrator', 'url': f'/{act}'}
+                    for act in ['view', 'create', 'update', 'delete']
+                ]
         return permissions
 
     from app.utils.query_helpers import get_active_user_role_mappings, get_active_role_permissions

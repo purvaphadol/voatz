@@ -47,7 +47,8 @@ class Voter(db.Model, TimestampAuditMixin):
     
     # Constraints
     __table_args__ = (
-        db.UniqueConstraint('voter_id', 'company_id', name='unique_voter_per_company'),
+        db.UniqueConstraint('company_id', 'voter_id', name='unique_voter_per_company'),
+        db.Index('idx_voter_company_verification', 'company_id', 'is_verified'),
         db.Index('idx_voter_phone', 'phone_number'),
         db.Index('idx_voter_verification', 'is_verified', 'verification_level'),
     )

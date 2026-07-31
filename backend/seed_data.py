@@ -1,25 +1,30 @@
 """
-seed_data.py — Bootstrap the Voatz database with an Administrator and at
-least one demo company (Datagrid / Company A).
+seed_data.py — Production-ready seed script for the Voatz platform.
 
-The core seeding logic is factored into seed_company(), which can be
-reused directly by test scripts to seed additional companies against the
-live database without going through the HTTP API (which would fail for
-Administrator-issued role-creation calls because create_role() uses
-get_current_company_id() → None for admin tokens).
+Seeds:
+1. Initial Platform Administrator account (SaaS Product Owner)
+2. Master System Modules Catalog (system_modules & system_module_actions)
+
+Idempotent: Skips records if already present in database to prevent duplication.
+Exposes helper seed_company() for automated test runs & onboarding pipelines.
 """
 
-from sqlalchemy import create_engine, MetaData
-from sqlalchemy.orm import sessionmaker
-from werkzeug.security import generate_password_hash
-from datetime import datetime
 import os
 import re
 import getpass
+from datetime import datetime, timezone
 from dotenv import load_dotenv
+from sqlalchemy import create_engine, MetaData
+from sqlalchemy.orm import sessionmaker
+from werkzeug.security import generate_password_hash
 
 load_dotenv()
-DATABASE_URI = os.environ["DATABASE_URL"]
+
+DATABASE_URI = os.environ.get("DATABASE_URL")
+if not DATABASE_URI:
+    print("❌ ERROR: DATABASE_URL environment variable is not set.")
+    exit(1)
+
 masked_uri = re.sub(r':([^@]+)@', ':****@', DATABASE_URI)
 print(f"Connecting to database: {masked_uri}")
 
@@ -28,29 +33,26 @@ metadata = MetaData()
 metadata.reflect(bind=engine)
 Session = sessionmaker(bind=engine)
 
-
-# ---------------------------------------------------------------------------
-# Reusable company-seeding function
-# ---------------------------------------------------------------------------
-
-MODULE_NAMES = [
-    ("Dashboard",           1),
-    ("Users",               2),
-    ("Roles",               3),
-    ("Departments",         4),
-    ("Companies",           5),
-    ("Modules",             6),
-    ("Permissions",         7),
-    ("UserRoles",           8),
-    ("Settings",            9),
-    ("Voters",              10),
-    ("Elections",           11),
-    ("Ballots",             12),
-    ("Candidates",          13),
-    ("Votes",               14),
-    ("VoterRegistrations",  15),
-    ("AuditLogs",           16),
+SYSTEM_MODULE_SPECS = [
+    ("Dashboard",           "dashboard",           "home",          1),
+    ("Users",               "users",               "users",         2),
+    ("Roles",               "roles",               "shield",        3),
+    ("Departments",         "departments",         "briefcase",     4),
+    ("Companies",           "companies",           "building",      5),
+    ("Modules",             "modules",             "box",           6),
+    ("Permissions",         "permissions",         "lock",          7),
+    ("UserRoles",           "user-roles",          "user-check",    8),
+    ("Settings",            "settings",            "settings",      9),
+    ("Voters",              "voters",              "user-check",   10),
+    ("Elections",           "elections",           "vote",         11),
+    ("Ballots",             "ballots",             "file-text",    12),
+    ("Candidates",          "candidates",          "user",         13),
+    ("Votes",               "votes",               "check-square", 14),
+    ("VoterRegistrations",  "voter-registrations", "clipboard-list",15),
+    ("AuditLogs",           "audit-logs",          "activity",     16),
 ]
+
+MODULE_NAMES = [name for name, _, _, _ in SYSTEM_MODULE_SPECS]
 
 ACTIONS = [
     {"name": "view",   "url": "/view"},
@@ -58,6 +60,97 @@ ACTIONS = [
     {"name": "update", "url": "/update"},
     {"name": "delete", "url": "/delete"},
 ]
+
+
+def seed_administrator(session):
+    """Seed the initial Platform Administrator account if none exists."""
+    t = metadata.tables
+    if "administrators" not in t:
+        print("❌ Table 'administrators' does not exist in schema. Please run migrations first.")
+        return
+
+    existing = session.execute(t["administrators"].select()).fetchone()
+    if existing:
+        print(f"ℹ️  Platform Administrator already exists ({existing.email}) — skipping creation.")
+        return existing.email
+
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@gmail.com").strip()
+    admin_name = os.environ.get("ADMIN_NAME", "Platform Administrator").strip()
+    admin_password = os.environ.get("ADMIN_PASSWORD", "Admin@123")
+
+    now = datetime.now(timezone.utc)
+    session.execute(
+        t["administrators"].insert().values(
+            name=admin_name,
+            email=admin_email,
+            password_hash=generate_password_hash(admin_password),
+            created_at=now,
+            updated_at=now,
+            status=1,
+        )
+    )
+    session.commit()
+    print(f"✅ Platform Administrator '{admin_email}' successfully created.")
+    return admin_email
+
+
+def seed_system_modules(session):
+    """Seed base SystemModules and SystemModuleActions if not present."""
+    t = metadata.tables
+    if "system_modules" not in t or "system_module_actions" not in t:
+        print("❌ System modules tables do not exist in schema. Please run migrations first.")
+        return
+
+    now = datetime.now(timezone.utc)
+    seeded_count = 0
+
+    for name, route, icon, order in SYSTEM_MODULE_SPECS:
+        existing = session.execute(
+            t["system_modules"].select().where(t["system_modules"].c.module_name == name)
+        ).fetchone()
+
+        if existing:
+            mod_id = existing.id
+        else:
+            mod_id = session.execute(
+                t["system_modules"].insert().values(
+                    module_name=name,
+                    route_name=route,
+                    icon=icon,
+                    order_index=order,
+                    status=1,
+                    created_at=now,
+                    updated_at=now,
+                ).returning(t["system_modules"].c.id)
+            ).scalar()
+            seeded_count += 1
+
+        # Seed 4 standard actions for this module
+        for act in ACTIONS:
+            act_existing = session.execute(
+                t["system_module_actions"].select().where(
+                    t["system_module_actions"].c.system_module_id == mod_id,
+                    t["system_module_actions"].c.action_name == act["name"]
+                )
+            ).fetchone()
+
+            if not act_existing:
+                session.execute(
+                    t["system_module_actions"].insert().values(
+                        system_module_id=mod_id,
+                        action_name=act["name"],
+                        action_url=act["url"],
+                        status=1,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+
+    session.commit()
+    if seeded_count > 0:
+        print(f"✅ Seeded {seeded_count} new Master System Modules into global catalog.")
+    else:
+        print("ℹ️  Master System Modules already seeded — skipping creation.")
 
 
 def seed_company(
@@ -70,22 +163,9 @@ def seed_company(
     regular_admin_password=None,
     regular_admin_name="Admin",
 ):
-    """Seed a complete company, including:
-
-    - Company row
-    - 'Admin' department
-    - Protected 'Company Super Admin' role (is_super_admin=True, no dept)
-    - Optional regular 'Admin' role (department-linked)
-    - One super-admin user mapped to the super-admin role
-    - Optional regular admin user mapped to the regular role
-    - Full Modules / ModuleActions fan-out for this company
-    - Full RolePermissionMapping grant for the super-admin role
-
-    Returns a dict of all created IDs so callers can reference them later.
-    """
+    """Seed a complete company for testing/onboarding pipelines."""
     t = metadata.tables
-
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
 
     # 1. Company
     company_id = session.execute(
@@ -97,7 +177,24 @@ def seed_company(
         ).returning(t["companies"].c.id)
     ).scalar()
 
-    # 2. Department
+    # 2. Provision SystemModules to company_modules
+    all_sys_mods = session.execute(t["system_modules"].select()).fetchall()
+    if all_sys_mods:
+        session.execute(
+            t["company_modules"].insert(),
+            [
+                {
+                    "company_id": company_id,
+                    "system_module_id": mod.id,
+                    "status": 1,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for mod in all_sys_mods
+            ]
+        )
+
+    # 3. Department
     department_id = session.execute(
         t["departments"].insert().values(
             department_name="Admin",
@@ -108,7 +205,7 @@ def seed_company(
         ).returning(t["departments"].c.id)
     ).scalar()
 
-    # 3a. Protected Company Super Admin role (no department)
+    # 4. Super Admin role
     super_admin_role_id = session.execute(
         t["roles"].insert().values(
             role_name="Company Super Admin",
@@ -121,7 +218,7 @@ def seed_company(
         ).returning(t["roles"].c.id)
     ).scalar()
 
-    # 3b. Regular Admin role (optional, but always created for completeness)
+    # Regular Admin role
     regular_role_id = session.execute(
         t["roles"].insert().values(
             role_name="Admin",
@@ -134,7 +231,7 @@ def seed_company(
         ).returning(t["roles"].c.id)
     ).scalar()
 
-    # 4a. Super-admin user
+    # 5. Super admin user
     super_user_id = session.execute(
         t["users"].insert().values(
             name=super_admin_name,
@@ -159,7 +256,6 @@ def seed_company(
         )
     )
 
-    # 4b. Regular admin user (optional)
     regular_user_id = None
     if regular_admin_email and regular_admin_password:
         regular_user_id = session.execute(
@@ -186,117 +282,81 @@ def seed_company(
             )
         )
 
-    # 5. Modules
+    # 6. Legacy module rows for backward compatibility
     module_rows = [
         {
-            "module_name": name,
+            "module_name": mod.module_name,
+            "route_name": mod.route_name,
+            "icon": mod.icon,
+            "order_index": mod.order_index,
             "company_id": company_id,
             "status": 1,
-            "order_index": idx,
             "created_at": now,
             "updated_at": now,
         }
-        for name, idx in MODULE_NAMES
+        for mod in all_sys_mods
     ]
-    module_ids = session.execute(
-        t["modules"].insert().returning(t["modules"].c.id),
-        module_rows,
-    ).scalars().all()
+    if module_rows:
+        module_ids = session.execute(
+            t["modules"].insert().returning(t["modules"].c.id),
+            module_rows,
+        ).scalars().all()
 
-    # 6. ModuleActions (view / create / update / delete for every module)
-    module_action_rows = []
-    for mod_id in module_ids:
-        for act in ACTIONS:
-            module_action_rows.append({
-                "module_id": mod_id,
-                "action_name": act["name"],
-                "action_url": act["url"],
-                "company_id": company_id,
-                "status": 1,
-                "created_at": now,
-                "updated_at": now,
-            })
-    session.execute(t["module_action"].insert(), module_action_rows)
+        module_action_rows = []
+        for mod_id in module_ids:
+            for act in ACTIONS:
+                module_action_rows.append({
+                    "module_id": mod_id,
+                    "action_name": act["name"],
+                    "action_url": act["url"],
+                    "company_id": company_id,
+                    "status": 1,
+                    "created_at": now,
+                    "updated_at": now,
+                })
+        session.execute(t["module_action"].insert(), module_action_rows)
 
-    # 7. RolePermissionMapping — grant all actions to the super-admin role
-    all_actions = session.execute(
-        t["module_action"].select().where(
-            t["module_action"].c.company_id == company_id
+        all_actions = session.execute(
+            t["module_action"].select().where(
+                t["module_action"].c.company_id == company_id
+            )
+        ).fetchall()
+
+        session.execute(
+            t["role_permission_mapping"].insert(),
+            [
+                {
+                    "company_id": company_id,
+                    "role_id": super_admin_role_id,
+                    "module_id": row.module_id,
+                    "action_id": row.id,
+                    "status": 1,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for row in all_actions
+            ],
         )
-    ).fetchall()
-
-    session.execute(
-        t["role_permission_mapping"].insert(),
-        [
-            {
-                "company_id": company_id,
-                "role_id": super_admin_role_id,
-                "module_id": row.module_id,
-                "action_id": row.id,
-                "status": 1,
-                "created_at": now,
-                "updated_at": now,
-            }
-            for row in all_actions
-        ],
-    )
-
-    print(
-        f"✅ Seeded company '{company_name}' "
-        f"(id={company_id}, super_user_id={super_user_id}, dept_id={department_id})"
-    )
 
     return {
-        "company_id":         company_id,
-        "department_id":      department_id,
+        "company_id": company_id,
+        "department_id": department_id,
         "super_admin_role_id": super_admin_role_id,
-        "regular_role_id":    regular_role_id,
-        "super_user_id":      super_user_id,
-        "regular_user_id":    regular_user_id,
+        "regular_role_id": regular_role_id,
+        "super_user_id": super_user_id,
+        "regular_user_id": regular_user_id,
     }
 
 
-# ---------------------------------------------------------------------------
-# Script entry-point: seed Administrator + Company A (Datagrid)
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
     session = Session()
-
-    t = metadata.tables
-
-    # --- 1. Seed the single platform Administrator ---
-    existing = session.execute(t["administrators"].select()).fetchone()
-    if existing:
-        print(f"⚠️  Administrator already exists ({existing.email}) — skipping.")
-    else:
-        admin_email    = input("Administrator email: ").strip()
-        admin_name     = input("Administrator name: ").strip()
-        admin_password = getpass.getpass("Administrator password: ")
-        session.execute(
-            t["administrators"].insert().values(
-                name=admin_name,
-                email=admin_email,
-                password_hash=generate_password_hash(admin_password),
-                created_at=datetime.now(),
-                updated_at=datetime.now(),
-                status=1,
-            )
-        )
-        print(f"✅ Administrator '{admin_email}' created.")
-
-    # --- 2. Seed Company A (Datagrid) ---
-    seed_company(
-        session,
-        company_name="Datagrid",
-        super_admin_email="rushiraj@datagrid.co.in",
-        super_admin_password="admin123",
-        super_admin_name="Rushiraj",
-        regular_admin_email="john@datagrid.co.in",
-        regular_admin_password="admin123",
-        regular_admin_name="John Admin",
-    )
-
-    session.commit()
-    session.close()
-    print("✅ Seeding complete.")
+    try:
+        print("\n--- Seeding Production Base Data ---")
+        seed_administrator(session)
+        seed_system_modules(session)
+        print("✅ Seeding process completed successfully.")
+    except Exception as e:
+        session.rollback()
+        print(f"❌ Error during seeding: {e}")
+    finally:
+        session.close()

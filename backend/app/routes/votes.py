@@ -550,6 +550,81 @@ def bulk_verify_votes():
         'Failed to bulk verify votes'
     )
 
+@votes_bp.route('/tally-election/<int:election_id>', methods=['POST'])
+@require_permission('Votes', 'update')
+@audit_action('tally_election_votes', module='Votes', get_target_id=lambda *a, **kw: kw.get('election_id'))
+def tally_election_votes(election_id):
+    """Auto verify and tally all valid votes for an election."""
+    company_id = get_current_company_id()
+    
+    # Ensure election exists and belongs to company
+    election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
+    
+    data = request.get_json() or {}
+    auto_verify = data.get('auto_verify', True)
+    
+    # Fetch all uncounted votes for this election
+    uncounted_votes = Vote.query.filter_by(
+        election_id=election_id,
+        company_id=company_id,
+        is_counted=False
+    ).filter(Vote.vote_status != 'flagged').all()
+    
+    counted_count = 0
+    verified_count = 0
+    skipped_flagged = Vote.query.filter_by(
+        election_id=election_id,
+        company_id=company_id,
+        vote_status='flagged'
+    ).count()
+    
+    for vote in uncounted_votes:
+        # Auto-verify if requested and not yet verified
+        if auto_verify and not vote.is_verified:
+            vote.biometric_verified = True
+            vote.device_verified = True
+            vote.identity_verified = True
+            vote.vote_status = 'verified'
+            vote.processing_status = 'processed'
+            vote.vote_processing_time = datetime.now(timezone.utc)
+            verified_count += 1
+            
+        if vote.is_verified:
+            vote.is_counted = True
+            vote.vote_status = 'counted'
+            vote.processing_status = 'processed'
+            vote.vote_processing_time = datetime.now(timezone.utc)
+            
+            # Tally selected candidates
+            for candidate_id in vote.get_selected_candidates():
+                candidate = db.session.get(Candidate, candidate_id)
+                if candidate:
+                    candidate.total_votes_received += 1
+            
+            # Tally ballot
+            ballot = db.session.get(Ballot, vote.ballot_id)
+            if ballot:
+                ballot.total_votes_cast += 1
+                
+            election.total_votes_cast += 1
+            vote.add_audit_event('vote_counted', 'Vote included in automated election tally')
+            set_audit_fields(vote, is_create=False)
+            counted_count += 1
+            
+    set_audit_fields(election, is_create=False)
+    
+    return safe_commit(
+        (jsonify({
+            'message': 'Election vote tally completed successfully',
+            'election_id': election_id,
+            'total_processed': len(uncounted_votes),
+            'auto_verified_count': verified_count,
+            'counted_count': counted_count,
+            'skipped_flagged_count': skipped_flagged
+        }), 200),
+        'Failed to tally election votes'
+    )
+
 @votes_bp.route('/history', methods=['GET'])
 @jwt_required()
 def get_user_vote_history():

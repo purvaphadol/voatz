@@ -82,3 +82,6 @@ debug.log
 
 # ------ UPLOADS (user-generated, never in git) ------
 backend/static/uploads/
+
+# ------ IMPLEMENTATION PLANS ------
+plans/
