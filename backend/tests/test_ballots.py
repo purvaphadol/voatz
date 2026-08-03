@@ -5,8 +5,7 @@ from app.models.ballot import Ballot
 from app.models.election import Election
 from app.models.voter import Voter
 from app.models.vote import Vote
-from app.models.module import Module
-from app.models.module_action import ModuleAction
+from app.models.module import SystemModule, SystemModuleAction, CompanyModule
 from app.models.role_permission import RolePermissionMapping
 from app.models.role import Role
 
@@ -51,23 +50,28 @@ def add_ballots_permissions(client, setup_data):
         company_id = setup_data['company_id']
         role = Role.query.filter_by(role_name='Super Admin', company_id=company_id).first()
         if role:
-            mod = Module.query.filter_by(module_name='Ballots', company_id=company_id).first()
-            if not mod:
-                mod = Module(module_name='Ballots', company_id=company_id)
-                db.session.add(mod)
+            sys_mod = SystemModule.query.filter_by(module_name='Ballots').first()
+            if not sys_mod:
+                sys_mod = SystemModule(module_name='Ballots', status=1)
+                db.session.add(sys_mod)
                 db.session.flush()
+
+            cm = CompanyModule.query.filter_by(company_id=company_id, system_module_id=sys_mod.id).first()
+            if not cm:
+                cm = CompanyModule(company_id=company_id, system_module_id=sys_mod.id, status=1)
+                db.session.add(cm)
             
             actions = ['view', 'create', 'update', 'delete']
             for act_name in actions:
-                act = ModuleAction.query.filter_by(action_name=act_name, module_id=mod.id, company_id=company_id).first()
+                act = SystemModuleAction.query.filter_by(action_name=act_name, system_module_id=sys_mod.id).first()
                 if not act:
-                    act = ModuleAction(action_name=act_name, action_url='', module_id=mod.id, company_id=company_id)
+                    act = SystemModuleAction(action_name=act_name, action_url='', system_module_id=sys_mod.id, status=1)
                     db.session.add(act)
                     db.session.flush()
                 
-                rp = RolePermissionMapping.query.filter_by(role_id=role.id, module_id=mod.id, action_id=act.id, company_id=company_id).first()
+                rp = RolePermissionMapping.query.filter_by(role_id=role.id, module_id=sys_mod.id, action_id=act.id, company_id=company_id).first()
                 if not rp:
-                    rp = RolePermissionMapping(role_id=role.id, module_id=mod.id, action_id=act.id, company_id=company_id)
+                    rp = RolePermissionMapping(role_id=role.id, module_id=sys_mod.id, action_id=act.id, company_id=company_id, status=1)
                     db.session.add(rp)
             db.session.commit()
 

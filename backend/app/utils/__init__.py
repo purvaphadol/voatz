@@ -3,8 +3,6 @@ from app.models.user import User
 from app.models.user_role import UserRoleMapping
 from app.models.role_permission import RolePermissionMapping
 from app.models.user_permission import UserPermissionMapping
-from app.models.module import Module
-from app.models.module_action import ModuleAction
 from functools import wraps
 from flask import jsonify
 from app import db
@@ -199,7 +197,7 @@ def require_company_context(f):
     return decorated_function
 
 def check_user_permission(module_name, action_name):
-    """Check if current user has permission for a specific module/action"""
+    """Check if current user has permission for a specific module/action using SystemModule catalog."""
     try:
         user = get_current_user()
         if not user:
@@ -211,91 +209,94 @@ def check_user_permission(module_name, action_name):
             logger.warning(f"No company_id for user {user.id} in permission check: {module_name}.{action_name}")
             return False
         
-        # Get module by name
-        module = Module.query.filter_by(module_name=module_name, company_id=company_id).first()
-        if not module:
-            logger.warning(f"Module '{module_name}' not found for company {company_id}")
-            return False
-        
-        # Get action by name for this module
-        action = ModuleAction.query.filter_by(
-            action_name=action_name, 
-            module_id=module.id,
-            company_id=company_id
-        ).first()
-        if not action:
-            logger.warning(f"Action '{action_name}' not found for module '{module_name}' in company {company_id}")
-            return False
-        
-        # Check user's roles and their permissions
+        from app.models.module import SystemModule, SystemModuleAction, CompanyModule
         from app.utils.query_helpers import get_active_user_role_mappings, get_active_role_permissions
+
+        # 1. Fetch user's active role mappings
         active_mappings = get_active_user_role_mappings(user.id, company_id)
         role_ids = [ur.role_id for ur in active_mappings]
-        
-        # Check against active role permissions for this specific module+action
+        from app.models.role import Role
+        is_company_super_admin = Role.query.filter(
+            Role.id.in_(role_ids),
+            Role.is_super_admin == True,
+            Role.status != 0,
+            Role.status != 9
+        ).count() > 0 if role_ids else False
+
+        # 2. Get system module by name
+        sys_module = SystemModule.query.filter_by(module_name=module_name).filter(SystemModule.status != 9).first()
+        if not sys_module:
+            logger.warning(f"SystemModule '{module_name}' not found")
+            return False
+
+        # 3. Check if module is provisioned for this company
+        comp_module = CompanyModule.query.filter_by(
+            company_id=company_id,
+            system_module_id=sys_module.id
+        ).filter(CompanyModule.status != 9).first()
+        if not comp_module:
+            # If company_modules mappings exist for this company, enforce strict provisioning
+            has_any_provisioned = CompanyModule.query.filter_by(company_id=company_id).filter(CompanyModule.status != 9).count() > 0
+            if has_any_provisioned:
+                logger.warning(f"SystemModule '{module_name}' not provisioned for company {company_id}")
+                return False
+
+        # Company Super Admin carries automatic full permission for all provisioned modules
+        if is_company_super_admin:
+            return True
+
+        # 4. Get system action by name
+        sys_action = SystemModuleAction.query.filter_by(
+            action_name=action_name,
+            system_module_id=sys_module.id
+        ).filter(SystemModuleAction.status != 9).first()
+        if not sys_action:
+            logger.warning(f"SystemModuleAction '{action_name}' not found for module '{module_name}'")
+            return False
+
+        # 5. Check role permissions
+        role_ids = [ur.role_id for ur in active_mappings]
         active_role_perms = get_active_role_permissions(role_ids, company_id)
         role_permission = next(
             (rp for rp in active_role_perms
-             if rp.module_id == module.id and rp.action_id == action.id),
+             if rp.module_id == sys_module.id and rp.action_id == sys_action.id),
             None
         )
-        
+
         if role_permission:
-            # Check for user-specific overrides
             user_override = UserPermissionMapping.query.filter_by(
                 user_id=user.id,
-                module_id=module.id,
-                action_id=action.id,
+                module_id=sys_module.id,
+                action_id=sys_action.id,
                 company_id=company_id
-            ).first()
-            
+            ).filter(UserPermissionMapping.status != 9).first()
             if user_override:
-                result = user_override.permission_type == 1  # 1 = allow, 0 = deny
-                logger.info(f"User {user.id} permission override for {module_name}.{action_name}: {'ALLOW' if result else 'DENY'}")
-                return result
-            
-            logger.info(f"User {user.id} has role permission for {module_name}.{action_name}: ALLOW")
-            return True  # Role has permission and no user override
-        
-        # Check for user-specific allow permissions
+                return user_override.permission_type == 1
+            return True
+
         user_permission = UserPermissionMapping.query.filter_by(
             user_id=user.id,
-            module_id=module.id,
-            action_id=action.id,
+            module_id=sys_module.id,
+            action_id=sys_action.id,
             company_id=company_id,
-            permission_type=1  # Allow
-        ).first()
-        
+            permission_type=1
+        ).filter(UserPermissionMapping.status != 9).first()
         if user_permission:
-            logger.info(f"User {user.id} has direct permission for {module_name}.{action_name}: ALLOW")
             return True
-        
-        logger.warning(f"User {user.id} has no permission for {module_name}.{action_name}: DENY")
+
         return False
         
     except Exception as e:
         logger.error(f"Exception in check_user_permission({module_name}, {action_name}): {str(e)}")
-        # For permission checks, return False instead of raising
         return False
 
 def require_permission(module_name, action_name):
-    """Decorator to require specific permission for accessing an endpoint.
-
-    Platform Administrators (identified by the ``is_administrator`` JWT claim)
-    bypass the company-context and module/action permission checks entirely,
-    since their privileges are unconditional and not backed by company-scoped
-    Module/ModuleAction/RolePermission rows.
-
-    For all other identities the existing RBAC check is applied unchanged.
-    """
+    """Decorator to require specific permission for accessing an endpoint."""
     def decorator(f):
         @wraps(f)
         @jwt_required()
         def decorated_function(*args, **kwargs):
             try:
-                # Administrators have unconditional access — they carry no
-                # company-scoped permission rows, so the normal RBAC path
-                # would always reject them.
                 if is_administrator():
                     logger.info(f"Administrator granted access to {module_name}.{action_name}")
                     return f(*args, **kwargs)
@@ -324,7 +325,6 @@ def require_permission(module_name, action_name):
                     return jsonify({'error': e.description}), e.code
                 
                 logger.error(f"Exception in require_permission decorator for {module_name}.{action_name}: {str(e)}", exc_info=True)
-                # Instead of masking with 401, return 500 for actual errors
                 return jsonify({
                     'error': 'Internal server error', 
                     'message': 'An error occurred while checking permissions'
@@ -334,23 +334,16 @@ def require_permission(module_name, action_name):
     return decorator
 
 def get_user_permissions_summary():
-    """Get comprehensive permissions summary for current user"""
-    from app.models.module import SystemModule
+    """Get comprehensive permissions summary for current user using SystemModule catalog."""
+    from app.models.module import SystemModule, SystemModuleAction, CompanyModule
     if is_administrator():
-        sys_modules = SystemModule.query.filter(SystemModule.status == 1).order_by(SystemModule.order_index.asc()).all()
+        sys_modules = SystemModule.query.filter(SystemModule.status != 9).order_by(SystemModule.order_index.asc()).all()
         permissions = {}
         for m in sys_modules:
             permissions[m.module_name] = [
                 {'action': act, 'source': 'administrator', 'url': f'/{act}'}
                 for act in ['view', 'create', 'update', 'delete']
             ]
-        legacy_modules = Module.query.filter(Module.status == 1).all()
-        for m in legacy_modules:
-            if m.module_name not in permissions:
-                permissions[m.module_name] = [
-                    {'action': act, 'source': 'administrator', 'url': f'/{act}'}
-                    for act in ['view', 'create', 'update', 'delete']
-                ]
         return permissions
 
     from app.utils.query_helpers import get_active_user_role_mappings, get_active_role_permissions
@@ -367,12 +360,21 @@ def get_user_permissions_summary():
     user_permissions = UserPermissionMapping.query.filter(
         UserPermissionMapping.user_id == user.id,
         UserPermissionMapping.company_id == company_id,
-        UserPermissionMapping.status != 0
+        UserPermissionMapping.status != 9
     ).all()
 
-    # Pre-load modules and actions
-    modules_map = {m.id: m for m in Module.query.filter_by(company_id=company_id).all()}
-    actions_map = {a.id: a for a in ModuleAction.query.filter_by(company_id=company_id).all()}
+    sys_modules = SystemModule.query.join(
+        CompanyModule, CompanyModule.system_module_id == SystemModule.id
+    ).filter(
+        CompanyModule.company_id == company_id,
+        CompanyModule.status != 9,
+        SystemModule.status != 9
+    ).all()
+    if not sys_modules:
+        sys_modules = SystemModule.query.filter(SystemModule.status != 9).all()
+
+    modules_map = {m.id: m for m in sys_modules}
+    actions_map = {a.id: a for a in SystemModuleAction.query.filter(SystemModuleAction.status != 9).all()}
 
     permissions = {}
 
@@ -401,7 +403,7 @@ def get_user_permissions_summary():
             if up.permission_type == 1:
                 permissions[module.module_name].append({
                     'action': action.action_name,
-                    'source': 'user-allow',
+                    'source': 'user-override',
                     'url': action.action_url
                 })
 

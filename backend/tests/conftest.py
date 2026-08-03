@@ -6,8 +6,7 @@ from app.models.department import Department
 from app.models.role import Role
 from app.models.user import User
 from app.models.user_role import UserRoleMapping
-from app.models.module import Module
-from app.models.module_action import ModuleAction
+from app.models.module import SystemModule, SystemModuleAction, CompanyModule
 from app.models.role_permission import RolePermissionMapping
 from app.models.voter import Voter
 from flask_jwt_extended import create_access_token
@@ -26,7 +25,6 @@ def app():
         from dotenv import load_dotenv
         load_dotenv()
         db_url = os.environ.get('DATABASE_URL', 'postgresql://localhost/voatz')
-        # if the URL already has _test, don't add it again
         if not db_url.endswith('_test'):
             test_db_url = db_url + '_test'
         else:
@@ -91,16 +89,19 @@ def setup_data(app):
         }
 
         for mod_name, actions in modules_data.items():
-            mod = Module(module_name=mod_name, company_id=company.id)
-            db.session.add(mod)
+            sys_mod = SystemModule(module_name=mod_name, status=1)
+            db.session.add(sys_mod)
             db.session.flush()
 
+            cm = CompanyModule(company_id=company.id, system_module_id=sys_mod.id, status=1)
+            db.session.add(cm)
+
             for act_name in actions:
-                act = ModuleAction(action_name=act_name, action_url='', module_id=mod.id, company_id=company.id)
+                act = SystemModuleAction(action_name=act_name, action_url='', system_module_id=sys_mod.id, status=1)
                 db.session.add(act)
                 db.session.flush()
 
-                rp = RolePermissionMapping(role_id=role.id, module_id=mod.id, action_id=act.id, company_id=company.id)
+                rp = RolePermissionMapping(role_id=role.id, module_id=sys_mod.id, action_id=act.id, company_id=company.id, status=1)
                 db.session.add(rp)
 
         db.session.commit()

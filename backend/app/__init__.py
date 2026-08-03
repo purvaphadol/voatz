@@ -8,7 +8,17 @@ import logging
 import sys
 import os
 
-db = SQLAlchemy()
+from flask_sqlalchemy.query import Query
+
+class ActiveQuery(Query):
+    """Custom Query class for models with status fields.
+    Automatically excludes status=9 (deactivated) records unless .with_deactivated() is called.
+    """
+    def with_deactivated(self):
+        """Include deactivated (status=9) records in query results."""
+        return self.execution_options(include_deactivated=True)
+
+db = SQLAlchemy(query_class=ActiveQuery)
 migrate = Migrate()
 jwt = JWTManager()
 

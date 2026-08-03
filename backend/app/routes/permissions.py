@@ -3,11 +3,10 @@ from app import db
 from app.models.user_role import UserRoleMapping
 from app.models.role_permission import RolePermissionMapping
 from app.models.user_permission import UserPermissionMapping
-from app.models.module import Module
-from app.models.module_action import ModuleAction
+from app.models.module import SystemModule, SystemModuleAction, CompanyModule
 from app.models.role import Role
 from app.utils import get_current_company_id, require_company_context, require_permission
-from app.utils.constants import STATUS_INACTIVE
+from app.utils.constants import STATUS_INACTIVE, STATUS_DEACTIVATED, STATUS_ACTIVE
 from app.utils.audit import set_audit_fields
 from app.utils.db_utils import safe_commit
 from app.utils.query_helpers import get_active_user_role_mappings, get_active_role_permissions
@@ -16,20 +15,18 @@ permissions_bp = Blueprint('permissions', __name__)
 
 
 def _build_user_permissions(user_id, company_id):
-    """Shared helper that builds user permissions list. Returns a list, not a Response."""
-    # Step 1: Fetch roles assigned to the user within the company (only active mappings to active roles)
+    """Shared helper that builds user permissions list using SystemModules and SystemModuleActions."""
     active_mappings = get_active_user_role_mappings(user_id, company_id)
     role_ids = [ur.role_id for ur in active_mappings]
 
-    # Step 2: Get permissions from roles (company-specific)
     role_permissions = get_active_role_permissions(role_ids, company_id)
     permission_map = {(rp.module_id, rp.action_id): 'role' for rp in role_permissions}
 
-    # Step 3: Apply user-specific overrides (company-specific)
     user_permissions = UserPermissionMapping.query.filter(
         UserPermissionMapping.user_id == user_id,
         UserPermissionMapping.company_id == company_id,
-        UserPermissionMapping.status != STATUS_INACTIVE
+        UserPermissionMapping.status != STATUS_INACTIVE,
+        UserPermissionMapping.status != STATUS_DEACTIVATED
     ).all()
     for up in user_permissions:
         key = (up.module_id, up.action_id)
@@ -38,11 +35,22 @@ def _build_user_permissions(user_id, company_id):
         elif up.permission_type == 0:
             permission_map.pop(key, None)
 
-    # Step 4: Pre-load all modules and actions to avoid N+1
-    modules_map = {m.id: m for m in Module.query.filter_by(company_id=company_id).all()}
-    actions_map = {a.id: a for a in ModuleAction.query.filter_by(company_id=company_id).all()}
+    # Fetch allocated system modules for company (exclude only STATUS_DEACTIVATED so active and inactive are present)
+    sys_modules = SystemModule.query.join(
+        CompanyModule, CompanyModule.system_module_id == SystemModule.id
+    ).filter(
+        CompanyModule.company_id == company_id,
+        CompanyModule.status != STATUS_DEACTIVATED,
+        SystemModule.status != STATUS_DEACTIVATED
+    ).all()
 
-    # Step 5: Format for API response
+    if not sys_modules:
+        # Fallback to all non-deactivated system modules if company_modules not populated
+        sys_modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
+
+    modules_map = {m.id: m for m in sys_modules}
+    actions_map = {a.id: a for a in SystemModuleAction.query.filter(SystemModuleAction.status != STATUS_DEACTIVATED).all()}
+
     results = []
     for (module_id, action_id), source in permission_map.items():
         module = modules_map.get(module_id)
@@ -67,10 +75,10 @@ def get_current_user_permissions():
     from app.utils import get_current_user, is_administrator
 
     if is_administrator():
-        modules = Module.query.filter(Module.status != STATUS_INACTIVE).all()
+        modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
         results = []
         for m in modules:
-            actions = ModuleAction.query.filter(ModuleAction.module_id == m.id, ModuleAction.status != STATUS_INACTIVE).all()
+            actions = SystemModuleAction.query.filter(SystemModuleAction.system_module_id == m.id, SystemModuleAction.status != STATUS_DEACTIVATED).all()
             for a in actions:
                 results.append({
                     'module': m.module_name,
@@ -149,22 +157,37 @@ def get_modules_with_actions():
     if is_administrator():
         if filter_company_id:
             try:
-                company_id = int(filter_company_id)
+                comp_id = int(filter_company_id)
+                modules = SystemModule.query.join(
+                    CompanyModule, CompanyModule.system_module_id == SystemModule.id
+                ).filter(
+                    CompanyModule.company_id == comp_id,
+                    CompanyModule.status != STATUS_DEACTIVATED,
+                    SystemModule.status != STATUS_DEACTIVATED
+                ).all()
             except (ValueError, TypeError):
                 return jsonify({'error': 'Invalid company_id parameter'}), 400
-            modules = Module.query.filter_by(company_id=company_id).all()
         else:
-            modules = Module.query.all()
+            modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
     else:
         company_id = get_current_company_id()
-        modules = Module.query.filter_by(company_id=company_id).all()
+        modules = SystemModule.query.join(
+            CompanyModule, CompanyModule.system_module_id == SystemModule.id
+        ).filter(
+            CompanyModule.company_id == company_id,
+            CompanyModule.status != STATUS_DEACTIVATED,
+            SystemModule.status != STATUS_DEACTIVATED
+        ).all()
+        if not modules:
+            modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
         
     result = []
 
     for module in modules:
-        actions = ModuleAction.query.filter_by(
-            module_id=module.id,
-            company_id=module.company_id
+        actions = SystemModuleAction.query.filter_by(
+            system_module_id=module.id
+        ).filter(
+            SystemModuleAction.status != STATUS_DEACTIVATED
         ).all()
 
         result.append({
@@ -193,21 +216,21 @@ def get_role_permissions(role_id):
     """Get permissions for a specific role"""
     from app.utils import is_administrator
     if is_administrator():
-        role = Role.query.filter_by(id=role_id).filter(Role.status != STATUS_INACTIVE).first_or_404()
+        role = Role.query.filter_by(id=role_id).filter(Role.status != STATUS_INACTIVE, Role.status != STATUS_DEACTIVATED).first_or_404()
         company_id = role.company_id
     else:
         company_id = get_current_company_id()
-        role = Role.query.filter_by(id=role_id, company_id=company_id).filter(Role.status != STATUS_INACTIVE).first_or_404()
+        role = Role.query.filter_by(id=role_id, company_id=company_id).filter(Role.status != STATUS_INACTIVE, Role.status != STATUS_DEACTIVATED).first_or_404()
 
     role_permissions = RolePermissionMapping.query.filter(
         RolePermissionMapping.role_id == role_id,
         RolePermissionMapping.company_id == company_id,
-        RolePermissionMapping.status != STATUS_INACTIVE
+        RolePermissionMapping.status != STATUS_INACTIVE,
+        RolePermissionMapping.status != STATUS_DEACTIVATED
     ).all()
 
-    # Pre-load modules and actions
-    modules_map = {m.id: m for m in Module.query.filter_by(company_id=company_id).all()}
-    actions_map = {a.id: a for a in ModuleAction.query.filter_by(company_id=company_id).all()}
+    modules_map = {m.id: m for m in SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()}
+    actions_map = {a.id: a for a in SystemModuleAction.query.filter(SystemModuleAction.status != STATUS_DEACTIVATED).all()}
 
     permissions = {}
     for rp in role_permissions:
@@ -242,22 +265,22 @@ def update_role_permissions(role_id):
     if not data or 'permissions' not in data:
         return jsonify({'error': 'Missing permissions data'}), 400
 
-    if role.status == STATUS_INACTIVE:
+    if role.status == STATUS_INACTIVE or role.status == STATUS_DEACTIVATED:
         return jsonify({'error': 'Role is inactive'}), 400
 
     try:
         permissions_data = data['permissions']
-        valid_module_ids = {m.id for m in Module.query.filter_by(company_id=company_id).filter(Module.status != STATUS_INACTIVE).all()}
-        valid_action_ids = {a.id for a in ModuleAction.query.filter_by(company_id=company_id).filter(ModuleAction.status != STATUS_INACTIVE).all()}
+        valid_module_ids = {m.id for m in SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()}
+        valid_action_ids = {a.id for a in SystemModuleAction.query.filter(SystemModuleAction.status != STATUS_DEACTIVATED).all()}
 
-        # Validate all modules and actions belong to this company before mutating any state
+        # Validate all modules and actions exist before mutating state
         for module_id_str, actions in permissions_data.items():
             try:
                 module_id = int(module_id_str)
             except (ValueError, TypeError):
                 return jsonify({'error': f'Invalid module_id: {module_id_str}'}), 400
             if module_id not in valid_module_ids:
-                return jsonify({'error': f'Module {module_id} not found in this company'}), 404
+                return jsonify({'error': f'Module {module_id} not found'}), 404
 
             for action_id_str, granted in actions.items():
                 try:
@@ -265,7 +288,7 @@ def update_role_permissions(role_id):
                 except (ValueError, TypeError):
                     return jsonify({'error': f'Invalid action_id: {action_id_str}'}), 400
                 if action_id not in valid_action_ids:
-                    return jsonify({'error': f'Module action {action_id} not found in this company'}), 404
+                    return jsonify({'error': f'Module action {action_id} not found'}), 404
 
         # Delete existing permissions for this role
         RolePermissionMapping.query.filter_by(
@@ -281,7 +304,8 @@ def update_role_permissions(role_id):
                         role_id=role_id,
                         module_id=int(module_id),
                         action_id=int(action_id),
-                        company_id=company_id
+                        company_id=company_id,
+                        status=STATUS_ACTIVE
                     )
                     set_audit_fields(permission, is_create=True)
                     db.session.add(permission)
@@ -320,17 +344,17 @@ def update_user_permissions(user_id):
 
     try:
         permissions_data = data['permissions']
-        valid_module_ids = {m.id for m in Module.query.filter_by(company_id=company_id).filter(Module.status != STATUS_INACTIVE).all()}
-        valid_action_ids = {a.id for a in ModuleAction.query.filter_by(company_id=company_id).filter(ModuleAction.status != STATUS_INACTIVE).all()}
+        valid_module_ids = {m.id for m in SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()}
+        valid_action_ids = {a.id for a in SystemModuleAction.query.filter(SystemModuleAction.status != STATUS_DEACTIVATED).all()}
 
-        # Validate all modules and actions belong to this company before mutating any state
+        # Validate all modules and actions exist before mutating state
         for module_id_str, actions in permissions_data.items():
             try:
                 module_id = int(module_id_str)
             except (ValueError, TypeError):
                 return jsonify({'error': f'Invalid module_id: {module_id_str}'}), 400
             if module_id not in valid_module_ids:
-                return jsonify({'error': f'Module {module_id} not found in this company'}), 404
+                return jsonify({'error': f'Module {module_id} not found'}), 404
 
             for action_id_str, granted in actions.items():
                 try:
@@ -338,7 +362,7 @@ def update_user_permissions(user_id):
                 except (ValueError, TypeError):
                     return jsonify({'error': f'Invalid action_id: {action_id_str}'}), 400
                 if action_id not in valid_action_ids:
-                    return jsonify({'error': f'Module action {action_id} not found in this company'}), 404
+                    return jsonify({'error': f'Module action {action_id} not found'}), 404
 
         # Step 1: Get role-based permissions using active mappings only
         active_mappings = get_active_user_role_mappings(user_id, company_id)
@@ -350,7 +374,8 @@ def update_user_permissions(user_id):
         existing_overrides = UserPermissionMapping.query.filter(
             UserPermissionMapping.user_id == user_id,
             UserPermissionMapping.company_id == company_id,
-            UserPermissionMapping.status != STATUS_INACTIVE
+            UserPermissionMapping.status != STATUS_INACTIVE,
+            UserPermissionMapping.status != STATUS_DEACTIVATED
         ).all()
 
         # Build a map of existing overrides keyed by (module_id, action_id)
@@ -364,7 +389,6 @@ def update_user_permissions(user_id):
         overrides_removed = 0
         overrides_unchanged = 0
 
-        # Track which keys are covered by incoming data
         incoming_keys = set()
 
         for module_id, actions in permissions_data.items():
@@ -384,40 +408,30 @@ def update_user_permissions(user_id):
                     permission_type = 1 if granted_bool else 0
                     if existing:
                         if existing.permission_type != permission_type:
-                            # Override type changed — update it
                             existing.permission_type = permission_type
                             set_audit_fields(existing, is_create=False)
                             overrides_added += 1
                         else:
                             overrides_unchanged += 1
                     else:
-                        # New override needed
                         new_perm = UserPermissionMapping(
                             user_id=user_id,
                             role_id=None,
                             module_id=module_id_int,
                             action_id=action_id_int,
                             permission_type=permission_type,
-                            company_id=company_id
+                            company_id=company_id,
+                            status=STATUS_ACTIVE
                         )
                         set_audit_fields(new_perm, is_create=True)
                         db.session.add(new_perm)
                         overrides_added += 1
-
-                        override_type = "ALLOW" if permission_type == 1 else "DENY"
-                        current_app.logger.debug(
-                            f"Added {override_type} override: Module {module_id_int}, "
-                            f"Action {action_id_int}"
-                        )
                 else:
-                    # No override needed — if one exists, soft-delete it
                     if existing:
                         existing.status = STATUS_INACTIVE
                         set_audit_fields(existing, is_create=False)
                         overrides_removed += 1
 
-        # Step 4: Soft-delete existing overrides for keys NOT in incoming data
-        # These are permissions the admin didn't include — treat as remove
         for key, existing in existing_map.items():
             if key not in incoming_keys:
                 existing.status = STATUS_INACTIVE
@@ -443,7 +457,7 @@ def update_user_permissions(user_id):
 @permissions_bp.route('/user/<int:user_id>/management', methods=['GET'])
 @require_permission('Permissions', 'view')
 def get_user_permissions_for_management(user_id):
-    """Get user permissions in management format - shows all actions with current effective state"""
+    """Get user permissions in management format using SystemModule catalog."""
     from app.utils import is_administrator
     if is_administrator():
         from app.models.user import User
@@ -454,19 +468,26 @@ def get_user_permissions_for_management(user_id):
         from app.models.user import User
         user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
 
-    modules = Module.query.filter_by(company_id=company_id).all()
+    modules = SystemModule.query.join(
+        CompanyModule, CompanyModule.system_module_id == SystemModule.id
+    ).filter(
+        CompanyModule.company_id == company_id,
+        CompanyModule.status != STATUS_DEACTIVATED,
+        SystemModule.status != STATUS_DEACTIVATED
+    ).all()
+    if not modules:
+        modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
 
-    # Step 1: Get user's role-based permissions
     active_mappings = get_active_user_role_mappings(user_id, company_id)
     role_ids = [ur.role_id for ur in active_mappings]
     role_permissions = get_active_role_permissions(role_ids, company_id)
     role_perm_map = {(rp.module_id, rp.action_id): True for rp in role_permissions}
 
-    # Step 2: Get user-specific overrides
     user_permissions = UserPermissionMapping.query.filter(
         UserPermissionMapping.user_id == user_id,
         UserPermissionMapping.company_id == company_id,
-        UserPermissionMapping.status != STATUS_INACTIVE
+        UserPermissionMapping.status != STATUS_INACTIVE,
+        UserPermissionMapping.status != STATUS_DEACTIVATED
     ).all()
 
     user_overrides = {}
@@ -477,14 +498,14 @@ def get_user_permissions_for_management(user_id):
         elif up.permission_type == 0:
             user_overrides[key] = False
 
-    # Step 3: Build response with effective permissions
     permissions = {}
     permission_sources = {}
 
     for module in modules:
-        actions = ModuleAction.query.filter_by(
-            module_id=module.id,
-            company_id=company_id
+        actions = SystemModuleAction.query.filter_by(
+            system_module_id=module.id
+        ).filter(
+            SystemModuleAction.status != STATUS_DEACTIVATED
         ).all()
 
         if actions:

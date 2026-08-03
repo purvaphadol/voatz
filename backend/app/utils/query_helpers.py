@@ -122,39 +122,33 @@ def get_active_companies_query():
 
 def get_active_modules_query(company_id):
     """
-    Returns a SQLAlchemy query for all active modules in a given company.
-    A module is considered active if its status is STATUS_ACTIVE.
+    Returns a SQLAlchemy query for all provisioned non-deactivated system modules for a given company.
     """
-    from app.models.module import Module
-    from app.utils.constants import STATUS_ACTIVE
-    return Module.query.filter(
-        Module.company_id == company_id,
-        Module.status == STATUS_ACTIVE
-    ).order_by(Module.order_index.asc(), Module.module_name.asc())
+    from app.models.module import SystemModule, CompanyModule
+    from app.utils.constants import STATUS_DEACTIVATED
+    return SystemModule.query.join(
+        CompanyModule, CompanyModule.system_module_id == SystemModule.id
+    ).filter(
+        CompanyModule.company_id == company_id,
+        CompanyModule.status != STATUS_DEACTIVATED,
+        SystemModule.status != STATUS_DEACTIVATED
+    ).order_by(SystemModule.order_index.asc(), SystemModule.module_name.asc())
 
 
 def get_admin_modules_query(company_id):
     """
-    Returns a SQLAlchemy query for all admin modules in a given company.
-    Shows active and deactivated modules, hides deleted modules.
+    Returns a SQLAlchemy query for non-deactivated modules provisioned for a given company.
     """
-    from app.models.module import Module
-    from app.utils.constants import STATUS_INACTIVE
-    return Module.query.filter(
-        Module.company_id == company_id,
-        Module.status != STATUS_INACTIVE
-    ).order_by(Module.order_index.asc(), Module.module_name.asc())
+    return get_active_modules_query(company_id)
 
 
-def get_active_module_actions_query(module_id, company_id):
+def get_active_module_actions_query(module_id, company_id=None):
     """
-    Returns a SQLAlchemy query for all active module actions for a specific module.
-    An action is considered active if its status is STATUS_ACTIVE.
+    Returns a SQLAlchemy query for non-deactivated system module actions for a specific system module.
     """
-    from app.models.module_action import ModuleAction
-    from app.utils.constants import STATUS_ACTIVE
-    return ModuleAction.query.filter(
-        ModuleAction.module_id == module_id,
-        ModuleAction.company_id == company_id,
-        ModuleAction.status == STATUS_ACTIVE
+    from app.models.module import SystemModuleAction
+    from app.utils.constants import STATUS_DEACTIVATED
+    return SystemModuleAction.query.filter(
+        SystemModuleAction.system_module_id == module_id,
+        SystemModuleAction.status != STATUS_DEACTIVATED
     )

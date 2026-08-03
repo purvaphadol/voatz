@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script to assign voting module permissions to Super Admin role
+Script to assign voting module permissions to Super Admin role using SystemModule catalog
 """
 
 import os
@@ -8,7 +8,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app import create_app
-from app.models import db, Role, Module, ModuleAction, RolePermissionMapping, Company
+from app.models import db, Role, SystemModule, SystemModuleAction, CompanyModule, RolePermissionMapping, Company
 
 def assign_voting_permissions():
     """Assign all voting module permissions to Super Admin role"""
@@ -52,42 +52,49 @@ def assign_voting_permissions():
         for module_name in voting_modules:
             print(f"\n📋 Processing module: {module_name}")
             
-            # Get the module
-            module = Module.query.filter_by(module_name=module_name).first()
+            # Get the system module
+            module = SystemModule.query.filter_by(module_name=module_name).first()
             if not module:
-                print(f"❌ Module '{module_name}' not found")
+                print(f"❌ SystemModule '{module_name}' not found")
                 continue
             
-            print(f"✅ Found module '{module_name}' with ID: {module.id}")
+            print(f"✅ Found system module '{module_name}' with ID: {module.id}")
             
-            # Get all actions for this module
-            module_actions = ModuleAction.query.filter_by(module_id=module.id).all()
+            # Ensure CompanyModule mapping exists
+            comp_mod = CompanyModule.query.filter_by(company_id=company.id, system_module_id=module.id).first()
+            if not comp_mod:
+                comp_mod = CompanyModule(company_id=company.id, system_module_id=module.id, status=1)
+                db.session.add(comp_mod)
+                print(f"   ✅ Provisioned system module '{module_name}' to company {company.id}")
+            
+            # Get all actions for this system module
+            module_actions = SystemModuleAction.query.filter_by(system_module_id=module.id).all()
             
             if not module_actions:
-                print(f"❌ No actions found for module '{module_name}'")
+                print(f"❌ No actions found for system module '{module_name}'")
                 continue
             
-            print(f"✅ Found {len(module_actions)} actions for module '{module_name}'")
+            print(f"✅ Found {len(module_actions)} actions for system module '{module_name}'")
             
             # Assign permissions for each action
             for action in module_actions:
-                # Check if permission already exists
                 existing_permission = RolePermissionMapping.query.filter_by(
                     role_id=super_admin_role.id,
                     module_id=module.id,
-                    action_id=action.id
+                    action_id=action.id,
+                    company_id=company.id
                 ).first()
                 
                 if existing_permission:
                     print(f"   ➡️ Permission already exists: {action.action_name}")
                     continue
                 
-                # Create new permission
                 new_permission = RolePermissionMapping(
                     role_id=super_admin_role.id,
                     module_id=module.id,
                     action_id=action.id,
-                    company_id=company.id
+                    company_id=company.id,
+                    status=1
                 )
                 
                 db.session.add(new_permission)
@@ -104,4 +111,4 @@ def assign_voting_permissions():
             print(f"❌ Error committing changes: {str(e)}")
 
 if __name__ == '__main__':
-    assign_voting_permissions() 
+    assign_voting_permissions()

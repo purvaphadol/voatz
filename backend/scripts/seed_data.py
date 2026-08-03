@@ -282,59 +282,25 @@ def seed_company(
             )
         )
 
-    # 6. Legacy module rows for backward compatibility
-    module_rows = [
-        {
-            "module_name": mod.module_name,
-            "route_name": mod.route_name,
-            "icon": mod.icon,
-            "order_index": mod.order_index,
-            "company_id": company_id,
-            "status": 1,
-            "created_at": now,
-            "updated_at": now,
-        }
-        for mod in all_sys_mods
-    ]
-    if module_rows:
-        module_ids = session.execute(
-            t["modules"].insert().returning(t["modules"].c.id),
-            module_rows,
-        ).scalars().all()
+    # 6. Assign role permissions to Super Admin role for all system module actions
+    all_sys_actions = session.execute(
+        t["system_module_actions"].select()
+    ).fetchall()
 
-        module_action_rows = []
-        for mod_id in module_ids:
-            for act in ACTIONS:
-                module_action_rows.append({
-                    "module_id": mod_id,
-                    "action_name": act["name"],
-                    "action_url": act["url"],
-                    "company_id": company_id,
-                    "status": 1,
-                    "created_at": now,
-                    "updated_at": now,
-                })
-        session.execute(t["module_action"].insert(), module_action_rows)
-
-        all_actions = session.execute(
-            t["module_action"].select().where(
-                t["module_action"].c.company_id == company_id
-            )
-        ).fetchall()
-
+    if all_sys_actions:
         session.execute(
             t["role_permission_mapping"].insert(),
             [
                 {
                     "company_id": company_id,
                     "role_id": super_admin_role_id,
-                    "module_id": row.module_id,
+                    "module_id": row.system_module_id,
                     "action_id": row.id,
                     "status": 1,
                     "created_at": now,
                     "updated_at": now,
                 }
-                for row in all_actions
+                for row in all_sys_actions
             ],
         )
 

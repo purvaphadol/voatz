@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required
 from app.utils import get_current_user, get_user_permissions_summary, require_company_context, get_current_company_id
-from app.models.module import SystemModule, CompanyModule, Module
+from app.models.module import SystemModule, CompanyModule
 from app.utils.constants import STATUS_ACTIVE
 
 menu_bp = Blueprint('menu', __name__)
@@ -24,15 +24,6 @@ def get_user_sidebar():
     
     if is_administrator():
         modules = SystemModule.query.filter(SystemModule.status == STATUS_ACTIVE).order_by(SystemModule.order_index.asc(), SystemModule.module_name.asc()).all()
-        if not modules:
-            # Fallback to legacy modules if system_modules empty
-            all_modules = Module.query.filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
-            seen = set()
-            modules = []
-            for m in all_modules:
-                if m.module_name not in seen:
-                    seen.add(m.module_name)
-                    modules.append(m)
     else:
         company_id = get_current_company_id()
         modules = SystemModule.query.join(
@@ -42,10 +33,6 @@ def get_user_sidebar():
             CompanyModule.status == STATUS_ACTIVE,
             SystemModule.status == STATUS_ACTIVE
         ).order_by(SystemModule.order_index.asc(), SystemModule.module_name.asc()).all()
-
-        if not modules:
-            # Fallback to legacy modules
-            modules = Module.query.filter_by(company_id=company_id).filter(Module.status == STATUS_ACTIVE).order_by(Module.order_index.asc(), Module.module_name.asc()).all()
         
     module_routes = {module.module_name: module.display_route for module in modules}
     module_orders = {module.module_name: module.order_index for module in modules}

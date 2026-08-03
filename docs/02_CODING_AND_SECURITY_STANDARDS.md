@@ -99,3 +99,15 @@ def ensure_ist(dt):
 
 - Major state changes (creating companies, updating roles, changing election status, casting votes, publishing results) MUST be annotated with `@audit_action(action_name, module=module_name)`.
 - Audit logs capture `company_id`, `user_id`, `module_name`, `action_name`, `ip_address`, `user_agent`, and `timestamp` in IST.
+
+---
+
+## 7. Entity Lifecycle & Status Standards (`app/utils/constants.py`)
+
+All core domain entities utilize a standardized 3-tier lifecycle status defined in `app/utils/constants.py`:
+
+* **`STATUS_ACTIVE = 1` (Active / Operational)**: Currently enabled, operational, and open for standard UI & API operations.
+* **`STATUS_INACTIVE = 0` (Paused / Disabled)**: Exists in the system but temporarily paused or disabled. Can be toggled back to Active later from the UI.
+* **`STATUS_DEACTIVATED = 9` (Deleted / Historical)**: Soft-deleted / purged from standard application views. Never shown on UI lists and excluded from standard queries. The record is preserved in the database strictly for historical/audit integrity, but treated by the application as deleted.
+
+Standard query helpers in `app/utils/query_helpers.py` automatically exclude `STATUS_DEACTIVATED = 9` records from list queries.

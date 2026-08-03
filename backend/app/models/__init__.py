@@ -3,7 +3,6 @@ from .role import *
 from .company import *
 from .department import *
 from .module import *
-from .module_action import *
 from .user_role import *
 from .role_permission import *
 from .user_permission import *

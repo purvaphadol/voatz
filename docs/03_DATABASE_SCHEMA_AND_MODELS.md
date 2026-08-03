@@ -43,7 +43,7 @@ Stores onboarded tenant organizations.
 | `id` | INTEGER | PRIMARY KEY, AUTOINCREMENT | Unique company ID |
 | `company_name` | VARCHAR(100) | NOT NULL, UNIQUE (case-insensitive) | Company name |
 | `code` | VARCHAR(20) | UNIQUE, NULLABLE | Company short code |
-| `status` | INTEGER | DEFAULT 1 | 1=Active, 0=Inactive |
+| `status` | INTEGER | DEFAULT 1 | 1=Active, 0=Inactive, 9=Deactivated |
 | `created_at` | DATETIME | DEFAULT IST | Creation timestamp |
 | `updated_at` | DATETIME | DEFAULT IST | Last update timestamp |
 
