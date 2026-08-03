@@ -47,9 +47,21 @@ export const AuthProvider = ({ children }) => {
     initAuth();
   }, []);
 
-  const login = async (email, password) => {
+  const login = async (email, password, companyId = null) => {
     try {
-      const response = await authAPI.login({ email, password });
+      const payload = { email, password };
+      if (companyId) payload.company_id = companyId;
+
+      const response = await authAPI.login(payload);
+
+      if (response.data.multi_company) {
+        return {
+          multi_company: true,
+          companies: response.data.companies,
+          message: response.data.message
+        };
+      }
+
       const { access_token, is_administrator } = response.data;
       
       let userData;

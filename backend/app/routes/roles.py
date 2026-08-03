@@ -89,6 +89,7 @@ def list_roles():
             'role_name': r.role_name,
             'description': r.description or '',
             'company_id': r.company_id,
+            'company_name': r.company.company_name if r.company else None,
             'department_id': r.department_id,
             'department_name': r.department.department_name if r.department else None,
             'created_at': r.created_at.isoformat() if r.created_at else None,

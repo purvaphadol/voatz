@@ -96,16 +96,54 @@ def login():
             }
         }), 200
         
-    # 2. If not found in administrators, fall through to User table lookup
-    user = User.query.filter_by(email=data['email']).first()
-    
-    if not user or getattr(user, 'status', 1) == STATUS_INACTIVE:
+    # 2. If not found in administrators, search User table across companies
+    requested_company_id = data.get('company_id')
+    matching_users = User.query.filter(
+        User.email == data['email'],
+        User.status != 0,
+        User.status != 9
+    ).all()
+
+    if not matching_users:
         return jsonify({'error': 'Invalid credentials'}), 401
-        
-    if not check_password_hash(user.password_hash, str(data['password'])):
+
+    # Filter users with valid matching password
+    valid_users = [
+        u for u in matching_users
+        if check_password_hash(u.password_hash, str(data['password']))
+    ]
+
+    if not valid_users:
         return jsonify({'error': 'Invalid credentials'}), 401
-    
-    # Get company information
+
+    # Disambiguate if multiple company accounts exist for this email
+    user = None
+    if requested_company_id:
+        try:
+            req_comp_id = int(requested_company_id)
+            user = next((u for u in valid_users if u.company_id == req_comp_id), None)
+            if not user:
+                return jsonify({'error': 'Account not found for selected company'}), 401
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid company_id parameter'}), 400
+    elif len(valid_users) == 1:
+        user = valid_users[0]
+    else:
+        # Multiple company profiles found for this email & password!
+        company_options = []
+        for u in valid_users:
+            comp = Company.query.get(u.company_id)
+            company_options.append({
+                'company_id': u.company_id,
+                'company_name': comp.company_name if comp else f"Company #{u.company_id}"
+            })
+        return jsonify({
+            'multi_company': True,
+            'message': 'Multiple organizations found for this account. Please select an organization to proceed.',
+            'companies': company_options
+        }), 200
+
+    # Single targeted user confirmed — retrieve company & roles
     company = Company.query.get(user.company_id)
     
     # Fetch active roles

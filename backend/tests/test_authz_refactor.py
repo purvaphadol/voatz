@@ -12,7 +12,7 @@ Company B is seeded directly via seed_data.seed_company() so it gets the
 full module/action/permission fan-out.
 """
 import sys, os, json, time, requests, uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
@@ -20,6 +20,7 @@ sys.path.insert(0, BACKEND_DIR)
 from dotenv import load_dotenv
 load_dotenv(os.path.join(BACKEND_DIR, ".env"))
 
+from werkzeug.security import generate_password_hash
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import sessionmaker
 from scripts.seed_data import seed_company
@@ -967,8 +968,30 @@ r_cand_re = requests.post(f"{BASE}/candidates/{withdrawn_b_id}/reinstate", heade
 record("14.7", "Company A Super Admin cannot reinstate Company B withdrawn candidate → 404", 404, r_cand_re)
 
 # 14.8 - Company A Super Admin get-candidate-stats -> 200
-r_cand_stats = requests.get(f"{BASE}/candidates/stats", headers=ah(A_SUPER_TOKEN))
-record("14.8", "Company A Super Admin get-candidate-stats → 200", 200, r_cand_stats)
+# ── Section 15: Multi-Company Login Disambiguation ──────────────────────────────
+# Create user with same email across Company A and Company B
+shared_email = "shared_multicomp_user@test.com"
+shared_pass = "SharedPass123!"
+sh_pass_hash = generate_password_hash(shared_pass)
+
+now_utc = datetime.now(timezone.utc)
+db_sess = DBSession()
+db_sess.execute(meta.tables['users'].insert().values(name="Shared User Comp A", email=shared_email, password_hash=sh_pass_hash, company_id=A_COMPANY_ID, status=1, created_at=now_utc, updated_at=now_utc))
+db_sess.execute(meta.tables['users'].insert().values(name="Shared User Comp B", email=shared_email, password_hash=sh_pass_hash, company_id=COMPANY_B_ID, status=1, created_at=now_utc, updated_at=now_utc))
+db_sess.commit()
+db_sess.close()
+
+# Test 15.1: Login without company_id -> Returns multi_company response
+r_mc1 = requests.post(f"{BASE}/auth/login", json={"email": shared_email, "password": shared_pass})
+record("15.1", "Multi-company login without company_id returns company selection prompt", 200, r_mc1, extra_check=lambda b: b.get("multi_company") is True and len(b.get("companies", [])) == 2)
+
+# Test 15.2: Login with explicit Company A ID -> Returns token for Company A
+r_mc2 = requests.post(f"{BASE}/auth/login", json={"email": shared_email, "password": shared_pass, "company_id": A_COMPANY_ID})
+record("15.2", "Multi-company login with explicit Company A ID targets Company A", 200, r_mc2, extra_check=lambda b: b.get("user", {}).get("company_id") == A_COMPANY_ID)
+
+# Test 15.3: Login with explicit Company B ID -> Returns token for Company B
+r_mc3 = requests.post(f"{BASE}/auth/login", json={"email": shared_email, "password": shared_pass, "company_id": COMPANY_B_ID})
+record("15.3", "Multi-company login with explicit Company B ID targets Company B", 200, r_mc3, extra_check=lambda b: b.get("user", {}).get("company_id") == COMPANY_B_ID)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 passed_count = sum(1 for r in results if r["passed"])

@@ -5,6 +5,7 @@ from app.models.user_role import UserRoleMapping
 from app.models.user import User
 from app.models.role import Role
 from app.models.department import Department
+from app.models.company import Company
 from app.utils import get_current_company_id, require_permission
 from app.utils.db_utils import safe_commit
 from app.utils.audit import audit_action, set_audit_fields
@@ -49,13 +50,16 @@ def list_user_roles():
         User.name.label('user_name'),
         User.email.label('user_email'),
         Role.role_name,
-        Department.department_name
+        Department.department_name,
+        Company.company_name
     ).join(
         User, UserRoleMapping.user_id == User.id
     ).join(
         Role, UserRoleMapping.role_id == Role.id
     ).outerjoin(
         Department, UserRoleMapping.department_id == Department.id
+    ).outerjoin(
+        Company, UserRoleMapping.company_id == Company.id
     ).filter(
         UserRoleMapping.status.in_(allowed),
         UserRoleMapping.status != STATUS_DEACTIVATED,
@@ -115,7 +119,8 @@ def list_user_roles():
             'department_id': ur.UserRoleMapping.department_id,
             'department_name': ur.department_name,
             'status': ur.UserRoleMapping.status,
-            'company_id': ur.UserRoleMapping.company_id
+            'company_id': ur.UserRoleMapping.company_id,
+            'company_name': ur.company_name
         } for ur in user_roles],
         'total': pagination.total,
         'page': pagination.page,

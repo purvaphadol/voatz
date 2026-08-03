@@ -40,8 +40,9 @@ import {
   Business as BusinessIcon,
   Assignment as AssignmentIcon,
 } from '@mui/icons-material';
-import { userRolesAPI, usersAPI, rolesAPI, departmentsAPI } from '../../services/api';
+import { userRolesAPI, usersAPI, rolesAPI, departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -57,27 +58,41 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
 );
 
 const UserRoles = () => {
+  const { user: currentUser } = useAuth();
   const { hasPermission, refreshPermissions } = usePermissions();
   const [userRoles, setUserRoles] = useState([]);
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState('');
   const [userRolesList, setUserRolesList] = useState([]);
-  const [formData, setFormData] = useState({
-    user_id: '',
-    role_id: '',
-    department_id: '',
-  });
-  const [filteredRoles, setFilteredRoles] = useState([]);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [searchInput, setSearchInput] = useState('');
+  
+  // Filter bar states
+  const [filterCompany, setFilterCompany] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
+  // Form modal states
+  const [formData, setFormData] = useState({
+    company_id: '',
+    user_id: '',
+    department_id: '',
+    role_id: '',
+  });
+  
+  const [formDepartments, setFormDepartments] = useState([]);
+  const [formRoles, setFormRoles] = useState([]);
+  const [formUsers, setFormUsers] = useState([]);
+
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const isPlatformAdmin = currentUser?.is_administrator;
   const canView = hasPermission('UserRoles', 'view');
   const canCreate = hasPermission('UserRoles', 'create');
   const canDelete = hasPermission('UserRoles', 'delete');
@@ -89,33 +104,35 @@ const UserRoles = () => {
 
   useEffect(() => {
     loadData();
-  }, [debouncedSearch, filterDepartment]);
+  }, [debouncedSearch, filterCompany, filterDepartment]);
 
   const loadData = async () => {
     try {
       setLoading(true);
       const params = {};
       if (debouncedSearch) params.search = debouncedSearch;
+      if (filterCompany) params.company_id = filterCompany;
       if (filterDepartment) params.department_id = filterDepartment;
 
-      const [userRolesRes, usersRes, rolesRes, departmentsRes] = await Promise.allSettled([
+      const promises = [
         userRolesAPI.getAll(params),
-        usersAPI.getAll(),
-        rolesAPI.getAll(),
-        departmentsAPI.getAll(),
-      ]);
+        usersAPI.getAll(filterCompany ? { company_id: filterCompany } : {}),
+        rolesAPI.getAll(filterCompany ? { company_id: filterCompany } : {}),
+        departmentsAPI.getAll(filterCompany ? { company_id: filterCompany } : {}),
+      ];
 
-      if (userRolesRes.status === 'fulfilled') {
-        setUserRoles(userRolesRes.value.data.data || []);
+      if (isPlatformAdmin) {
+        promises.push(companiesAPI.getAll());
       }
-      if (usersRes.status === 'fulfilled') {
-        setUsers(usersRes.value.data.data || []);
-      }
-      if (rolesRes.status === 'fulfilled') {
-        setRoles(rolesRes.value.data.data || []);
-      }
-      if (departmentsRes.status === 'fulfilled') {
-        setDepartments(departmentsRes.value.data.data || []);
+
+      const results = await Promise.allSettled(promises);
+
+      if (results[0].status === 'fulfilled') setUserRoles(results[0].value.data.data || []);
+      if (results[1].status === 'fulfilled') setUsers(results[1].value.data.data || []);
+      if (results[2].status === 'fulfilled') setRoles(results[2].value.data.data || []);
+      if (results[3].status === 'fulfilled') setDepartments(results[3].value.data.data || []);
+      if (isPlatformAdmin && results[4]?.status === 'fulfilled') {
+        setCompanies(results[4].value.data.data || []);
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -135,28 +152,86 @@ const UserRoles = () => {
     }
   };
 
-  const loadRolesByDepartment = async (departmentId) => {
-    try {
-      if (!departmentId) {
-        setFilteredRoles([]);
-        return;
-      }
-      const response = await rolesAPI.getAll({ department_id: departmentId });
-      setFilteredRoles(response.data.data || []);
-    } catch (error) {
-      console.error('Error loading roles by department:', error);
-      setFilteredRoles([]);
-    }
+  const handleFilterCompanyChange = (companyId) => {
+    setFilterCompany(companyId);
+    setFilterDepartment(''); // Reset department filter when company changes
+    setSelectedUser('');
+    setUserRolesList([]);
   };
 
   const handleAdd = () => {
+    const initialCompanyId = !isPlatformAdmin && currentUser?.company_id ? currentUser.company_id : '';
     setFormData({
+      company_id: initialCompanyId,
       user_id: '',
-      role_id: '',
       department_id: '',
+      role_id: '',
     });
-    setFilteredRoles([]);
+    setFormDepartments([]);
+    setFormRoles([]);
+    setFormUsers([]);
     setDialogOpen(true);
+
+    if (initialCompanyId) {
+      loadFormDepartmentsAndUsers(initialCompanyId);
+    }
+  };
+
+  const loadFormDepartmentsAndUsers = async (companyId) => {
+    try {
+      if (!companyId) {
+        setFormDepartments([]);
+        setFormUsers([]);
+        setFormRoles([]);
+        return;
+      }
+      const [deptRes, userRes] = await Promise.all([
+        departmentsAPI.getAll({ company_id: companyId }),
+        usersAPI.getAll({ company_id: companyId }),
+      ]);
+      setFormDepartments(deptRes.data.data || []);
+      setFormUsers(userRes.data.data || []);
+    } catch (err) {
+      console.error('Error loading form departments/users:', err);
+      setFormDepartments([]);
+      setFormUsers([]);
+    }
+  };
+
+  const handleFormCompanyChange = (companyId) => {
+    setFormData({
+      ...formData,
+      company_id: companyId,
+      user_id: '',
+      department_id: '',
+      role_id: '',
+    });
+    setFormRoles([]);
+    loadFormDepartmentsAndUsers(companyId);
+  };
+
+  const handleFormDepartmentChange = async (departmentId) => {
+    setFormData({ 
+      ...formData, 
+      department_id: departmentId,
+      role_id: '' // Clear role selection when department changes
+    });
+
+    if (!departmentId) {
+      setFormRoles([]);
+      return;
+    }
+
+    try {
+      const response = await rolesAPI.getAll({ 
+        company_id: formData.company_id,
+        department_id: departmentId 
+      });
+      setFormRoles(response.data.data || []);
+    } catch (error) {
+      console.error('Error loading roles by department:', error);
+      setFormRoles([]);
+    }
   };
 
   const handleUserSelect = (userId) => {
@@ -166,15 +241,6 @@ const UserRoles = () => {
     } else {
       setUserRolesList([]);
     }
-  };
-
-  const handleDepartmentChange = (departmentId) => {
-    setFormData({ 
-      ...formData, 
-      department_id: departmentId,
-      role_id: '' // Clear role selection when department changes
-    });
-    loadRolesByDepartment(departmentId);
   };
 
   const handleAssignRole = async (e) => {
@@ -188,7 +254,12 @@ const UserRoles = () => {
     }
 
     try {
-      await userRolesAPI.assign(formData);
+      await userRolesAPI.assign({
+        user_id: formData.user_id,
+        role_id: formData.role_id,
+        company_id: formData.company_id,
+        department_id: formData.department_id,
+      });
       setSuccess('Role assigned successfully');
       setDialogOpen(false);
       loadData();
@@ -196,7 +267,6 @@ const UserRoles = () => {
         loadUserRoles(selectedUser);
       }
       
-      // Refresh permissions since role assignments affect user permissions
       await refreshPermissions();
     } catch (error) {
       setError((error.response && error.response.data && error.response.data.error) || 'Failed to assign role');
@@ -213,7 +283,6 @@ const UserRoles = () => {
           loadUserRoles(selectedUser);
         }
         
-        // Refresh permissions since role unassignments affect user permissions
         await refreshPermissions();
       } catch (error) {
         setError(
@@ -244,8 +313,27 @@ const UserRoles = () => {
     return department ? department.department_name : 'N/A';
   };
 
+  const getCompanyName = (companyId) => {
+    const company = companies.find(c => c.id === companyId);
+    return company ? company.company_name : 'N/A';
+  };
+
   const columns = [
     { field: 'id', headerName: 'ID', width: 70 },
+    {
+      field: 'company_name',
+      headerName: 'Company',
+      width: 170,
+      renderCell: (params) => (
+        <Chip
+          label={params.value || params.row.company_name || getCompanyName(params.row.company_id)}
+          size="small"
+          variant="outlined"
+          color="primary"
+          icon={<BusinessIcon />}
+        />
+      ),
+    },
     {
       field: 'user_id',
       headerName: 'User',
@@ -302,7 +390,6 @@ const UserRoles = () => {
       width: 100,
       getActions: (params) => {
         const actions = [];
-        
         if (canDelete) {
           actions.push(
             <GridActionsCellItem
@@ -312,13 +399,10 @@ const UserRoles = () => {
             />
           );
         }
-        
         return actions;
       },
     },
   ];
-
-
 
   return (
     <Box>
@@ -338,6 +422,7 @@ const UserRoles = () => {
         </Alert>
       )}
 
+      {/* Filter Bar */}
       <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
         <TextField
           label="Search by name"
@@ -345,18 +430,39 @@ const UserRoles = () => {
           size="small"
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          sx={{ minWidth: 220 }}
+          sx={{ minWidth: 200 }}
         />
-        <FormControl size="small" sx={{ minWidth: 160 }}>
+
+        {isPlatformAdmin && (
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel>Filter by Company</InputLabel>
+            <Select
+              value={filterCompany}
+              label="Filter by Company"
+              onChange={(e) => handleFilterCompanyChange(e.target.value)}
+            >
+              <MenuItem value="">All Companies</MenuItem>
+              {companies.map((c) => (
+                <MenuItem key={c.id} value={c.id}>
+                  {c.company_name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+
+        <FormControl size="small" sx={{ minWidth: 200 }}>
           <InputLabel>Filter by Department</InputLabel>
           <Select
             value={filterDepartment}
             label="Filter by Department"
             onChange={(e) => setFilterDepartment(e.target.value)}
           >
-            <MenuItem value="">All</MenuItem>
-            {departments.map(d => (
-              <MenuItem key={d.id} value={d.id}>{d.department_name}</MenuItem>
+            <MenuItem value="">All Departments</MenuItem>
+            {departments.map((d) => (
+              <MenuItem key={d.id} value={d.id}>
+                {d.department_name}
+              </MenuItem>
             ))}
           </Select>
         </FormControl>
@@ -386,7 +492,7 @@ const UserRoles = () => {
                 User Role Details
               </Typography>
               
-              <FormControl fullWidth sx={{ mb: 2 }}>
+              <FormControl fullWidth sx={{ mb: 2 }} disabled={isPlatformAdmin && !filterCompany}>
                 <InputLabel>Select User</InputLabel>
                 <Select
                   value={selectedUser}
@@ -394,7 +500,7 @@ const UserRoles = () => {
                   label="Select User"
                 >
                   <MenuItem value="">
-                    <em>Select a user</em>
+                    <em>{isPlatformAdmin && !filterCompany ? 'Select Company Filter First' : 'Select a user'}</em>
                   </MenuItem>
                   {users.map((user) => (
                     <MenuItem key={user.id} value={user.id}>
@@ -448,6 +554,7 @@ const UserRoles = () => {
         </Grid>
       </Grid>
 
+      {/* Assign Role Dialog */}
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <DialogTitle>
           <Box display="flex" alignItems="center">
@@ -459,37 +566,69 @@ const UserRoles = () => {
           <DialogContent>
             {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
             
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>User</InputLabel>
+            {/* 1. Company Field FIRST */}
+            {isPlatformAdmin ? (
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel>Company *</InputLabel>
+                <Select
+                  value={formData.company_id}
+                  onChange={(e) => handleFormCompanyChange(e.target.value)}
+                  label="Company *"
+                  required
+                >
+                  <MenuItem value="">
+                    <em>Select Company</em>
+                  </MenuItem>
+                  {companies.map((company) => (
+                    <MenuItem key={company.id} value={company.id}>
+                      {company.company_name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            ) : (
+              <TextField
+                fullWidth
+                label="Company"
+                value={currentUser?.company_name || 'Your Company'}
+                disabled
+                sx={{ mb: 2 }}
+              />
+            )}
+
+            {/* 2. User Field (Scoped to selected Company) */}
+            <FormControl fullWidth sx={{ mb: 2 }} disabled={!formData.company_id}>
+              <InputLabel>User *</InputLabel>
               <Select
                 value={formData.user_id}
                 onChange={(e) => setFormData({ ...formData, user_id: e.target.value })}
-                label="User"
+                label="User *"
                 required
               >
                 <MenuItem value="">
-                  <em>Select User</em>
+                  <em>{formData.company_id ? 'Select User' : 'Select Company First'}</em>
                 </MenuItem>
-                {users.map((user) => (
-                  <MenuItem key={user.id} value={user.id}>
-                    {user.name} ({user.email})
+                {formUsers.map((u) => (
+                  <MenuItem key={u.id} value={u.id}>
+                    {u.name} ({u.email})
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
 
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Department</InputLabel>
+            {/* 3. Department Field SECOND (Scoped to selected Company) */}
+            <FormControl fullWidth sx={{ mb: 2 }} disabled={!formData.company_id}>
+              <InputLabel>Department *</InputLabel>
               <Select
                 value={formData.department_id}
-                onChange={(e) => handleDepartmentChange(e.target.value)}
-                label="Department"
+                onChange={(e) => handleFormDepartmentChange(e.target.value)}
+                label="Department *"
                 required
               >
                 <MenuItem value="">
-                  <em>Select Department</em>
+                  <em>{formData.company_id ? 'Select Department' : 'Select Company First'}</em>
                 </MenuItem>
-                {departments.map((department) => (
+                {formDepartments.map((department) => (
                   <MenuItem key={department.id} value={department.id}>
                     {department.department_name}
                   </MenuItem>
@@ -497,19 +636,19 @@ const UserRoles = () => {
               </Select>
             </FormControl>
 
-            <FormControl fullWidth>
-              <InputLabel>Role</InputLabel>
+            {/* 4. Role Field THIRD (Scoped to selected Department) */}
+            <FormControl fullWidth disabled={!formData.department_id}>
+              <InputLabel>Role *</InputLabel>
               <Select
                 value={formData.role_id}
                 onChange={(e) => setFormData({ ...formData, role_id: e.target.value })}
-                label="Role"
+                label="Role *"
                 required
-                disabled={!formData.department_id}
               >
                 <MenuItem value="">
                   <em>{formData.department_id ? 'Select Role' : 'Select Department First'}</em>
                 </MenuItem>
-                {filteredRoles.map((role) => (
+                {formRoles.map((role) => (
                   <MenuItem key={role.id} value={role.id}>
                     {role.role_name}
                   </MenuItem>
@@ -529,4 +668,4 @@ const UserRoles = () => {
   );
 };
 
-export default UserRoles; 
+export default UserRoles;

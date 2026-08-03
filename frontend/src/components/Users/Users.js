@@ -76,12 +76,14 @@ const Users = () => {
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
+  // Filters
+  const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('');
+  const [selectedDepartmentFilter, setSelectedDepartmentFilter] = useState('');
+
   const canView = hasPermission('Users', 'view');
   const canCreate = hasPermission('Users', 'create');
   const canUpdate = hasPermission('Users', 'update');
   const canDelete = hasPermission('Users', 'delete');
-
-
 
   // Debounce search
   useEffect(() => {
@@ -93,15 +95,14 @@ const Users = () => {
 
   useEffect(() => {
     loadUsers();
-  }, [page, pageSize, debouncedSearch]);
+  }, [page, pageSize, debouncedSearch, selectedCompanyFilter, selectedDepartmentFilter]);
 
   useEffect(() => {
-    if (isPlatformAdmin) loadCompanies();
-  }, [isPlatformAdmin]);
-
-  useEffect(() => {
-    loadDepartments();
-  }, []);
+    if (isPlatformAdmin) {
+      loadCompanies();
+    }
+    loadDepartments(isPlatformAdmin ? selectedCompanyFilter : undefined);
+  }, [isPlatformAdmin, selectedCompanyFilter]);
 
   const loadUsers = async () => {
     try {
@@ -109,8 +110,11 @@ const Users = () => {
       const params = {
         page: page + 1, // backend is 1-indexed
         per_page: pageSize,
-        search: debouncedSearch || undefined
+        search: debouncedSearch || undefined,
       };
+      if (selectedDepartmentFilter) params.department_id = selectedDepartmentFilter;
+      if (isPlatformAdmin && selectedCompanyFilter) params.company_id = selectedCompanyFilter;
+
       const response = await usersAPI.getAll(params);
       setUsers(response.data.data || []);
       setTotalRows(response.data.total || 0);
@@ -155,14 +159,16 @@ const Users = () => {
 
   const handleEdit = (user) => {
     setEditingUser(user);
+    const compId = user.company_id || '';
     setFormData({
       name: user.name,
       email: user.email,
       password: '',
+      company_id: compId,
       department_id: user.department_id || '',
     });
-    if (isPlatformAdmin && user.company_id) {
-      loadDepartments(user.company_id);
+    if (isPlatformAdmin && compId) {
+      loadDepartments(compId);
     }
     setDialogOpen(true);
   };
@@ -260,27 +266,27 @@ const Users = () => {
     { field: 'name', headerName: 'Name', width: 200 },
     { field: 'email', headerName: 'Email', width: 250 },
     {
+      field: 'company_name',
+      headerName: 'Company',
+      width: 180,
+      renderCell: (params) => (
+        <Chip 
+          label={params.value || 'N/A'}
+          variant="outlined"
+          size="small"
+          color="primary"
+        />
+      ),
+    },
+    {
       field: 'department_id',
       headerName: 'Department',
-      width: 150,
+      width: 180,
       renderCell: (params) => (
         <Chip
           label={params.row.department_name || getDepartmentName(params.value)}
           size="small"
           variant="outlined"
-        />
-      ),
-    },
-    {
-      field: 'company_name',
-      headerName: 'Company',
-      width: 200,
-      renderCell: (params) => (
-        <Chip 
-          label={params.value}
-          variant="outlined"
-          size="small"
-          color="primary"
         />
       ),
     },
@@ -298,7 +304,7 @@ const Users = () => {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
-      width: 150,
+      width: 130,
       getActions: (params) => {
         const actions = [];
         
@@ -327,8 +333,6 @@ const Users = () => {
     },
   ];
 
-
-
   return (
     <Box>
       <Typography variant="h4" gutterBottom>
@@ -347,7 +351,8 @@ const Users = () => {
         </Alert>
       )}
       
-      <Box sx={{ mb: 2 }}>
+      {/* Search and Filters Bar: Company First, Department Second */}
+      <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField
           label="Search Users"
           variant="outlined"
@@ -355,7 +360,49 @@ const Users = () => {
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           placeholder="Search by name or email..."
+          sx={{ minWidth: 220 }}
         />
+
+        {isPlatformAdmin && (
+          <TextField
+            label="Filter by Company"
+            select
+            size="small"
+            value={selectedCompanyFilter}
+            onChange={(e) => {
+              const compId = e.target.value;
+              setSelectedCompanyFilter(compId);
+              setSelectedDepartmentFilter('');
+              loadDepartments(compId);
+            }}
+            SelectProps={{ native: true }}
+            sx={{ minWidth: 200 }}
+          >
+            <option value="">All Companies</option>
+            {companies.map((comp) => (
+              <option key={comp.id} value={comp.id}>
+                {comp.company_name}
+              </option>
+            ))}
+          </TextField>
+        )}
+
+        <TextField
+          label="Filter by Department"
+          select
+          size="small"
+          value={selectedDepartmentFilter}
+          onChange={(e) => setSelectedDepartmentFilter(e.target.value)}
+          SelectProps={{ native: true }}
+          sx={{ minWidth: 200 }}
+        >
+          <option value="">All Departments</option>
+          {departments.map((dept) => (
+            <option key={dept.id} value={dept.id}>
+              {dept.department_name}
+            </option>
+          ))}
+        </TextField>
       </Box>
 
       <Paper sx={{ height: 600, width: '100%' }}>
@@ -369,7 +416,6 @@ const Users = () => {
           pageSize={pageSize}
           onPageSizeChange={(newPageSize) => setPageSize(newPageSize)}
           rowsPerPageOptions={[5, 10, 25, 50, 100]}
-          checkboxSelection
           disableSelectionOnClick
           loading={loading}
           components={{
@@ -418,6 +464,8 @@ const Users = () => {
               required={!editingUser}
               sx={{ mb: 2 }}
             />
+
+            {/* 1. Company Field FIRST */}
             {!editingUser ? (
               isPlatformAdmin ? (
                 <TextField
@@ -447,14 +495,21 @@ const Users = () => {
                   ))}
                 </TextField>
               ) : (
-                <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
-                  <Typography variant="caption" color="textSecondary" display="block">
-                    Company
-                  </Typography>
-                  <Typography variant="body2">
-                    {departments[0]?.company_name || user?.company_name || 'N/A'}
-                  </Typography>
-                </Box>
+                <TextField
+                  margin="dense"
+                  label="Company"
+                  fullWidth
+                  variant="outlined"
+                  value={
+                    user?.company_name ||
+                    companies.find(c => c.id === user?.company_id)?.company_name ||
+                    (departments.length > 0 ? departments[0]?.company_name : '') ||
+                    'Your Company'
+                  }
+                  disabled
+                  helperText="Users are automatically assigned to your company."
+                  sx={{ mb: 2 }}
+                />
               )
             ) : (
               <TextField
@@ -462,11 +517,14 @@ const Users = () => {
                 label="Company"
                 fullWidth
                 variant="outlined"
-                value={editingUser.company_name || ''}
+                value={editingUser.company_name || 'N/A'}
                 disabled
+                helperText="Company cannot be modified after creation."
                 sx={{ mb: 2 }}
               />
             )}
+
+            {/* 2. Department Field SECOND (Dynamic dependent dropdown) */}
             <TextField
               margin="dense"
               label="Department"
@@ -475,12 +533,15 @@ const Users = () => {
               variant="outlined"
               value={formData.department_id}
               onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
+              disabled={isPlatformAdmin && !formData.company_id && !editingUser}
               SelectProps={{
                 native: true,
               }}
               sx={{ mb: 2 }}
             >
-              <option value="">Select Department</option>
+              <option value="">
+                {isPlatformAdmin && !formData.company_id && !editingUser ? 'Select Company First' : 'Select Department'}
+              </option>
               {departments.map((dept) => (
                 <option key={dept.id} value={dept.id}>
                   {dept.department_name}

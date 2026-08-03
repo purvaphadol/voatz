@@ -10,8 +10,16 @@ import {
   Alert,
   CircularProgress,
   Avatar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
+import BusinessIcon from '@mui/icons-material/Business';
 import { useAuth } from '../../contexts/AuthContext';
 
 const Login = () => {
@@ -23,6 +31,10 @@ const Login = () => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Multi-Company Selection State
+  const [multiCompanyDialogOpen, setMultiCompanyDialogOpen] = useState(false);
+  const [companyOptions, setCompanyOptions] = useState([]);
 
   useEffect(() => {
     if (isAuthenticated()) {
@@ -47,10 +59,27 @@ const Login = () => {
     
     if (result.success) {
       navigate('/dashboard');
+    } else if (result.multi_company) {
+      setCompanyOptions(result.companies || []);
+      setMultiCompanyDialogOpen(true);
     } else {
       setError(result.error);
     }
     
+    setLoading(false);
+  };
+
+  const handleSelectCompany = async (companyId) => {
+    setMultiCompanyDialogOpen(false);
+    setLoading(true);
+    setError('');
+
+    const result = await login(formData.email, formData.password, companyId);
+    if (result.success) {
+      navigate('/dashboard');
+    } else {
+      setError(result.error);
+    }
     setLoading(false);
   };
 
@@ -146,6 +175,38 @@ const Login = () => {
           </Typography>
         </Box>
       </Box>
+
+      {/* Multi-Company Disambiguation Dialog */}
+      <Dialog
+        open={multiCompanyDialogOpen}
+        onClose={() => setMultiCompanyDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Select Organization</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Multiple organizations are associated with your account. Select which organization to log in to:
+          </Typography>
+          <List>
+            {companyOptions.map((comp) => (
+              <ListItemButton
+                key={comp.company_id}
+                onClick={() => handleSelectCompany(comp.company_id)}
+                sx={{ border: '1px solid #e0e0e0', borderRadius: 1, mb: 1 }}
+              >
+                <ListItemIcon>
+                  <BusinessIcon color="primary" />
+                </ListItemIcon>
+                <ListItemText
+                  primary={comp.company_name}
+                  secondary={`Organization ID: #${comp.company_id}`}
+                />
+              </ListItemButton>
+            ))}
+          </List>
+        </DialogContent>
+      </Dialog>
     </Container>
   );
 };

@@ -365,19 +365,7 @@ const Modules = () => {
         return <Chip label="Deleted" color="error" size="small" />;
       },
     },
-    {
-      field: 'company_name',
-      headerName: 'Company',
-      width: 200,
-      renderCell: (params) => (
-        <Chip 
-          label={params.value}
-          variant="outlined"
-          size="small"
-          color="primary"
-        />
-      ),
-    },
+
     {
       field: 'created_at',
       headerName: 'Created',

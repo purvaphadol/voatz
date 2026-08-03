@@ -24,6 +24,7 @@ import {
   CardContent,
   Switch,
   FormControlLabel,
+  TextField,
 } from '@mui/material';
 import {
   Security as SecurityIcon,
@@ -33,8 +34,9 @@ import {
   Refresh as RefreshIcon,
   Business as BusinessIcon,
 } from '@mui/icons-material';
-import { permissionsAPI, rolesAPI, usersAPI, departmentsAPI } from '../../services/api';
+import { permissionsAPI, rolesAPI, usersAPI, departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const TabPanel = ({ children, value, index, ...other }) => (
   <div
@@ -49,16 +51,27 @@ const TabPanel = ({ children, value, index, ...other }) => (
 );
 
 const Permissions = () => {
+  const { user: currentUser } = useAuth();
   const { hasPermission, refreshPermissions, autoRefreshEnabled, toggleAutoRefresh } = usePermissions();
   const [tabValue, setTabValue] = useState(0);
   const [moduleActions, setModuleActions] = useState([]);
+  
+  const [companies, setCompanies] = useState([]);
   const [departments, setDepartments] = useState([]);
-  const [allRoles, setAllRoles] = useState([]);
-  const [filteredRoles, setFilteredRoles] = useState([]);
+  const [roles, setRoles] = useState([]);
   const [users, setUsers] = useState([]);
+
+  // Selection states
+  const [selectedCompany, setSelectedCompany] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [selectedRole, setSelectedRole] = useState('');
   const [selectedUser, setSelectedUser] = useState('');
+
+  // Scoped lists
+  const [filteredDepartments, setFilteredDepartments] = useState([]);
+  const [filteredRoles, setFilteredRoles] = useState([]);
+  const [filteredUsers, setFilteredUsers] = useState([]);
+
   const [rolePermissions, setRolePermissions] = useState({});
   const [userPermissions, setUserPermissions] = useState({});
   const [permissionSources, setPermissionSources] = useState({});
@@ -67,6 +80,7 @@ const Permissions = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  const isPlatformAdmin = currentUser?.is_administrator;
   const canView = hasPermission('Permissions', 'view');
   const canUpdate = hasPermission('Permissions', 'update');
 
@@ -79,26 +93,48 @@ const Permissions = () => {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [moduleActionsRes, departmentsRes, rolesRes, usersRes] = await Promise.allSettled([
+      const initialCompanyId = !isPlatformAdmin && currentUser?.company_id ? currentUser.company_id : '';
+      if (initialCompanyId) {
+        setSelectedCompany(initialCompanyId);
+      }
+
+      const promises = [
         permissionsAPI.getModuleActions(),
         departmentsAPI.getAll(),
         rolesAPI.getAll(),
         usersAPI.getAll(),
-      ]);
+      ];
 
-      if (moduleActionsRes.status === 'fulfilled') {
-        setModuleActions(moduleActionsRes.value.data || []);
+      if (isPlatformAdmin) {
+        promises.push(companiesAPI.getAll());
       }
-      if (departmentsRes.status === 'fulfilled') {
-        setDepartments(departmentsRes.value.data.data || []);
+
+      const results = await Promise.allSettled(promises);
+
+      if (results[0].status === 'fulfilled') setModuleActions(results[0].value.data || []);
+      
+      const allDepts = results[1].status === 'fulfilled' ? (results[1].value.data.data || []) : [];
+      const allRolesList = results[2].status === 'fulfilled' ? (results[2].value.data.data || []) : [];
+      const allUsersList = results[3].status === 'fulfilled' ? (results[3].value.data.data || []) : [];
+
+      setDepartments(allDepts);
+      setRoles(allRolesList);
+      setUsers(allUsersList);
+
+      if (isPlatformAdmin && results[4]?.status === 'fulfilled') {
+        setCompanies(results[4].value.data.data || []);
       }
-      if (rolesRes.status === 'fulfilled') {
-        const roles = rolesRes.value.data.data || [];
-        setAllRoles(roles);
-        setFilteredRoles(roles); // Initially show all roles
-      }
-      if (usersRes.status === 'fulfilled') {
-        setUsers(usersRes.value.data.data || []);
+
+      // Initial scoping if company is set
+      const compTarget = initialCompanyId || '';
+      if (compTarget) {
+        setFilteredDepartments(allDepts.filter(d => d.company_id === Number(compTarget)));
+        setFilteredUsers(allUsersList.filter(u => u.company_id === Number(compTarget)));
+        setFilteredRoles(allRolesList.filter(r => r.company_id === Number(compTarget)));
+      } else {
+        setFilteredDepartments(allDepts);
+        setFilteredUsers(allUsersList);
+        setFilteredRoles(allRolesList);
       }
     } catch (error) {
       console.error('Error loading initial data:', error);
@@ -108,50 +144,48 @@ const Permissions = () => {
     }
   };
 
-  const loadRolePermissions = async (roleId) => {
-    try {
-      setLoading(true);
-      const response = await permissionsAPI.getRolePermissions(roleId);
-      setRolePermissions(response.data.permissions || {});
-    } catch (error) {
-      console.error('Error loading role permissions:', error);
-      setError('Failed to load role permissions');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleCompanyChange = (companyId) => {
+    setSelectedCompany(companyId);
+    setSelectedDepartment('');
+    setSelectedRole('');
+    setSelectedUser('');
+    setRolePermissions({});
+    setUserPermissions({});
 
-  const loadUserPermissions = async (userId) => {
-    try {
-      setLoading(true);
-      // Use the new management API that shows all actions with their states
-      const response = await permissionsAPI.getUserPermissionsForManagement(userId);
-      setUserPermissions(response.data.permissions || {});
-      
-      // Store the sources information for display
-      setPermissionSources(response.data.sources || {});
-      
-
-    } catch (error) {
-      console.error('Error loading user permissions:', error);
-      setError('Failed to load user permissions');
-    } finally {
-      setLoading(false);
+    if (!companyId) {
+      setFilteredDepartments(departments);
+      setFilteredRoles([]);
+      setFilteredUsers(users);
+      return;
     }
+
+    const cIdNum = Number(companyId);
+    const matchedDepts = departments.filter(d => d.company_id === cIdNum);
+    const matchedUsers = users.filter(u => u.company_id === cIdNum);
+    const matchedRoles = roles.filter(r => r.company_id === cIdNum);
+
+    setFilteredDepartments(matchedDepts);
+    setFilteredUsers(matchedUsers);
+    setFilteredRoles(matchedRoles);
   };
 
   const handleDepartmentChange = (departmentId) => {
     setSelectedDepartment(departmentId);
-    setSelectedRole(''); // Reset role selection when department changes
-    setRolePermissions({}); // Clear role permissions
+    setSelectedRole('');
+    setRolePermissions({});
     
+    const cIdNum = Number(selectedCompany || currentUser?.company_id);
     if (departmentId) {
-      // Filter roles by selected department
-      const rolesInDepartment = allRoles.filter(role => role.department_id === departmentId);
+      const dIdNum = Number(departmentId);
+      const rolesInDepartment = roles.filter(role => 
+        (cIdNum ? role.company_id === cIdNum : true) && role.department_id === dIdNum
+      );
       setFilteredRoles(rolesInDepartment);
     } else {
-      // Show all roles if no department selected
-      setFilteredRoles(allRoles);
+      const companyRoles = roles.filter(role => 
+        cIdNum ? role.company_id === cIdNum : true
+      );
+      setFilteredRoles(companyRoles);
     }
   };
 
@@ -171,6 +205,33 @@ const Permissions = () => {
     } else {
       setUserPermissions({});
       setPermissionSources({});
+    }
+  };
+
+  const loadRolePermissions = async (roleId) => {
+    try {
+      setLoading(true);
+      const response = await permissionsAPI.getRolePermissions(roleId);
+      setRolePermissions(response.data.permissions || {});
+    } catch (error) {
+      console.error('Error loading role permissions:', error);
+      setError('Failed to load role permissions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadUserPermissions = async (userId) => {
+    try {
+      setLoading(true);
+      const response = await permissionsAPI.getUserPermissionsForManagement(userId);
+      setUserPermissions(response.data.permissions || {});
+      setPermissionSources(response.data.sources || {});
+    } catch (error) {
+      console.error('Error loading user permissions:', error);
+      setError('Failed to load user permissions');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -205,8 +266,6 @@ const Permissions = () => {
       setLoading(true);
       await permissionsAPI.updateRolePermissions(selectedRole, rolePermissions);
       setSuccess('Role permissions updated successfully');
-      
-      // Refresh permissions context to update sidebar and permission checks
       await refreshPermissions();
     } catch (error) {
       setError('Failed to update role permissions');
@@ -220,14 +279,9 @@ const Permissions = () => {
 
     try {
       setLoading(true);
-      // Send the complete permission state so backend can diff against existing overrides
       await permissionsAPI.updateUserPermissions(selectedUser, userPermissions);
       setSuccess('User permissions updated successfully');
-      
-      // Reload user permissions to get the updated state
       await loadUserPermissions(selectedUser);
-      
-      // Refresh permissions context to update sidebar and permission checks
       await refreshPermissions();
     } catch (error) {
       setError('Failed to update user permissions');
@@ -237,15 +291,12 @@ const Permissions = () => {
   };
 
   const getPermissionStatus = (permissions, moduleId, actionId) => {
-    // Convert IDs to strings since API returns string keys
     const moduleKey = String(moduleId);
     const actionKey = String(actionId);
-    const hasPermission = permissions[moduleKey] && permissions[moduleKey][actionKey] === true;
-    return hasPermission;
+    return permissions[moduleKey] && permissions[moduleKey][actionKey] === true;
   };
 
   const PermissionMatrix = ({ permissions, onPermissionChange, type, sources }) => {
-    // Get all unique actions across all modules for table headers
     const allActions = [...new Set(
       moduleActions.flatMap(module => 
         module.actions ? module.actions.map(action => action.action_name) : []
@@ -263,7 +314,6 @@ const Permissions = () => {
       switch (source) {
         case 'role': return 'primary';
         case 'user-override': return 'secondary';
-        case 'none': return 'default';
         default: return 'default';
       }
     };
@@ -272,8 +322,7 @@ const Permissions = () => {
       switch (source) {
         case 'role': return 'Role';
         case 'user-override': return 'User';
-        case 'none': return 'None';
-        default: return 'Unknown';
+        default: return 'None';
       }
     };
 
@@ -333,7 +382,6 @@ const Permissions = () => {
                           color={isUserOverride ? "secondary" : "primary"}
                         />
                         
-                        {/* Show permission source */}
                         {source && type === 'user' && (
                           <Chip 
                             label={getSourceLabel(source)} 
@@ -344,12 +392,10 @@ const Permissions = () => {
                           />
                         )}
                         
-                        {/* Show action URL */}
                         <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
                           {moduleAction.action_url || 'N/A'}
                         </Typography>
                         
-                        {/* Show explanation for user permissions */}
                         {type === 'user' && isFromRole && (
                           <Typography variant="caption" color="primary.main" sx={{ fontSize: '0.6rem', fontStyle: 'italic' }}>
                             From role
@@ -432,8 +478,7 @@ const Permissions = () => {
 
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="body2">
-          <strong>Dynamic Actions:</strong> Custom actions added to modules will automatically appear here. 
-          Use the refresh button above to reload if you've just added new actions.
+          <strong>Dynamic Actions:</strong> Custom actions added to modules will automatically appear here.
         </Typography>
       </Alert>
 
@@ -447,27 +492,57 @@ const Permissions = () => {
           <Tab icon={<PersonIcon />} label="User Permissions" />
         </Tabs>
 
+        {/* Tab 1: Role Permissions */}
         <TabPanel value={tabValue} index={0}>
           <Grid container spacing={3}>
             <Grid item xs={12} md={4}>
               <Card>
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
-                    Select Department & Role
+                    Select Company, Department & Role
                   </Typography>
                   
-                  {/* Department Selection */}
-                  <FormControl fullWidth sx={{ mb: 2 }}>
-                    <InputLabel>Department</InputLabel>
+                  {/* 1. Company Selection FIRST */}
+                  {isPlatformAdmin ? (
+                    <FormControl fullWidth sx={{ mb: 2 }}>
+                      <InputLabel>Company</InputLabel>
+                      <Select
+                        value={selectedCompany}
+                        onChange={(e) => handleCompanyChange(e.target.value)}
+                        label="Company"
+                      >
+                        <MenuItem value="">
+                          <em>Select Company</em>
+                        </MenuItem>
+                        {companies.map((c) => (
+                          <MenuItem key={c.id} value={c.id}>
+                            {c.company_name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  ) : (
+                    <TextField
+                      fullWidth
+                      label="Company"
+                      value={currentUser?.company_name || 'Your Company'}
+                      disabled
+                      sx={{ mb: 2 }}
+                    />
+                  )}
+
+                  {/* 2. Department Selection SECOND (Optional filter) */}
+                  <FormControl fullWidth sx={{ mb: 2 }} disabled={!selectedCompany}>
+                    <InputLabel>Department (Optional Filter)</InputLabel>
                     <Select
                       value={selectedDepartment}
                       onChange={(e) => handleDepartmentChange(e.target.value)}
-                      label="Department"
+                      label="Department (Optional Filter)"
                     >
                       <MenuItem value="">
-                        <em>All Departments</em>
+                        <em>{selectedCompany ? 'All Departments (Show All Roles)' : 'Select Company First'}</em>
                       </MenuItem>
-                      {departments.map((dept) => (
+                      {filteredDepartments.map((dept) => (
                         <MenuItem key={dept.id} value={dept.id}>
                           {dept.department_name}
                         </MenuItem>
@@ -475,27 +550,29 @@ const Permissions = () => {
                     </Select>
                   </FormControl>
                   
-                  {/* Role Selection */}
-                  <FormControl fullWidth>
+                  {/* 3. Role Selection THIRD */}
+                  <FormControl fullWidth disabled={!selectedCompany}>
                     <InputLabel>Role</InputLabel>
                     <Select
                       value={selectedRole}
                       onChange={(e) => handleRoleChange(e.target.value)}
                       label="Role"
-                      disabled={!selectedDepartment}
                     >
                       <MenuItem value="">
-                        <em>Select a role</em>
+                        <em>{selectedCompany ? 'Select Role' : 'Select Company First'}</em>
                       </MenuItem>
                       {filteredRoles.map((role) => (
                         <MenuItem key={role.id} value={role.id}>
-                          <Box display="flex" alignItems="center">
-                            <GroupIcon sx={{ mr: 1, fontSize: 'small' }} />
-                            {role.role_name}
+                          <Box display="flex" alignItems="center" justifyContent="space-between" width="100%">
+                            <Box display="flex" alignItems="center">
+                              <GroupIcon sx={{ mr: 1, fontSize: 'small' }} />
+                              {role.role_name}
+                            </Box>
                             <Chip 
-                              label={role.department_name} 
+                              label={role.department_name || (role.department_id ? (departments.find(d => d.id === role.department_id)?.department_name || 'N/A') : 'Company-Wide')} 
                               size="small" 
                               variant="outlined" 
+                              color={role.department_name || role.department_id ? "default" : "secondary"}
                               sx={{ ml: 1 }} 
                             />
                           </Box>
@@ -504,9 +581,9 @@ const Permissions = () => {
                     </Select>
                   </FormControl>
                   
-                  {!selectedDepartment && (
+                  {!selectedCompany && isPlatformAdmin && (
                     <Alert severity="info" sx={{ mt: 2 }}>
-                      Please select a department first to see available roles.
+                      Please select a company first to see available roles and departments.
                     </Alert>
                   )}
                   
@@ -530,21 +607,26 @@ const Permissions = () => {
             <Grid item xs={12} md={8}>
               {selectedRole ? (
                 <Box>
-                  {/* Role Information Header */}
                   <Paper sx={{ p: 2, mb: 2, backgroundColor: 'primary.light', color: 'primary.contrastText' }}>
                     <Typography variant="h6" gutterBottom>
                       Managing Permissions for:
                     </Typography>
                     <Box display="flex" alignItems="center" gap={2}>
                       <Chip 
+                        icon={<BusinessIcon />}
+                        label={`Company: ${companies.find(c => c.id === Number(selectedCompany))?.company_name || currentUser?.company_name || 'N/A'}`}
+                        variant="filled"
+                        color="secondary"
+                      />
+                      <Chip 
                         icon={<SecurityIcon />}
-                        label={`Department: ${departments.find(d => d.id === selectedDepartment)?.department_name || 'N/A'}`}
+                        label={`Department: ${filteredRoles.find(r => r.id === Number(selectedRole))?.department_name || (filteredRoles.find(r => r.id === Number(selectedRole))?.department_id ? (departments.find(d => d.id === filteredRoles.find(r => r.id === Number(selectedRole))?.department_id)?.department_name || 'N/A') : 'Company-Wide')}`}
                         variant="filled"
                         color="secondary"
                       />
                       <Chip 
                         icon={<GroupIcon />}
-                        label={`Role: ${filteredRoles.find(r => r.id === selectedRole)?.role_name || 'N/A'}`}
+                        label={`Role: ${filteredRoles.find(r => r.id === Number(selectedRole))?.role_name || 'N/A'}`}
                         variant="filled"
                         color="secondary"
                       />
@@ -561,10 +643,9 @@ const Permissions = () => {
               ) : (
                 <Paper sx={{ p: 3, textAlign: 'center' }}>
                   <Typography variant="body1" color="text.secondary">
-                    {!selectedDepartment 
-                      ? 'Select a department first, then choose a role to manage its permissions'
-                      : 'Select a role to manage its permissions'
-                    }
+                    {!selectedCompany && isPlatformAdmin
+                      ? 'Select a company first to proceed'
+                      : 'Select a role to manage its permissions'}
                   </Typography>
                 </Paper>
               )}
@@ -572,15 +653,47 @@ const Permissions = () => {
           </Grid>
         </TabPanel>
 
+        {/* Tab 2: User Permissions */}
         <TabPanel value={tabValue} index={1}>
           <Grid container spacing={3}>
             <Grid item xs={12} md={4}>
               <Card>
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
-                    Select User
+                    Select Company & User
                   </Typography>
-                  <FormControl fullWidth>
+
+                  {/* 1. Company Selection FIRST */}
+                  {isPlatformAdmin ? (
+                    <FormControl fullWidth sx={{ mb: 2 }}>
+                      <InputLabel>Company</InputLabel>
+                      <Select
+                        value={selectedCompany}
+                        onChange={(e) => handleCompanyChange(e.target.value)}
+                        label="Company"
+                      >
+                        <MenuItem value="">
+                          <em>Select Company</em>
+                        </MenuItem>
+                        {companies.map((c) => (
+                          <MenuItem key={c.id} value={c.id}>
+                            {c.company_name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  ) : (
+                    <TextField
+                      fullWidth
+                      label="Company"
+                      value={currentUser?.company_name || 'Your Company'}
+                      disabled
+                      sx={{ mb: 2 }}
+                    />
+                  )}
+
+                  {/* 2. User Selection SECOND */}
+                  <FormControl fullWidth disabled={!selectedCompany}>
                     <InputLabel>User</InputLabel>
                     <Select
                       value={selectedUser}
@@ -588,15 +701,15 @@ const Permissions = () => {
                       label="User"
                     >
                       <MenuItem value="">
-                        <em>Select a user</em>
+                        <em>{selectedCompany ? 'Select User' : 'Select Company First'}</em>
                       </MenuItem>
-                      {users.map((user) => (
-                        <MenuItem key={user.id} value={user.id}>
+                      {filteredUsers.map((u) => (
+                        <MenuItem key={u.id} value={u.id}>
                           <Box display="flex" alignItems="center">
                             <PersonIcon sx={{ mr: 1, fontSize: 'small' }} />
-                            {user.name}
+                            {u.name}
                             <Chip 
-                              label={user.email} 
+                              label={u.email} 
                               size="small" 
                               variant="outlined" 
                               sx={{ ml: 1 }} 
@@ -614,8 +727,7 @@ const Permissions = () => {
                           <strong>User Permission Management:</strong><br/>
                           • <strong>Role</strong> permissions are inherited from the user's assigned roles<br/>
                           • <strong>User</strong> permissions are direct overrides for this specific user<br/>
-                          • Checking a box creates a user-specific permission override<br/>
-                          • Unchecking removes the user-specific override (reverts to role-based)
+                          • Checking a box creates a user-specific permission override
                         </Typography>
                       </Alert>
                       
@@ -637,7 +749,6 @@ const Permissions = () => {
             <Grid item xs={12} md={8}>
               {selectedUser ? (
                 <Box>
-                  {/* User Information Header */}
                   <Paper sx={{ p: 2, mb: 2, backgroundColor: 'secondary.light', color: 'secondary.contrastText' }}>
                     <Typography variant="h6" gutterBottom>
                       Managing User-Specific Permissions for:
@@ -645,20 +756,19 @@ const Permissions = () => {
                     <Box display="flex" alignItems="center" gap={2}>
                       <Chip 
                         icon={<PersonIcon />}
-                        label={`User: ${users.find(u => u.id === selectedUser)?.name || 'N/A'}`}
+                        label={`User: ${users.find(u => u.id === Number(selectedUser))?.name || 'N/A'}`}
                         variant="filled"
                         color="primary"
                       />
                       <Chip 
                         icon={<BusinessIcon />}
-                        label={`Email: ${users.find(u => u.id === selectedUser)?.email || 'N/A'}`}
+                        label={`Email: ${users.find(u => u.id === Number(selectedUser))?.email || 'N/A'}`}
                         variant="filled"
                         color="primary"
                       />
                     </Box>
                   </Paper>
                   
-
                   <PermissionMatrix
                     permissions={userPermissions}
                     onPermissionChange={handleUserPermissionChange}
@@ -669,10 +779,9 @@ const Permissions = () => {
               ) : (
                 <Paper sx={{ p: 3, textAlign: 'center' }}>
                   <Typography variant="body1" color="text.secondary">
-                    Select a user to manage their specific permissions
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    User-specific permissions override role-based permissions
+                    {!selectedCompany && isPlatformAdmin
+                      ? 'Select a company first to see users'
+                      : 'Select a user to manage their specific permissions'}
                   </Typography>
                 </Paper>
               )}
@@ -684,4 +793,4 @@ const Permissions = () => {
   );
 };
 
-export default Permissions; 
+export default Permissions;

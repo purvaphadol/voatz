@@ -30,8 +30,9 @@ import {
   Delete as DeleteIcon,
   Business as BusinessIcon,
 } from '@mui/icons-material';
-import { rolesAPI, departmentsAPI } from '../../services/api';
+import { rolesAPI, departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -48,15 +49,24 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
 
 const Roles = () => {
   const { hasPermission } = usePermissions();
+  const { user } = useAuth();
+
+  const isPlatformAdmin = user?.is_administrator === true;
+
   const [roles, setRoles] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRole, setEditingRole] = useState(null);
-  const [selectedDepartment, setSelectedDepartment] = useState('');
+
+  const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('');
+  const [selectedDepartmentFilter, setSelectedDepartmentFilter] = useState('');
+
   const [formData, setFormData] = useState({
     role_name: '',
     description: '',
+    company_id: '',
     department_id: '',
   });
   const [error, setError] = useState('');
@@ -69,20 +79,25 @@ const Roles = () => {
 
   useEffect(() => {
     if (canView) {
-      loadDepartments();
+      if (isPlatformAdmin) {
+        loadCompanies();
+      }
+      loadDepartments(isPlatformAdmin ? selectedCompanyFilter : undefined);
     }
-  }, [canView]);
+  }, [canView, isPlatformAdmin, selectedCompanyFilter]);
 
   useEffect(() => {
     if (canView) {
       loadRoles();
     }
-  }, [canView, selectedDepartment]);
+  }, [canView, selectedCompanyFilter, selectedDepartmentFilter]);
 
   const loadRoles = async () => {
     try {
       setLoading(true);
-      const params = selectedDepartment ? { department_id: selectedDepartment } : {};
+      const params = {};
+      if (selectedDepartmentFilter) params.department_id = selectedDepartmentFilter;
+      if (isPlatformAdmin && selectedCompanyFilter) params.company_id = selectedCompanyFilter;
       const response = await rolesAPI.getAll(params);
       setRoles(response.data.data || []);
     } catch (error) {
@@ -93,9 +108,19 @@ const Roles = () => {
     }
   };
 
-  const loadDepartments = async () => {
+  const loadCompanies = async () => {
     try {
-      const response = await departmentsAPI.getAll();
+      const response = await companiesAPI.getAll();
+      setCompanies((response.data.data || []).filter(c => c.status === 1));
+    } catch (error) {
+      console.error('Error loading companies:', error);
+    }
+  };
+
+  const loadDepartments = async (companyId) => {
+    try {
+      const params = companyId ? { company_id: companyId } : {};
+      const response = await departmentsAPI.getAll(params);
       setDepartments(response.data.data || []);
     } catch (error) {
       console.error('Error loading departments:', error);
@@ -107,6 +132,7 @@ const Roles = () => {
     setFormData({
       role_name: '',
       description: '',
+      company_id: '',
       department_id: '',
     });
     setDialogOpen(true);
@@ -114,11 +140,16 @@ const Roles = () => {
 
   const handleEdit = (role) => {
     setEditingRole(role);
+    const roleCompId = role.company_id || '';
     setFormData({
       role_name: role.role_name,
       description: role.description || '',
+      company_id: roleCompId,
       department_id: role.department_id || '',
     });
+    if (isPlatformAdmin && roleCompId) {
+      loadDepartments(roleCompId);
+    }
     setDialogOpen(true);
   };
 
@@ -142,12 +173,31 @@ const Roles = () => {
     setError('');
     setSuccess('');
 
+    if (isPlatformAdmin && !editingRole && !formData.company_id) {
+      setError('Please select a company');
+      return;
+    }
+
+    if (!formData.department_id) {
+      setError('Please select a department');
+      return;
+    }
+
     try {
+      const payload = {
+        role_name: formData.role_name,
+        description: formData.description,
+        department_id: formData.department_id,
+      };
+      if (isPlatformAdmin && formData.company_id) {
+        payload.company_id = formData.company_id;
+      }
+
       if (editingRole) {
-        await rolesAPI.update(editingRole.id, formData);
+        await rolesAPI.update(editingRole.id, payload);
         setSuccess('Role updated successfully');
       } else {
-        await rolesAPI.create(formData);
+        await rolesAPI.create(payload);
         setSuccess('Role created successfully');
       }
       setDialogOpen(false);
@@ -160,24 +210,37 @@ const Roles = () => {
   const columns = [
     { field: 'id', headerName: 'ID', width: 70 },
     { field: 'role_name', headerName: 'Role Name', width: 200 },
-    { field: 'description', headerName: 'Description', width: 250 },
+    {
+      field: 'company_name',
+      headerName: 'Company',
+      width: 180,
+      renderCell: (params) => (
+        <Chip
+          icon={<BusinessIcon />}
+          label={params.value || 'N/A'}
+          variant="outlined"
+          size="small"
+          color="primary"
+        />
+      ),
+    },
     { 
       field: 'department_name', 
       headerName: 'Department', 
-      width: 200,
+      width: 180,
       renderCell: (params) => (
         <Chip 
-          icon={<BusinessIcon />}
-          label={params.value}
+          label={params.value || 'N/A'}
           variant="outlined"
           size="small"
         />
       ),
     },
+    { field: 'description', headerName: 'Description', width: 220 },
     {
       field: 'created_at',
       headerName: 'Created',
-      width: 150,
+      width: 130,
       renderCell: (params) => {
         if (!params.value) return 'N/A';
         const date = new Date(params.value);
@@ -188,7 +251,7 @@ const Roles = () => {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
-      width: 150,
+      width: 130,
       getActions: (params) => {
         const actions = [];
         
@@ -245,16 +308,37 @@ const Roles = () => {
         </Alert>
       )}
 
-      {/* Department Filter */}
-      <Box sx={{ mb: 2 }}>
-        <FormControl sx={{ minWidth: 200 }}>
+      {/* Filters Bar: Company First, Department Second */}
+      <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+        {isPlatformAdmin && (
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel>Filter by Company</InputLabel>
+            <Select
+              value={selectedCompanyFilter}
+              label="Filter by Company"
+              onChange={(e) => {
+                const compId = e.target.value;
+                setSelectedCompanyFilter(compId);
+                setSelectedDepartmentFilter('');
+                loadDepartments(compId);
+              }}
+            >
+              <MenuItem value="">All Companies</MenuItem>
+              {companies.map((comp) => (
+                <MenuItem key={comp.id} value={comp.id}>
+                  {comp.company_name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+
+        <FormControl size="small" sx={{ minWidth: 200 }}>
           <InputLabel>Filter by Department</InputLabel>
           <Select
-            value={selectedDepartment}
+            value={selectedDepartmentFilter}
             label="Filter by Department"
-            onChange={(e) => {
-              setSelectedDepartment(e.target.value);
-            }}
+            onChange={(e) => setSelectedDepartmentFilter(e.target.value)}
           >
             <MenuItem value="">All Departments</MenuItem>
             {departments.map((dept) => (
@@ -272,7 +356,6 @@ const Roles = () => {
           columns={columns}
           pageSize={10}
           rowsPerPageOptions={[5, 10, 25]}
-          checkboxSelection
           disableSelectionOnClick
           loading={loading}
           components={{
@@ -293,6 +376,8 @@ const Roles = () => {
             {editingRole ? 'Edit Role' : 'Add New Role'}
           </DialogTitle>
           <DialogContent>
+            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
             <TextField
               autoFocus
               margin="dense"
@@ -306,14 +391,75 @@ const Roles = () => {
               sx={{ mb: 2 }}
             />
             
-            <FormControl fullWidth sx={{ mb: 2 }}>
+            {/* 1. Company Field FIRST */}
+            {!editingRole ? (
+              isPlatformAdmin ? (
+                <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
+                  <InputLabel>Company *</InputLabel>
+                  <Select
+                    value={formData.company_id}
+                    label="Company *"
+                    onChange={(e) => {
+                      const selectedCompId = e.target.value;
+                      setFormData({ ...formData, company_id: selectedCompId, department_id: '' });
+                      if (selectedCompId) {
+                        loadDepartments(selectedCompId);
+                      }
+                    }}
+                    required
+                  >
+                    <MenuItem value="">
+                      <em>Select Company</em>
+                    </MenuItem>
+                    {companies.map((comp) => (
+                      <MenuItem key={comp.id} value={comp.id}>
+                        {comp.company_name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              ) : (
+                <TextField
+                  margin="dense"
+                  label="Company"
+                  fullWidth
+                  variant="outlined"
+                  value={
+                    user?.company_name ||
+                    companies.find(c => c.id === user?.company_id)?.company_name ||
+                    'Your Company'
+                  }
+                  disabled
+                  helperText="Roles are automatically assigned to your company."
+                  sx={{ mb: 2 }}
+                />
+              )
+            ) : (
+              <TextField
+                margin="dense"
+                label="Company"
+                fullWidth
+                variant="outlined"
+                value={editingRole.company_name || 'N/A'}
+                disabled
+                helperText="Company cannot be modified after creation."
+                sx={{ mb: 2 }}
+              />
+            )}
+
+            {/* 2. Department Field SECOND (Dynamic dependent dropdown) */}
+            <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
               <InputLabel>Department *</InputLabel>
               <Select
                 value={formData.department_id}
                 label="Department *"
                 onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
                 required
+                disabled={isPlatformAdmin && !formData.company_id && !editingRole}
               >
+                <MenuItem value="">
+                  <em>{isPlatformAdmin && !formData.company_id && !editingRole ? 'Select Company First' : 'Select Department'}</em>
+                </MenuItem>
                 {departments.map((dept) => (
                   <MenuItem key={dept.id} value={dept.id}>
                     {dept.department_name}

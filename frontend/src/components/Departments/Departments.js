@@ -384,7 +384,7 @@ const Departments = () => {
               sx={{ mb: 2 }}
             />
 
-            {/* Company field — picker for Super Admin, read-only for others */}
+            {/* Company field — dropdown for Platform Admin, non-editable pre-selected box for Company Staff */}
             {!editingDepartment && !viewMode && (
               isPlatformAdmin ? (
                 <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
@@ -408,39 +408,40 @@ const Departments = () => {
                   </Select>
                 </FormControl>
               ) : (
-                <Box sx={{ mb: 2, p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    Company
-                  </Typography>
-                  <Typography variant="body2" fontWeight="medium">
-                    {departments[0]?.company_name || 'Your current company'}
-                  </Typography>
-                </Box>
+                <TextField
+                  margin="dense"
+                  label="Company"
+                  fullWidth
+                  variant="outlined"
+                  value={
+                    user?.company_name ||
+                    companies.find(c => c.id === user?.company_id)?.company_name ||
+                    (departments.length > 0 ? departments[0]?.company_name : '') ||
+                    'Your Company'
+                  }
+                  disabled
+                  helperText="Departments are automatically assigned to your company."
+                  sx={{ mb: 2 }}
+                />
               )
             )}
 
-            {/* Edit/View mode — always show disabled company */}
+            {/* Edit/View mode — always show company as non-editable */}
             {(editingDepartment || viewMode) && (
-              <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
-                <InputLabel>Company</InputLabel>
-                <Select
-                  value={formData.company_id || ''}
-                  label="Company"
-                  disabled
-                >
-                  {companies.map(c => (
-                    <MenuItem key={c.id} value={c.id}>
-                      {c.company_name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
-            {editingDepartment && !viewMode && (
-              <Typography variant="caption" color="text.secondary"
-                sx={{ mt: -1, mb: 1, display: 'block' }}>
-                Company cannot be changed after creation.
-              </Typography>
+              <TextField
+                margin="dense"
+                label="Company"
+                fullWidth
+                variant="outlined"
+                value={
+                  getCompanyName(formData.company_id) ||
+                  editingDepartment?.company_name ||
+                  'N/A'
+                }
+                disabled
+                helperText={!viewMode ? "Company cannot be modified after creation." : ""}
+                sx={{ mb: 2 }}
+              />
             )}
 
             <TextField
