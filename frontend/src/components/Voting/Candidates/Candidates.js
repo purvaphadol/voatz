@@ -65,6 +65,8 @@ import {
 } from '@mui/icons-material';
 import { candidatesAPI, ballotsAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
+import { showDeleteConfirm, showConfirmDialog } from '../../../utils/swal';
+import { validateNonNumericText, validateEmail, validatePhone, validateUrl } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -306,7 +308,8 @@ const Candidates = () => {
   };
 
   const handleDelete = async (candidateId) => {
-    if (window.confirm('Are you sure you want to delete this candidate?')) {
+    const confirmed = await showDeleteConfirm('this candidate');
+    if (confirmed) {
       try {
         await candidatesAPI.delete(candidateId);
         setSuccess('Candidate deleted successfully');
@@ -340,7 +343,14 @@ const Candidates = () => {
   };
 
   const handleReinstate = async (candidateId) => {
-    if (window.confirm('Are you sure you want to reinstate this candidate?')) {
+    const confirmed = await showConfirmDialog({
+      title: 'Reinstate Candidate',
+      text: 'Are you sure you want to reinstate this candidate back to active status?',
+      icon: 'question',
+      confirmButtonText: 'Yes, reinstate',
+      confirmButtonColor: '#2e7d32',
+    });
+    if (confirmed) {
       try {
         await candidatesAPI.reinstate(candidateId);
         setSuccess('Candidate reinstated successfully');
@@ -354,8 +364,35 @@ const Candidates = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
+    const nameErr = validateNonNumericText(formData.name, 'Candidate name', 2, 100);
+    if (nameErr) {
+      setError(nameErr);
+      return;
+    }
+
+    if (formData.email) {
+      const emailErr = validateEmail(formData.email);
+      if (emailErr) {
+        setError(emailErr);
+        return;
+      }
+    }
+
+    if (formData.phone) {
+      const phoneErr = validatePhone(formData.phone);
+      if (phoneErr) {
+        setError(phoneErr);
+        return;
+      }
+    }
+
+    if (formData.image_url) {
+      const urlErr = validateUrl(formData.image_url);
+      if (urlErr) {
+        setError(urlErr);
+        return;
+      }
+    }
 
     try {
       if (editingCandidate) {

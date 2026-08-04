@@ -1,7 +1,7 @@
 # User and Entity Statuses
 STATUS_ACTIVE = 1       # Active: Operational, enabled, open for use
-STATUS_INACTIVE = 0     # Inactive: Paused / disabled, but can be reactivated later
-STATUS_DEACTIVATED = 9  # Soft-Deleted / Historical: Excluded from all UI & standard queries
+STATUS_INACTIVE = 0     # Inactive / Soft-Deleted: Disabled/archived
+STATUS_DEACTIVATED = 9  # Permanently Soft-Deleted / Historical: Excluded from all UI & standard queries
 
 # Pagination Defaults
 DEFAULT_PAGE = 1

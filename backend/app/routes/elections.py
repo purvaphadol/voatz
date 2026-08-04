@@ -6,8 +6,8 @@ from app.models.company import Company
 from app.models.ballot import Ballot
 from app.models.voter_registration import VoterRegistration
 from app.models.vote import Vote
-from app.utils import get_current_company_id, require_permission, get_current_user
-from app.utils.validators import parse_pagination
+from app.utils import get_current_company_id, require_permission, get_current_user, is_administrator
+from app.utils.validators import parse_pagination, validate_election_input
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
 from app.utils.query_helpers import get_active_elections_query, get_election_registrations_query
@@ -29,7 +29,6 @@ def _safe_prop(obj, prop, default=None):
 @require_permission('Elections', 'view')
 def list_elections():
     """List all elections with filtering and pagination"""
-    company_id = get_current_company_id()
     search = request.args.get('search')
     election_type = request.args.get('election_type')
     status = request.args.get('status')
@@ -39,11 +38,27 @@ def list_elections():
     if error:
         return error
 
-    # Use get_active_elections_query to exclude cancelled by default
-    if show_cancelled == 'true':
-        query = Election.query.filter(Election.company_id == company_id)
+    if is_administrator():
+        req_company_id = request.args.get('company_id', type=int)
+        if req_company_id:
+            if show_cancelled == 'true':
+                query = Election.query.filter(Election.company_id == req_company_id)
+            else:
+                query = get_active_elections_query(req_company_id)
+            base = get_active_elections_query(req_company_id)
+        else:
+            if show_cancelled == 'true':
+                query = Election.query
+            else:
+                query = Election.query.filter(Election.status != 'cancelled')
+            base = Election.query.filter(Election.status != 'cancelled')
     else:
-        query = get_active_elections_query(company_id)
+        company_id = get_current_company_id()
+        if show_cancelled == 'true':
+            query = Election.query.filter(Election.company_id == company_id)
+        else:
+            query = get_active_elections_query(company_id)
+        base = get_active_elections_query(company_id)
     
     if search:
         query = query.filter(or_(
@@ -82,7 +97,6 @@ def list_elections():
     elections = pagination.items
 
     # Full dataset counts using base query
-    base = get_active_elections_query(company_id)
     now = datetime.now(timezone.utc)
     summary = {
         'total_elections': pagination.total,
@@ -126,25 +140,24 @@ def list_elections():
 @audit_action('create_election', module='Elections')
 def create_election():
     """Create a new election"""
-    company_id = get_current_company_id()
+    data = request.get_json() or {}
+    if is_administrator():
+        company_id = data.get('company_id')
+        if not company_id:
+            return jsonify({'error': 'company_id is required for platform Administrators'}), 400
+    else:
+        company_id = get_current_company_id()
     current_user = get_current_user()
-    data = request.get_json()
     
-    if not data or not data.get('title') or not data.get('election_type'):
-        return jsonify({'error': 'Title and election type are required'}), 400
-    
-    if not data.get('start_date') or not data.get('end_date'):
-        return jsonify({'error': 'Start date and end date are required'}), 400
-    
-    # Parse dates
-    try:
-        start_date = datetime.fromisoformat(data['start_date'].replace('Z', '+00:00'))
-        end_date = datetime.fromisoformat(data['end_date'].replace('Z', '+00:00'))
-    except ValueError:
-        return jsonify({'error': 'Invalid date format. Use ISO format.'}), 400
-    
-    if start_date >= end_date:
-        return jsonify({'error': 'Start date must be before end date'}), 400
+    cleaned_data, err = validate_election_input(data, is_create=True)
+    if err:
+        return err
+
+    if not data.get('election_type'):
+        return jsonify({'error': 'election_type is required'}), 400
+
+    start_date = cleaned_data['start_date']
+    end_date = cleaned_data['end_date']
     
     # Generate unique election code
     election_code = generate_election_code()
@@ -206,8 +219,11 @@ def create_election():
 @require_permission('Elections', 'view')
 def get_election(election_id):
     """Get detailed election information"""
-    company_id = get_current_company_id()
-    election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
+    if is_administrator():
+        election = Election.query.filter_by(id=election_id).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     
     # Get related statistics
     ballot_count = Ballot.query.filter_by(election_id=election_id).count()
@@ -264,11 +280,17 @@ def get_election(election_id):
 @audit_action('update_election', module='Elections')
 def update_election(election_id):
     """Update election information"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        election = Election.query.filter_by(id=election_id).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     current_user = get_current_user()
-    election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
-    data = request.get_json()
-    
+    data = request.get_json() or {}
+    cleaned_data, err = validate_election_input(data, is_create=False)
+    if err:
+        return err
+
     # Only block date changes on active elections
     if election.status == 'active':
         if any(k in data for k in ['start_date', 'end_date', 'registration_deadline']):
@@ -342,8 +364,11 @@ def update_election(election_id):
 @audit_action('delete_election', module='Elections')
 def delete_election(election_id):
     """Delete election (soft delete)"""
-    company_id = get_current_company_id()
-    election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
+    if is_administrator():
+        election = Election.query.filter_by(id=election_id).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     
     # Don't allow deletion of active elections
     if election.status == 'active':
@@ -368,9 +393,12 @@ def delete_election(election_id):
 @audit_action('activate_election', module='Elections')
 def activate_election(election_id):
     """Activate an election for voting"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        election = Election.query.filter_by(id=election_id).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     current_user = get_current_user()
-    election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     
     # Validate election can be activated
     if election.status != 'draft':
@@ -399,9 +427,12 @@ def activate_election(election_id):
 @audit_action('publish_results', module='Elections')
 def publish_results(election_id):
     """Publish election results"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        election = Election.query.filter_by(id=election_id).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     current_user = get_current_user()
-    election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     
     # Validate election can have results published
     if election.status not in ['completed', 'active']:
@@ -438,9 +469,12 @@ def tally_election(election_id):
 @audit_action('change_election_status', module='Elections')
 def change_election_status(election_id):
     """Change election status"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        election = Election.query.filter_by(id=election_id).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     current_user = get_current_user()
-    election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     data = request.get_json()
     
     if not data or 'status' not in data:
@@ -472,8 +506,11 @@ def change_election_status(election_id):
 @require_permission('Elections', 'view')
 def get_election_ballots(election_id):
     """Get all ballots for an election"""
-    company_id = get_current_company_id()
-    election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
+    if is_administrator():
+        election = Election.query.filter_by(id=election_id).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     
     ballots = Ballot.query.filter_by(election_id=election_id).order_by(Ballot.order_index).all()
     
@@ -496,8 +533,12 @@ def get_election_ballots(election_id):
 @require_permission('Elections', 'view')
 def get_election_registrations(election_id):
     """Get voter registrations for an election"""
-    company_id = get_current_company_id()
-    election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
+    if is_administrator():
+        election = Election.query.filter_by(id=election_id).first_or_404()
+        company_id = election.company_id
+    else:
+        company_id = get_current_company_id()
+        election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     
     page, per_page, error = parse_pagination(request)
     if error:
@@ -533,31 +574,42 @@ def get_election_registrations(election_id):
 @require_permission('Elections', 'view')
 def get_election_stats():
     """Get election statistics for the company"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        req_company_id = request.args.get('company_id', type=int)
+        if req_company_id:
+            filter_kwargs = {'company_id': req_company_id}
+            comp_filter = (Election.company_id == req_company_id)
+        else:
+            filter_kwargs = {}
+            comp_filter = True
+    else:
+        company_id = get_current_company_id()
+        filter_kwargs = {'company_id': company_id}
+        comp_filter = (Election.company_id == company_id)
     
-    total_elections = Election.query.filter_by(company_id=company_id).count()
-    active_elections = Election.query.filter_by(company_id=company_id, status='active').count()
+    total_elections = Election.query.filter_by(**filter_kwargs).count()
+    active_elections = Election.query.filter_by(status='active', **filter_kwargs).count()
     
     # Upcoming and completed counts
     now = datetime.now(timezone.utc)
     upcoming = Election.query.filter(
-        Election.company_id == company_id,
+        comp_filter,
         Election.start_date > now,
         Election.status != 'cancelled'
     ).count()
-    completed = Election.query.filter_by(company_id=company_id, status='completed').count()
+    completed = Election.query.filter_by(status='completed', **filter_kwargs).count()
     
     # Election types
     election_types = db.session.query(
         Election.election_type,
         db.func.count(Election.id).label('count')
-    ).filter_by(company_id=company_id).group_by(Election.election_type).all()
+    ).filter(comp_filter).group_by(Election.election_type).all()
     
     # Elections by status
     election_statuses = db.session.query(
         Election.status,
         db.func.count(Election.id).label('count')
-    ).filter_by(company_id=company_id).group_by(Election.status).all()
+    ).filter(comp_filter).group_by(Election.status).all()
     
     return jsonify({
         'total_elections': total_elections,

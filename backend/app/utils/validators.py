@@ -79,9 +79,9 @@ def validate_user_input(data, is_create=False):
     cleaned_data = {}
     
     if 'name' in data and data['name'] is not None:
-        name = sanitize_string(data['name'])
-        if not name:
-            return None, (jsonify({'error': 'Name cannot be empty'}), 400)
+        name, err = validate_non_numeric_text(data['name'], 'Name', min_length=2, max_length=100, required=is_create)
+        if err:
+            return None, err
         cleaned_data['name'] = name
         
     if 'email' in data and data['email'] is not None:
@@ -206,14 +206,7 @@ def parse_pagination(request):
 
 def validate_role_name(role_name):
     """Sanitize and validate a role name. Returns (cleaned_name, error_tuple_or_None)."""
-    if role_name is None:
-        return None, (jsonify({'error': 'Role name is required'}), 400)
-    name = str(role_name).strip().title()
-    if not name:
-        return None, (jsonify({'error': 'Role name cannot be empty'}), 400)
-    if len(name) > 100:
-        return None, (jsonify({'error': 'Role name cannot exceed 100 characters'}), 400)
-    return name, None
+    return validate_non_numeric_text(role_name, field_name="Role name", min_length=2, max_length=100, required=True)
 
 
 def validate_role_input(data, is_create=False):
@@ -257,14 +250,7 @@ def validate_department_active(department):
 def validate_department_name(name):
     """Sanitize and validate a department name.
     Returns (cleaned_name, error_tuple_or_None)."""
-    if name is None:
-        return None, (jsonify({'error': 'Department name is required'}), 400)
-    cleaned = str(name).strip().title()
-    if not cleaned:
-        return None, (jsonify({'error': 'Department name cannot be empty'}), 400)
-    if len(cleaned) > 100:
-        return None, (jsonify({'error': 'Department name cannot exceed 100 characters'}), 400)
-    return cleaned, None
+    return validate_non_numeric_text(name, field_name="Department name", min_length=2, max_length=100, required=True)
 
 
 def validate_department_input(data, is_create=False):
@@ -301,11 +287,9 @@ def validate_company_input(data, is_create=False):
         return None, (jsonify({'error': 'Company name is required'}), 400)
         
     if 'company_name' in data and data['company_name'] is not None:
-        name = str(data['company_name']).strip().title()
-        if not name:
-            return None, (jsonify({'error': 'Company name cannot be empty'}), 400)
-        if len(name) > 100:
-            return None, (jsonify({'error': 'Company name cannot exceed 100 characters'}), 400)
+        name, err = validate_non_numeric_text(data['company_name'], field_name="Company name", min_length=2, max_length=100, required=is_create)
+        if err:
+            return None, err
         cleaned['company_name'] = name
     elif is_create:
         return None, (jsonify({'error': 'Company name cannot be empty'}), 400)
@@ -325,9 +309,9 @@ def validate_company_input(data, is_create=False):
     if 'phone' in data:
         phone = data['phone']
         if phone and str(phone).strip():
-            phone_val = str(phone).strip()
-            if len(phone_val) > 20:
-                return None, (jsonify({'error': 'Phone cannot exceed 20 characters'}), 400)
+            phone_val, err = validate_phone_number(phone, field_name="Phone")
+            if err:
+                return None, err
             cleaned['phone'] = phone_val
         else:
             cleaned['phone'] = None
@@ -336,9 +320,9 @@ def validate_company_input(data, is_create=False):
     if 'website' in data:
         website = data['website']
         if website and str(website).strip():
-            website_val = str(website).strip()
-            if len(website_val) > 200:
-                return None, (jsonify({'error': 'Website cannot exceed 200 characters'}), 400)
+            website_val, err = validate_url_format(website, field_name="Website")
+            if err:
+                return None, err
             cleaned['website'] = website_val
         else:
             cleaned['website'] = None
@@ -373,14 +357,10 @@ def validate_module_input(data, is_create=False):
             return None, (jsonify({'error': 'Module name is required'}), 400)
             
     if 'module_name' in data and data['module_name'] is not None:
-        name = str(data['module_name']).strip()
-        if not name and is_create:
-            return None, (jsonify({'error': 'Module name cannot be empty'}), 400)
-        elif name:
-            name = name.title()
-            if len(name) > 100:
-                return None, (jsonify({'error': 'Module name cannot exceed 100 characters'}), 400)
-            cleaned['module_name'] = name
+        name, err = validate_non_numeric_text(data['module_name'], field_name="Module name", min_length=2, max_length=100, required=is_create)
+        if err:
+            return None, err
+        cleaned['module_name'] = name
 
     if 'route_name' in data:
         if data['route_name'] and str(data['route_name']).strip():
@@ -466,3 +446,199 @@ def validate_module_action_input(data, is_create=False):
             return None, (jsonify({'error': 'Invalid status format'}), 400)
             
     return cleaned, None
+
+
+def validate_non_numeric_text(text, field_name="Field", min_length=2, max_length=100, required=True):
+    if text is None:
+        if required:
+            return None, (jsonify({'error': f'{field_name} is required'}), 400)
+        return None, None
+        
+    val = str(text).strip()
+    if not val:
+        if required:
+            return None, (jsonify({'error': f'{field_name} cannot be empty'}), 400)
+        return None, None
+
+    if len(val) < min_length:
+        return None, (jsonify({'error': f'{field_name} must be at least {min_length} characters'}), 400)
+        
+    if len(val) > max_length:
+        return None, (jsonify({'error': f'{field_name} cannot exceed {max_length} characters'}), 400)
+
+    if val.isdigit():
+        return None, (jsonify({'error': f'{field_name} cannot consist solely of numbers'}), 400)
+
+    if not re.search(r'[a-zA-Z]', val):
+        return None, (jsonify({'error': f'{field_name} must contain at least one letter'}), 400)
+
+    return val, None
+
+
+def validate_phone_number(phone, field_name="Phone number", required=False):
+    if phone is None or str(phone).strip() == '':
+        if required:
+            return None, (jsonify({'error': f'{field_name} is required'}), 400)
+        return None, None
+
+    val = str(phone).strip()
+    if len(val) < 7 or len(val) > 20:
+        return None, (jsonify({'error': f'{field_name} must be between 7 and 20 characters'}), 400)
+
+    phone_regex = r'^\+?[0-9\-\s\(\)]{7,20}$'
+    if not re.match(phone_regex, val):
+        return None, (jsonify({'error': f'Invalid {field_name.lower()} format'}), 400)
+
+    return val, None
+
+
+def validate_url_format(url, field_name="URL", required=False):
+    if url is None or str(url).strip() == '':
+        if required:
+            return None, (jsonify({'error': f'{field_name} is required'}), 400)
+        return None, None
+
+    val = str(url).strip()
+    if val.startswith('data:image/'):
+        return val, None
+
+    url_regex = r'^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$'
+    if not re.match(url_regex, val, re.IGNORECASE):
+        return None, (jsonify({'error': f'Invalid {field_name.lower()} format (must be valid HTTP/HTTPS URL)'}), 400)
+
+    return val, None
+
+
+def validate_date_range_iso(start_str, end_str):
+    from datetime import datetime
+    if not start_str or not end_str:
+        return None, (jsonify({'error': 'Start date and end date are required'}), 400)
+
+    try:
+        start_date = datetime.fromisoformat(str(start_str).replace('Z', '+00:00'))
+        end_date = datetime.fromisoformat(str(end_str).replace('Z', '+00:00'))
+    except Exception:
+        return None, (jsonify({'error': 'Invalid date format (ISO 8601 expected)'}), 400)
+
+    if end_date <= start_date:
+        return None, (jsonify({'error': 'End date must be strictly after start date'}), 400)
+
+    return (start_date, end_date), None
+
+
+def validate_election_input(data, is_create=False):
+    if not data:
+        return None, (jsonify({'error': 'Data is required'}), 400)
+    cleaned = {}
+
+    if is_create:
+        if not data.get('title'):
+            return None, (jsonify({'error': 'Title is required'}), 400)
+        if not data.get('start_date') or not data.get('end_date'):
+            return None, (jsonify({'error': 'Start date and end date are required'}), 400)
+
+    if 'title' in data and data['title'] is not None:
+        title, err = validate_non_numeric_text(data['title'], field_name="Title", min_length=3, max_length=150, required=is_create)
+        if err:
+            return None, err
+        cleaned['title'] = title
+
+    if 'start_date' in data and 'end_date' in data and data['start_date'] and data['end_date']:
+        dates, err = validate_date_range_iso(data['start_date'], data['end_date'])
+        if err:
+            return None, err
+        cleaned['start_date'] = dates[0]
+        cleaned['end_date'] = dates[1]
+
+    if 'description' in data:
+        cleaned['description'] = str(data['description']).strip() if data['description'] else None
+
+    return cleaned, None
+
+
+def validate_ballot_input(data, is_create=False):
+    if not data:
+        return None, (jsonify({'error': 'Data is required'}), 400)
+    cleaned = {}
+
+    if is_create:
+        if not data.get('title'):
+            return None, (jsonify({'error': 'Ballot title is required'}), 400)
+        if not data.get('election_id'):
+            return None, (jsonify({'error': 'election_id is required'}), 400)
+
+    if 'title' in data and data['title'] is not None:
+        title, err = validate_non_numeric_text(data['title'], field_name="Ballot title", min_length=3, max_length=200, required=is_create)
+        if err:
+            return None, err
+        cleaned['title'] = title
+
+    if 'ballot_type' in data and data['ballot_type'] is not None:
+        b_type = str(data['ballot_type']).strip().lower()
+        if b_type not in ['single_choice', 'multiple_choice', 'ranked_choice', 'approval']:
+            return None, (jsonify({'error': 'Invalid ballot_type'}), 400)
+        cleaned['ballot_type'] = b_type
+
+    if 'min_selections' in data and 'max_selections' in data:
+        try:
+            min_sel = int(data['min_selections'])
+            max_sel = int(data['max_selections'])
+            if min_sel < 0:
+                return None, (jsonify({'error': 'Minimum selections cannot be negative'}), 400)
+            if max_sel < 1:
+                return None, (jsonify({'error': 'Maximum selections must be at least 1'}), 400)
+            if min_sel > max_sel:
+                return None, (jsonify({'error': 'Minimum selections cannot exceed maximum selections'}), 400)
+            cleaned['min_selections'] = min_sel
+            cleaned['max_selections'] = max_sel
+        except (ValueError, TypeError):
+            return None, (jsonify({'error': 'Invalid selection bounds format'}), 400)
+
+    return cleaned, None
+
+
+def validate_candidate_input(data, is_create=False):
+    if not data:
+        return None, (jsonify({'error': 'Data is required'}), 400)
+    cleaned = {}
+
+    if is_create:
+        if not data.get('name'):
+            return None, (jsonify({'error': 'Candidate name is required'}), 400)
+
+    if 'name' in data and data['name'] is not None:
+        name, err = validate_non_numeric_text(data['name'], field_name="Candidate name", min_length=2, max_length=100, required=is_create)
+        if err:
+            return None, err
+        cleaned['name'] = name
+
+    if 'email' in data and data['email']:
+        email, err = validate_email(data['email'])
+        if err:
+            return None, err
+        cleaned['email'] = email
+
+    if 'phone' in data and data['phone']:
+        phone, err = validate_phone_number(data['phone'], field_name="Phone")
+        if err:
+            return None, err
+        cleaned['phone'] = phone
+
+    if 'image_url' in data and data['image_url']:
+        url, err = validate_url_format(data['image_url'], field_name="Image URL")
+        if err:
+            return None, err
+        cleaned['image_url'] = url
+
+    if 'age' in data and data['age']:
+        try:
+            age = int(data['age'])
+            if age < 18 or age > 120:
+                return None, (jsonify({'error': 'Candidate age must be between 18 and 120'}), 400)
+            cleaned['age'] = age
+        except (ValueError, TypeError):
+            return None, (jsonify({'error': 'Invalid age format'}), 400)
+
+    return cleaned, None
+
+

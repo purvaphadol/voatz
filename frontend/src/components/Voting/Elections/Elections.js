@@ -52,8 +52,11 @@ import {
   Cancel as CancelIcon,
   Settings as ManageIcon,
 } from '@mui/icons-material';
-import { electionsAPI } from '../../../services/api';
+import { electionsAPI, companiesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
+import { useAuth } from '../../../contexts/AuthContext';
+import { showDeleteConfirm, showConfirmDialog } from '../../../utils/swal';
+import { validateNonNumericText, validateDateRange } from '../../../utils/validators';
 import ElectionResults from './ElectionResults';
 import ElectionWorkflow from './ElectionWorkflow';
 
@@ -72,7 +75,13 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
 
 const Elections = () => {
   const { hasPermission } = usePermissions();
+  const { user } = useAuth();
+
+  const isPlatformAdmin = user?.is_administrator === true;
+
   const [elections, setElections] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
@@ -84,6 +93,7 @@ const Elections = () => {
   const [selectedElectionForWorkflow, setSelectedElectionForWorkflow] = useState(null);
   const [stats, setStats] = useState({});
   const [formData, setFormData] = useState({
+    company_id: '',
     title: '',
     description: '',
     election_type: 'general',
@@ -117,15 +127,29 @@ const Elections = () => {
 
   useEffect(() => {
     if (canView) {
+      if (isPlatformAdmin) {
+        loadCompanies();
+      }
       loadElections();
       loadStats();
     }
-  }, [canView]);
+  }, [canView, isPlatformAdmin, selectedCompanyFilter]);
+
+  const loadCompanies = async () => {
+    try {
+      const response = await companiesAPI.getAll();
+      setCompanies((response.data.data || []).filter(c => c.status === 1));
+    } catch (error) {
+      console.error('Error loading companies:', error);
+    }
+  };
 
   const loadElections = async () => {
     try {
       setLoading(true);
-      const response = await electionsAPI.getAll();
+      const params = {};
+      if (isPlatformAdmin && selectedCompanyFilter) params.company_id = selectedCompanyFilter;
+      const response = await electionsAPI.getAll(params);
       setElections(response.data.data || []);
     } catch (error) {
       console.error('Error loading elections:', error);
@@ -137,7 +161,9 @@ const Elections = () => {
 
   const loadStats = async () => {
     try {
-      const response = await electionsAPI.getStats();
+      const params = {};
+      if (isPlatformAdmin && selectedCompanyFilter) params.company_id = selectedCompanyFilter;
+      const response = await electionsAPI.getStats(params);
       setStats(response.data);
     } catch (error) {
       console.error('Error loading stats:', error);
@@ -147,6 +173,7 @@ const Elections = () => {
   const handleAdd = () => {
     setEditingElection(null);
     setFormData({
+      company_id: '',
       title: '',
       description: '',
       election_type: 'general',
@@ -176,6 +203,7 @@ const Elections = () => {
   const handleEdit = (election) => {
     setEditingElection(election);
     setFormData({
+      company_id: election.company_id || '',
       title: election.title || '',
       description: election.description || '',
       election_type: election.election_type || 'general',
@@ -229,7 +257,8 @@ const Elections = () => {
   };
 
   const handleDelete = async (electionId) => {
-    if (window.confirm('Are you sure you want to delete this election? This action cannot be undone.')) {
+    const confirmed = await showDeleteConfirm('this election');
+    if (confirmed) {
       try {
         await electionsAPI.delete(electionId);
         setSuccess('Election deleted successfully');
@@ -252,7 +281,14 @@ const Elections = () => {
   };
 
   const handlePublishResults = async (electionId) => {
-    if (window.confirm('Are you sure you want to publish the results? This action cannot be undone.')) {
+    const confirmed = await showConfirmDialog({
+      title: 'Publish Results?',
+      text: 'Are you sure you want to publish the results? This action cannot be undone.',
+      icon: 'info',
+      confirmButtonText: 'Yes, publish',
+      confirmButtonColor: '#1976d2',
+    });
+    if (confirmed) {
       try {
         await electionsAPI.publishResults(electionId);
         setSuccess('Results published successfully');
@@ -271,9 +307,15 @@ const Elections = () => {
       'cancelled': 'Cancelled'
     };
     
-    const confirmMessage = `Are you sure you want to change the election status to ${statusLabels[newStatus]}?`;
+    const confirmed = await showConfirmDialog({
+      title: 'Change Election Status',
+      text: `Are you sure you want to change the election status to ${statusLabels[newStatus]}?`,
+      icon: 'question',
+      confirmButtonText: 'Yes, change status',
+      confirmButtonColor: '#1976d2',
+    });
     
-    if (window.confirm(confirmMessage)) {
+    if (confirmed) {
       try {
         await electionsAPI.changeStatus(electionId, newStatus);
         setSuccess(`Election status changed to ${statusLabels[newStatus]} successfully`);
@@ -288,6 +330,20 @@ const Elections = () => {
     e.preventDefault();
     setError('');
     setSuccess('');
+
+    const titleErr = validateNonNumericText(formData.title, 'Election title', 3, 150);
+    if (titleErr) {
+      setError(titleErr);
+      return;
+    }
+
+    if (formData.start_date && formData.end_date) {
+      const dateErr = validateDateRange(formData.start_date, formData.end_date);
+      if (dateErr) {
+        setError(dateErr);
+        return;
+      }
+    }
 
     try {
       if (editingElection) {
@@ -581,6 +637,29 @@ const Elections = () => {
         </Alert>
       )}
 
+      {/* Platform Admin Filter Bar */}
+      {isPlatformAdmin && (
+        <Box sx={{ mb: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+          <TextField
+            label="Filter by Company"
+            select
+            size="small"
+            value={selectedCompanyFilter}
+            onChange={(e) => setSelectedCompanyFilter(e.target.value)}
+            SelectProps={{ native: true }}
+            InputLabelProps={{ shrink: true }}
+            sx={{ minWidth: 220 }}
+          >
+            <option value="">All Companies</option>
+            {companies.map((comp) => (
+              <option key={comp.id} value={comp.id}>
+                {comp.company_name}
+              </option>
+            ))}
+          </TextField>
+        </Box>
+      )}
+
       <Paper sx={{ height: 600, width: '100%' }}>
         <DataGrid
           rows={elections}
@@ -615,6 +694,50 @@ const Elections = () => {
                   Basic Information
                 </Typography>
                 <Divider sx={{ mb: 2 }} />
+              </Grid>
+
+              {/* Company Field */}
+              <Grid item xs={12} sm={6}>
+                {!editingElection ? (
+                  isPlatformAdmin ? (
+                    <TextField
+                      fullWidth
+                      label="Company *"
+                      select
+                      variant="outlined"
+                      value={formData.company_id || ''}
+                      onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}
+                      SelectProps={{ native: true }}
+                      InputLabelProps={{ shrink: true }}
+                      required
+                    >
+                      <option value="" disabled hidden>Select Company</option>
+                      {companies.map((comp) => (
+                        <option key={comp.id} value={comp.id}>
+                          {comp.company_name}
+                        </option>
+                      ))}
+                    </TextField>
+                  ) : (
+                    <TextField
+                      fullWidth
+                      label="Company"
+                      variant="outlined"
+                      value={user?.company_name || 'Your Company'}
+                      disabled
+                      helperText="Elections are automatically assigned to your company."
+                    />
+                  )
+                ) : (
+                  <TextField
+                    fullWidth
+                    label="Company"
+                    variant="outlined"
+                    value={editingElection.company_name || user?.company_name || 'N/A'}
+                    disabled
+                    helperText="Company cannot be modified after creation."
+                  />
+                )}
               </Grid>
               
               <Grid item xs={12} sm={6}>

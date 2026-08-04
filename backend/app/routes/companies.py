@@ -140,11 +140,10 @@ def create_company():
         target_sys_mods = SystemModule.query.filter(SystemModule.status == STATUS_ACTIVE).all()
 
     for sys_mod in target_sys_mods:
-        comp_mod = CompanyModule(
-            company_id=company.id,
-            system_module_id=sys_mod.id,
-            status=STATUS_ACTIVE
-        )
+        comp_mod = CompanyModule()
+        comp_mod.company_id = company.id
+        comp_mod.system_module_id = sys_mod.id
+        comp_mod.status = STATUS_ACTIVE
         set_audit_fields(comp_mod, is_create=True)
         db.session.add(comp_mod)
         

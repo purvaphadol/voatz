@@ -118,8 +118,7 @@ def is_company_super_admin():
 
         super_admin_role = Role.query.filter(
             Role.is_super_admin.is_(True),
-            Role.company_id == user.company_id,
-            Role.status != 0
+            Role.company_id == user.company_id
         ).first()
 
         if not super_admin_role:

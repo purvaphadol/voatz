@@ -29,6 +29,8 @@ import {
 import { usersAPI, departmentsAPI, companiesAPI, handleApiError } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { showDeleteConfirm } from '../../utils/swal';
+import { validateNonNumericText, validateEmail } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -174,7 +176,8 @@ const Users = () => {
   };
 
   const handleDelete = async (userId) => {
-    if (window.confirm('Are you sure you want to delete this user?')) {
+    const confirmed = await showDeleteConfirm('this user');
+    if (confirmed) {
       try {
         await usersAPI.delete(userId);
         setSuccess('User deleted successfully');
@@ -201,8 +204,15 @@ const Users = () => {
       return;
     }
 
-    if (!cleanedData.name || !cleanedData.email) {
-      setError('Name and email cannot be empty');
+    const nameErr = validateNonNumericText(cleanedData.name, 'Full Name', 2, 100);
+    if (nameErr) {
+      setError(nameErr);
+      return;
+    }
+
+    const emailErr = validateEmail(cleanedData.email);
+    if (emailErr) {
+      setError(emailErr);
       return;
     }
 
@@ -376,6 +386,7 @@ const Users = () => {
               loadDepartments(compId);
             }}
             SelectProps={{ native: true }}
+            InputLabelProps={{ shrink: true }}
             sx={{ minWidth: 200 }}
           >
             <option value="">All Companies</option>
@@ -394,6 +405,7 @@ const Users = () => {
           value={selectedDepartmentFilter}
           onChange={(e) => setSelectedDepartmentFilter(e.target.value)}
           SelectProps={{ native: true }}
+          InputLabelProps={{ shrink: true }}
           sx={{ minWidth: 200 }}
         >
           <option value="">All Departments</option>
@@ -485,9 +497,10 @@ const Users = () => {
                   SelectProps={{
                     native: true,
                   }}
+                  InputLabelProps={{ shrink: true }}
                   sx={{ mb: 2 }}
                 >
-                  <option value="">Select Company</option>
+                  <option value="" disabled hidden>Select Company</option>
                   {companies.map((comp) => (
                     <option key={comp.id} value={comp.id}>
                       {comp.company_name}
@@ -537,9 +550,10 @@ const Users = () => {
               SelectProps={{
                 native: true,
               }}
+              InputLabelProps={{ shrink: true }}
               sx={{ mb: 2 }}
             >
-              <option value="">
+              <option value="" disabled hidden>
                 {isPlatformAdmin && !formData.company_id && !editingUser ? 'Select Company First' : 'Select Department'}
               </option>
               {departments.map((dept) => (

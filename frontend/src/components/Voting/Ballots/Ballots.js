@@ -78,6 +78,8 @@ import {
 } from '@mui/icons-material';
 import { ballotsAPI, electionsAPI, candidatesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
+import { showDeleteConfirm } from '../../../utils/swal';
+import { validateNonNumericText } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -291,7 +293,8 @@ const Ballots = () => {
   };
 
   const handleDelete = async (ballotId) => {
-    if (window.confirm('Are you sure you want to delete this ballot?')) {
+    const confirmed = await showDeleteConfirm('this ballot');
+    if (confirmed) {
       try {
         await ballotsAPI.delete(ballotId);
         setSuccess('Ballot deleted successfully');
@@ -604,8 +607,16 @@ const Ballots = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
+    const titleErr = validateNonNumericText(formData.title, 'Ballot title', 3, 200);
+    if (titleErr) {
+      setError(titleErr);
+      return;
+    }
+
+    if (formData.min_selections > formData.max_selections) {
+      setError('Minimum selections cannot exceed maximum selections');
+      return;
+    }
 
     try {
       if (editingBallot) {

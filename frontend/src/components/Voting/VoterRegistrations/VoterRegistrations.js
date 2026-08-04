@@ -84,6 +84,7 @@ import {
 } from '@mui/icons-material';
 import { voterRegistrationsAPI, electionsAPI, votersAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
+import { showDeleteConfirm, showErrorAlert } from '../../../utils/swal';
 
 const CustomToolbar = ({ onAdd, onBulkApprove, onQuickProcess, onImportRegistrations, onExportReport, hasCreatePermission, hasUpdatePermission, selectedRows }) => (
   <GridToolbarContainer>
@@ -351,7 +352,8 @@ const VoterRegistrations = () => {
   };
 
   const handleDelete = async (registrationId) => {
-    if (window.confirm('Are you sure you want to delete this registration?')) {
+    const confirmed = await showDeleteConfirm('this registration');
+    if (confirmed) {
       try {
         await voterRegistrationsAPI.delete(registrationId);
         setSuccess('Registration deleted successfully');
@@ -784,7 +786,7 @@ const VoterRegistrations = () => {
               <CustomToolbar
                 onAdd={handleAdd}
                 onBulkApprove={handleBulkApprove}
-                onQuickProcess={() => alert('Quick Process functionality not implemented yet')}
+                onQuickProcess={() => showErrorAlert('Quick Process functionality not implemented yet')}
                 onImportRegistrations={() => setImportDialogOpen(true)}
                 onExportReport={handleExportReport}
                 hasCreatePermission={canCreate}

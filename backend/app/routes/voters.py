@@ -140,7 +140,7 @@ def create_voter():
         if not email:
             return jsonify({'error': 'Email is required to create a linked user account'}), 400
             
-        if User.query.filter_by(email=email, company_id=company_id).first():
+        if User.query.filter_by(email=email, company_id=company_id).filter(User.status == STATUS_ACTIVE).first():
             return jsonify({'error': 'Email already exists'}), 400
             
         from app.utils.validators import validate_password

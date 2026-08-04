@@ -505,14 +505,15 @@ const Permissions = () => {
                   {/* 1. Company Selection FIRST */}
                   {isPlatformAdmin ? (
                     <FormControl fullWidth sx={{ mb: 2 }}>
-                      <InputLabel>Company</InputLabel>
+                      <InputLabel id="perm-role-company-label">Company</InputLabel>
                       <Select
+                        labelId="perm-role-company-label"
                         value={selectedCompany}
                         onChange={(e) => handleCompanyChange(e.target.value)}
                         label="Company"
                       >
-                        <MenuItem value="">
-                          <em>Select Company</em>
+                        <MenuItem value="" disabled hidden>
+                          Select Company
                         </MenuItem>
                         {companies.map((c) => (
                           <MenuItem key={c.id} value={c.id}>
@@ -533,14 +534,15 @@ const Permissions = () => {
 
                   {/* 2. Department Selection SECOND (Optional filter) */}
                   <FormControl fullWidth sx={{ mb: 2 }} disabled={!selectedCompany}>
-                    <InputLabel>Department (Optional Filter)</InputLabel>
+                    <InputLabel id="perm-role-dept-label">Department (Optional Filter)</InputLabel>
                     <Select
+                      labelId="perm-role-dept-label"
                       value={selectedDepartment}
                       onChange={(e) => handleDepartmentChange(e.target.value)}
                       label="Department (Optional Filter)"
                     >
                       <MenuItem value="">
-                        <em>{selectedCompany ? 'All Departments (Show All Roles)' : 'Select Company First'}</em>
+                        All Departments (Show All Roles)
                       </MenuItem>
                       {filteredDepartments.map((dept) => (
                         <MenuItem key={dept.id} value={dept.id}>
@@ -552,14 +554,15 @@ const Permissions = () => {
                   
                   {/* 3. Role Selection THIRD */}
                   <FormControl fullWidth disabled={!selectedCompany}>
-                    <InputLabel>Role</InputLabel>
+                    <InputLabel id="perm-role-select-label">Role</InputLabel>
                     <Select
+                      labelId="perm-role-select-label"
                       value={selectedRole}
                       onChange={(e) => handleRoleChange(e.target.value)}
                       label="Role"
                     >
-                      <MenuItem value="">
-                        <em>{selectedCompany ? 'Select Role' : 'Select Company First'}</em>
+                      <MenuItem value="" disabled hidden>
+                        {selectedCompany ? 'Select Role' : 'Select Company First'}
                       </MenuItem>
                       {filteredRoles.map((role) => (
                         <MenuItem key={role.id} value={role.id}>
@@ -666,14 +669,15 @@ const Permissions = () => {
                   {/* 1. Company Selection FIRST */}
                   {isPlatformAdmin ? (
                     <FormControl fullWidth sx={{ mb: 2 }}>
-                      <InputLabel>Company</InputLabel>
+                      <InputLabel id="perm-user-company-label">Company</InputLabel>
                       <Select
+                        labelId="perm-user-company-label"
                         value={selectedCompany}
                         onChange={(e) => handleCompanyChange(e.target.value)}
                         label="Company"
                       >
-                        <MenuItem value="">
-                          <em>Select Company</em>
+                        <MenuItem value="" disabled hidden>
+                          Select Company
                         </MenuItem>
                         {companies.map((c) => (
                           <MenuItem key={c.id} value={c.id}>
@@ -694,14 +698,15 @@ const Permissions = () => {
 
                   {/* 2. User Selection SECOND */}
                   <FormControl fullWidth disabled={!selectedCompany}>
-                    <InputLabel>User</InputLabel>
+                    <InputLabel id="perm-user-select-label">User</InputLabel>
                     <Select
+                      labelId="perm-user-select-label"
                       value={selectedUser}
                       onChange={(e) => handleUserChange(e.target.value)}
                       label="User"
                     >
-                      <MenuItem value="">
-                        <em>{selectedCompany ? 'Select User' : 'Select Company First'}</em>
+                      <MenuItem value="" disabled hidden>
+                        {selectedCompany ? 'Select User' : 'Select Company First'}
                       </MenuItem>
                       {filteredUsers.map((u) => (
                         <MenuItem key={u.id} value={u.id}>

@@ -136,8 +136,7 @@ def get_user_roles(user_id):
     ).filter(
         UserRoleMapping.user_id == user_id,
         UserRoleMapping.company_id == company_id,
-        UserRoleMapping.status != STATUS_INACTIVE,
-        Role.status != STATUS_INACTIVE
+        UserRoleMapping.status != STATUS_INACTIVE
     ).all()
 
     return jsonify([{
@@ -216,11 +215,11 @@ def get_role_permissions(role_id):
     """Get permissions for a specific role"""
     from app.utils import is_administrator
     if is_administrator():
-        role = Role.query.filter_by(id=role_id).filter(Role.status != STATUS_INACTIVE, Role.status != STATUS_DEACTIVATED).first_or_404()
+        role = Role.query.filter_by(id=role_id).first_or_404()
         company_id = role.company_id
     else:
         company_id = get_current_company_id()
-        role = Role.query.filter_by(id=role_id, company_id=company_id).filter(Role.status != STATUS_INACTIVE, Role.status != STATUS_DEACTIVATED).first_or_404()
+        role = Role.query.filter_by(id=role_id, company_id=company_id).first_or_404()
 
     role_permissions = RolePermissionMapping.query.filter(
         RolePermissionMapping.role_id == role_id,

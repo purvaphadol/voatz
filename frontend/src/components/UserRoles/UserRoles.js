@@ -43,6 +43,7 @@ import {
 import { userRolesAPI, usersAPI, rolesAPI, departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { showConfirmDialog } from '../../utils/swal';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -274,7 +275,14 @@ const UserRoles = () => {
   };
 
   const handleUnassignRole = async (mappingId) => {
-    if (window.confirm('Are you sure you want to unassign this role?')) {
+    const confirmed = await showConfirmDialog({
+      title: 'Unassign Role?',
+      text: 'Are you sure you want to unassign this role from the user?',
+      icon: 'warning',
+      confirmButtonText: 'Yes, unassign',
+      confirmButtonColor: '#d32f2f',
+    });
+    if (confirmed) {
       try {
         await userRolesAPI.unassign(mappingId);
         setSuccess('Role unassigned successfully');
@@ -493,14 +501,15 @@ const UserRoles = () => {
               </Typography>
               
               <FormControl fullWidth sx={{ mb: 2 }} disabled={isPlatformAdmin && !filterCompany}>
-                <InputLabel>Select User</InputLabel>
+                <InputLabel id="ur-select-user-label">Select User</InputLabel>
                 <Select
+                  labelId="ur-select-user-label"
                   value={selectedUser}
                   onChange={(e) => handleUserSelect(e.target.value)}
                   label="Select User"
                 >
-                  <MenuItem value="">
-                    <em>{isPlatformAdmin && !filterCompany ? 'Select Company Filter First' : 'Select a user'}</em>
+                  <MenuItem value="" disabled hidden>
+                    {isPlatformAdmin && !filterCompany ? 'Select Company Filter First' : 'Select User'}
                   </MenuItem>
                   {users.map((user) => (
                     <MenuItem key={user.id} value={user.id}>
@@ -569,15 +578,16 @@ const UserRoles = () => {
             {/* 1. Company Field FIRST */}
             {isPlatformAdmin ? (
               <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel>Company *</InputLabel>
+                <InputLabel id="ur-form-company-label">Company *</InputLabel>
                 <Select
+                  labelId="ur-form-company-label"
                   value={formData.company_id}
                   onChange={(e) => handleFormCompanyChange(e.target.value)}
                   label="Company *"
                   required
                 >
-                  <MenuItem value="">
-                    <em>Select Company</em>
+                  <MenuItem value="" disabled hidden>
+                    Select Company
                   </MenuItem>
                   {companies.map((company) => (
                     <MenuItem key={company.id} value={company.id}>
@@ -598,15 +608,16 @@ const UserRoles = () => {
 
             {/* 2. User Field (Scoped to selected Company) */}
             <FormControl fullWidth sx={{ mb: 2 }} disabled={!formData.company_id}>
-              <InputLabel>User *</InputLabel>
+              <InputLabel id="ur-form-user-label">User *</InputLabel>
               <Select
+                labelId="ur-form-user-label"
                 value={formData.user_id}
                 onChange={(e) => setFormData({ ...formData, user_id: e.target.value })}
                 label="User *"
                 required
               >
-                <MenuItem value="">
-                  <em>{formData.company_id ? 'Select User' : 'Select Company First'}</em>
+                <MenuItem value="" disabled hidden>
+                  {formData.company_id ? 'Select User' : 'Select Company First'}
                 </MenuItem>
                 {formUsers.map((u) => (
                   <MenuItem key={u.id} value={u.id}>
@@ -618,15 +629,16 @@ const UserRoles = () => {
 
             {/* 3. Department Field SECOND (Scoped to selected Company) */}
             <FormControl fullWidth sx={{ mb: 2 }} disabled={!formData.company_id}>
-              <InputLabel>Department *</InputLabel>
+              <InputLabel id="ur-form-dept-label">Department *</InputLabel>
               <Select
+                labelId="ur-form-dept-label"
                 value={formData.department_id}
                 onChange={(e) => handleFormDepartmentChange(e.target.value)}
                 label="Department *"
                 required
               >
-                <MenuItem value="">
-                  <em>{formData.company_id ? 'Select Department' : 'Select Company First'}</em>
+                <MenuItem value="" disabled hidden>
+                  {formData.company_id ? 'Select Department' : 'Select Company First'}
                 </MenuItem>
                 {formDepartments.map((department) => (
                   <MenuItem key={department.id} value={department.id}>
@@ -638,15 +650,16 @@ const UserRoles = () => {
 
             {/* 4. Role Field THIRD (Scoped to selected Department) */}
             <FormControl fullWidth disabled={!formData.department_id}>
-              <InputLabel>Role *</InputLabel>
+              <InputLabel id="ur-form-role-label">Role *</InputLabel>
               <Select
+                labelId="ur-form-role-label"
                 value={formData.role_id}
                 onChange={(e) => setFormData({ ...formData, role_id: e.target.value })}
                 label="Role *"
                 required
               >
-                <MenuItem value="">
-                  <em>{formData.department_id ? 'Select Role' : 'Select Department First'}</em>
+                <MenuItem value="" disabled hidden>
+                  {formData.department_id ? 'Select Role' : 'Select Department First'}
                 </MenuItem>
                 {formRoles.map((role) => (
                   <MenuItem key={role.id} value={role.id}>

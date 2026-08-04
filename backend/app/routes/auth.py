@@ -153,8 +153,7 @@ def login():
     ).filter(
         UserRoleMapping.user_id == user.id,
         UserRoleMapping.company_id == user.company_id,
-        UserRoleMapping.status == 1,
-        Role.status != 0
+        UserRoleMapping.status == 1
     ).all()
     roles_list = [{'id': role.id, 'role_name': role.role_name} for role in active_roles]
     
@@ -190,8 +189,7 @@ def get_profile():
     ).filter(
         UserRoleMapping.user_id == user.id,
         UserRoleMapping.company_id == user.company_id,
-        UserRoleMapping.status == 1,
-        Role.status != 0
+        UserRoleMapping.status == 1
     ).all()
     roles_list = [{'id': role.id, 'role_name': role.role_name} for role in active_roles]
     

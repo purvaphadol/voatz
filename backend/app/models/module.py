@@ -52,3 +52,6 @@ class CompanyModule(db.Model, TimestampAuditMixin):
     __table_args__ = (
         db.UniqueConstraint('company_id', 'system_module_id', name='uq_company_system_module'),
     )
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)

@@ -31,7 +31,7 @@ def assign_role_permission():
         company_id = get_current_company_id()
 
     # Validate that role, module, and action exist
-    role = Role.query.filter_by(id=data['role_id'], company_id=company_id).filter(Role.status != STATUS_DEACTIVATED).first()
+    role = Role.query.filter_by(id=data['role_id'], company_id=company_id).first()
     if not role:
         return jsonify({'error': 'Role not found in this company'}), 404
         
@@ -83,7 +83,7 @@ def assign_user_permission():
     if not user:
         return jsonify({'error': 'User not found in this company'}), 404
         
-    role = Role.query.filter_by(id=data['role_id'], company_id=company_id).filter(Role.status != STATUS_DEACTIVATED).first()
+    role = Role.query.filter_by(id=data['role_id'], company_id=company_id).first()
     if not role:
         return jsonify({'error': 'Role not found in this company'}), 404
         

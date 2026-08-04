@@ -268,8 +268,10 @@ def delete_department(department_id):
                      f'active role(s). Delete or reassign roles first.'
         }), 400
 
-    # Soft delete
+    # Soft delete department and unassign any assigned users
     department.status = STATUS_INACTIVE
+    from app.models.user import User
+    User.query.filter_by(department_id=department_id).update({'department_id': None})
     set_audit_fields(department, is_create=False)
     return safe_commit(
         (jsonify({'message': 'Department deleted'}), 200),

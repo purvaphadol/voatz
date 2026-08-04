@@ -71,8 +71,11 @@ import {
   FaceRetouchingNatural as FaceIcon,
   TouchApp as TouchIcon,
 } from '@mui/icons-material';
-import { votersAPI, usersAPI } from '../../../services/api';
+import { votersAPI, usersAPI, companiesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
+import { useAuth } from '../../../contexts/AuthContext';
+import { showDeleteConfirm } from '../../../utils/swal';
+import { validateNonNumericText, validateEmail, validatePhone } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -91,8 +94,14 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
 
 const Voters = () => {
   const { hasPermission } = usePermissions();
+  const { user } = useAuth();
+
+  const isPlatformAdmin = user?.is_administrator === true;
+
   const [voters, setVoters] = useState([]);
   const [users, setUsers] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
@@ -106,6 +115,7 @@ const Voters = () => {
   const [activeTab, setActiveTab] = useState(0);
   const [stats, setStats] = useState({});
   const [formData, setFormData] = useState({
+    company_id: '',
     user_id: '',
     name: '',
     email: '',
@@ -168,16 +178,30 @@ const Voters = () => {
 
   useEffect(() => {
     if (canView) {
+      if (isPlatformAdmin) {
+        loadCompanies();
+      }
       loadVoters();
-      loadUsers();
+      loadUsers(isPlatformAdmin ? selectedCompanyFilter : undefined);
       loadStats();
     }
-  }, [canView]);
+  }, [canView, isPlatformAdmin, selectedCompanyFilter]);
+
+  const loadCompanies = async () => {
+    try {
+      const response = await companiesAPI.getAll();
+      setCompanies((response.data.data || []).filter(c => c.status === 1));
+    } catch (error) {
+      console.error('Error loading companies:', error);
+    }
+  };
 
   const loadVoters = async () => {
     try {
       setLoading(true);
-      const response = await votersAPI.getAll();
+      const params = {};
+      if (isPlatformAdmin && selectedCompanyFilter) params.company_id = selectedCompanyFilter;
+      const response = await votersAPI.getAll(params);
       setVoters(response.data.data || []);
     } catch (error) {
       console.error('Error loading voters:', error);
@@ -187,9 +211,10 @@ const Voters = () => {
     }
   };
 
-  const loadUsers = async () => {
+  const loadUsers = async (companyId) => {
     try {
-      const response = await usersAPI.getAll();
+      const params = companyId ? { company_id: companyId } : {};
+      const response = await usersAPI.getAll(params);
       setUsers(response.data.data || []);
     } catch (error) {
       console.error('Error loading users:', error);
@@ -198,7 +223,9 @@ const Voters = () => {
 
   const loadStats = async () => {
     try {
-      const response = await votersAPI.getStats();
+      const params = {};
+      if (isPlatformAdmin && selectedCompanyFilter) params.company_id = selectedCompanyFilter;
+      const response = await votersAPI.getStats(params);
       setStats(response.data);
     } catch (error) {
       console.error('Error loading stats:', error);
@@ -210,6 +237,7 @@ const Voters = () => {
     setEditingVoter(null);
     setCreateLinked(false);
     setFormData({
+      company_id: '',
       user_id: '',
       name: '',
       email: '',
@@ -240,6 +268,7 @@ const Voters = () => {
     setEditingVoter(voter);
     setCreateLinked(voter.user_id !== null);
     setFormData({
+      company_id: voter.company_id || '',
       user_id: voter.user_id || '',
       name: voter.name || '',
       email: voter.email || '',
@@ -278,7 +307,8 @@ const Voters = () => {
   };
 
   const handleDelete = async (voterId) => {
-    if (window.confirm('Are you sure you want to delete this voter?')) {
+    const confirmed = await showDeleteConfirm('this voter');
+    if (confirmed) {
       try {
         await votersAPI.delete(voterId);
         setSuccess('Voter deleted successfully');
@@ -348,8 +378,34 @@ const Voters = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
+    if (formData.name) {
+      const nameErr = validateNonNumericText(formData.name, 'Voter name', 2, 100);
+      if (nameErr) {
+        setError(nameErr);
+        return;
+      }
+    }
+
+    if (formData.email) {
+      const emailErr = validateEmail(formData.email);
+      if (emailErr) {
+        setError(emailErr);
+        return;
+      }
+    }
+
+    if (formData.phone_number) {
+      const phoneErr = validatePhone(formData.phone_number);
+      if (phoneErr) {
+        setError(phoneErr);
+        return;
+      }
+    }
+
+    if (isPlatformAdmin && !editingVoter && !formData.company_id) {
+      setError('Please select a company');
+      return;
+    }
 
     try {
       if (editingVoter) {
@@ -624,6 +680,33 @@ const Voters = () => {
         </Alert>
       )}
 
+      {/* Platform Admin Filter Bar */}
+      {isPlatformAdmin && (
+        <Box sx={{ mb: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+          <TextField
+            label="Filter by Company"
+            select
+            size="small"
+            value={selectedCompanyFilter}
+            onChange={(e) => {
+              const compId = e.target.value;
+              setSelectedCompanyFilter(compId);
+              loadUsers(compId);
+            }}
+            SelectProps={{ native: true }}
+            InputLabelProps={{ shrink: true }}
+            sx={{ minWidth: 220 }}
+          >
+            <option value="">All Companies</option>
+            {companies.map((comp) => (
+              <option key={comp.id} value={comp.id}>
+                {comp.company_name}
+              </option>
+            ))}
+          </TextField>
+        </Box>
+      )}
+
       <Paper sx={{ height: 600, width: '100%' }}>
         <DataGrid
           rows={voters}
@@ -652,19 +735,70 @@ const Voters = () => {
         <form onSubmit={handleSubmit}>
           <DialogContent>
             <Grid container spacing={2}>
+              {/* Company Selection Field */}
+              <Grid item xs={12} sm={6}>
+                {!editingVoter ? (
+                  isPlatformAdmin ? (
+                    <TextField
+                      fullWidth
+                      label="Company *"
+                      select
+                      variant="outlined"
+                      value={formData.company_id || ''}
+                      onChange={(e) => {
+                        const compId = e.target.value;
+                        setFormData({ ...formData, company_id: compId, user_id: '' });
+                        loadUsers(compId);
+                      }}
+                      SelectProps={{ native: true }}
+                      InputLabelProps={{ shrink: true }}
+                      required
+                    >
+                      <option value="" disabled hidden>Select Company</option>
+                      {companies.map((comp) => (
+                        <option key={comp.id} value={comp.id}>
+                          {comp.company_name}
+                        </option>
+                      ))}
+                    </TextField>
+                  ) : (
+                    <TextField
+                      fullWidth
+                      label="Company"
+                      variant="outlined"
+                      value={user?.company_name || 'Your Company'}
+                      disabled
+                      helperText="Voters are automatically assigned to your company."
+                    />
+                  )
+                ) : (
+                  <TextField
+                    fullWidth
+                    label="Company"
+                    variant="outlined"
+                    value={editingVoter.company_name || user?.company_name || 'N/A'}
+                    disabled
+                    helperText="Company cannot be modified after creation."
+                  />
+                )}
+              </Grid>
+
               {!editingVoter && (
                 <>
                   <Grid item xs={12} sm={6}>
                     <FormControl fullWidth>
-                      <InputLabel>Link to Existing User</InputLabel>
+                      <InputLabel id="voter-user-link-label">Link to Existing User</InputLabel>
                       <Select
+                        labelId="voter-user-link-label"
+                        label="Link to Existing User"
                         value={formData.user_id}
                         onChange={(e) => setFormData({...formData, user_id: e.target.value})}
+                        disabled={isPlatformAdmin && !formData.company_id}
                       >
-                        <MenuItem value="">Create New User</MenuItem>
-                        {users.map((user) => (
-                          <MenuItem key={user.id} value={user.id}>
-                            {user.name} ({user.email})
+                        <MenuItem value="">Create New User (Unlinked)</MenuItem>
+                        {users.map((u) => (
+                          <MenuItem key={u.id} value={u.id}>
+                            {u.name} ({u.email})
                           </MenuItem>
                         ))}
                       </Select>

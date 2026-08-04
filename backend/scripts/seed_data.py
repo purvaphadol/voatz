@@ -168,101 +168,122 @@ def seed_company(
     now = datetime.now(timezone.utc)
 
     # 1. Company
-    company_id = session.execute(
-        t["companies"].insert().values(
-            company_name=company_name,
-            created_at=now,
-            updated_at=now,
-            status=1,
-        ).returning(t["companies"].c.id)
-    ).scalar()
+    existing_comp = session.execute(
+        t["companies"].select().where(t["companies"].c.company_name == company_name)
+    ).fetchone()
+    if existing_comp:
+        company_id = existing_comp.id
+    else:
+        company_id = session.execute(
+            t["companies"].insert().values(
+                company_name=company_name,
+                created_at=now,
+                updated_at=now,
+                status=1,
+            ).returning(t["companies"].c.id)
+        ).scalar()
 
     # 2. Provision SystemModules to company_modules
+    seed_system_modules(session)
     all_sys_mods = session.execute(t["system_modules"].select()).fetchall()
     if all_sys_mods:
-        session.execute(
-            t["company_modules"].insert(),
-            [
-                {
-                    "company_id": company_id,
-                    "system_module_id": mod.id,
-                    "status": 1,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-                for mod in all_sys_mods
-            ]
-        )
+        for mod in all_sys_mods:
+            existing_cm = session.execute(
+                t["company_modules"].select().where(
+                    t["company_modules"].c.company_id == company_id,
+                    t["company_modules"].c.system_module_id == mod.id
+                )
+            ).fetchone()
+            if not existing_cm:
+                session.execute(
+                    t["company_modules"].insert().values(
+                        company_id=company_id,
+                        system_module_id=mod.id,
+                        status=1,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
 
     # 3. Department
-    department_id = session.execute(
-        t["departments"].insert().values(
-            department_name="Admin",
-            company_id=company_id,
-            created_at=now,
-            updated_at=now,
-            status=1,
-        ).returning(t["departments"].c.id)
-    ).scalar()
+    existing_dept = session.execute(
+        t["departments"].select().where(
+            t["departments"].c.department_name == "Admin",
+            t["departments"].c.company_id == company_id
+        )
+    ).fetchone()
+    if existing_dept:
+        department_id = existing_dept.id
+    else:
+        department_id = session.execute(
+            t["departments"].insert().values(
+                department_name="Admin",
+                company_id=company_id,
+                created_at=now,
+                updated_at=now,
+                status=1,
+            ).returning(t["departments"].c.id)
+        ).scalar()
 
     # 4. Super Admin role
-    super_admin_role_id = session.execute(
-        t["roles"].insert().values(
-            role_name="Company Super Admin",
-            department_id=None,
-            is_super_admin=True,
-            company_id=company_id,
-            created_at=now,
-            updated_at=now,
-            status=1,
-        ).returning(t["roles"].c.id)
-    ).scalar()
+    existing_super_role = session.execute(
+        t["roles"].select().where(
+            t["roles"].c.role_name == "Company Super Admin",
+            t["roles"].c.company_id == company_id
+        )
+    ).fetchone()
+    if existing_super_role:
+        super_admin_role_id = existing_super_role.id
+    else:
+        super_admin_role_id = session.execute(
+            t["roles"].insert().values(
+                role_name="Company Super Admin",
+                department_id=None,
+                is_super_admin=True,
+                company_id=company_id,
+                created_at=now,
+                updated_at=now,
+                status=1,
+            ).returning(t["roles"].c.id)
+        ).scalar()
 
     # Regular Admin role
-    regular_role_id = session.execute(
-        t["roles"].insert().values(
-            role_name="Admin",
-            department_id=department_id,
-            is_super_admin=False,
-            company_id=company_id,
-            created_at=now,
-            updated_at=now,
-            status=1,
-        ).returning(t["roles"].c.id)
-    ).scalar()
+    existing_reg_role = session.execute(
+        t["roles"].select().where(
+            t["roles"].c.role_name == "Admin",
+            t["roles"].c.company_id == company_id
+        )
+    ).fetchone()
+    if existing_reg_role:
+        regular_role_id = existing_reg_role.id
+    else:
+        regular_role_id = session.execute(
+            t["roles"].insert().values(
+                role_name="Admin",
+                department_id=department_id,
+                is_super_admin=False,
+                company_id=company_id,
+                created_at=now,
+                updated_at=now,
+                status=1,
+            ).returning(t["roles"].c.id)
+        ).scalar()
 
     # 5. Super admin user
-    super_user_id = session.execute(
-        t["users"].insert().values(
-            name=super_admin_name,
-            email=super_admin_email,
-            password_hash=generate_password_hash(super_admin_password),
-            company_id=company_id,
-            created_at=now,
-            updated_at=now,
-            status=1,
-        ).returning(t["users"].c.id)
-    ).scalar()
-
-    session.execute(
-        t["user_role_mapping"].insert().values(
-            user_id=super_user_id,
-            role_id=super_admin_role_id,
-            department_id=department_id,
-            company_id=company_id,
-            status=1,
-            created_at=now,
-            updated_at=now,
+    existing_super_user = session.execute(
+        t["users"].select().where(
+            t["users"].c.email == super_admin_email,
+            t["users"].c.company_id == company_id
         )
-    )
-
-    regular_user_id = None
-    if regular_admin_email and regular_admin_password:
-        regular_user_id = session.execute(
+    ).fetchone()
+    if existing_super_user:
+        super_user_id = existing_super_user.id
+    else:
+        super_user_id = session.execute(
             t["users"].insert().values(
-                name=regular_admin_name,
-                email=regular_admin_email,
-                password_hash=generate_password_hash(regular_admin_password),
+                name=super_admin_name,
+                email=super_admin_email,
+                password_hash=generate_password_hash(super_admin_password),
                 company_id=company_id,
                 created_at=now,
                 updated_at=now,
@@ -270,10 +291,18 @@ def seed_company(
             ).returning(t["users"].c.id)
         ).scalar()
 
+    existing_super_mapping = session.execute(
+        t["user_role_mapping"].select().where(
+            t["user_role_mapping"].c.user_id == super_user_id,
+            t["user_role_mapping"].c.role_id == super_admin_role_id,
+            t["user_role_mapping"].c.company_id == company_id
+        )
+    ).fetchone()
+    if not existing_super_mapping:
         session.execute(
             t["user_role_mapping"].insert().values(
-                user_id=regular_user_id,
-                role_id=regular_role_id,
+                user_id=super_user_id,
+                role_id=super_admin_role_id,
                 department_id=department_id,
                 company_id=company_id,
                 status=1,
@@ -282,27 +311,76 @@ def seed_company(
             )
         )
 
+    regular_user_id = None
+    if regular_admin_email and regular_admin_password:
+        existing_reg_user = session.execute(
+            t["users"].select().where(
+                t["users"].c.email == regular_admin_email,
+                t["users"].c.company_id == company_id
+            )
+        ).fetchone()
+        if existing_reg_user:
+            regular_user_id = existing_reg_user.id
+        else:
+            regular_user_id = session.execute(
+                t["users"].insert().values(
+                    name=regular_admin_name,
+                    email=regular_admin_email,
+                    password_hash=generate_password_hash(regular_admin_password),
+                    company_id=company_id,
+                    created_at=now,
+                    updated_at=now,
+                    status=1,
+                ).returning(t["users"].c.id)
+            ).scalar()
+
+        existing_reg_mapping = session.execute(
+            t["user_role_mapping"].select().where(
+                t["user_role_mapping"].c.user_id == regular_user_id,
+                t["user_role_mapping"].c.role_id == regular_role_id,
+                t["user_role_mapping"].c.company_id == company_id
+            )
+        ).fetchone()
+        if not existing_reg_mapping:
+            session.execute(
+                t["user_role_mapping"].insert().values(
+                    user_id=regular_user_id,
+                    role_id=regular_role_id,
+                    department_id=department_id,
+                    company_id=company_id,
+                    status=1,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
     # 6. Assign role permissions to Super Admin role for all system module actions
     all_sys_actions = session.execute(
         t["system_module_actions"].select()
     ).fetchall()
 
     if all_sys_actions:
-        session.execute(
-            t["role_permission_mapping"].insert(),
-            [
-                {
-                    "company_id": company_id,
-                    "role_id": super_admin_role_id,
-                    "module_id": row.system_module_id,
-                    "action_id": row.id,
-                    "status": 1,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-                for row in all_sys_actions
-            ],
-        )
+        for row in all_sys_actions:
+            existing_rpm = session.execute(
+                t["role_permission_mapping"].select().where(
+                    t["role_permission_mapping"].c.company_id == company_id,
+                    t["role_permission_mapping"].c.role_id == super_admin_role_id,
+                    t["role_permission_mapping"].c.module_id == row.system_module_id,
+                    t["role_permission_mapping"].c.action_id == row.id,
+                )
+            ).fetchone()
+            if not existing_rpm:
+                session.execute(
+                    t["role_permission_mapping"].insert().values(
+                        company_id=company_id,
+                        role_id=super_admin_role_id,
+                        module_id=row.system_module_id,
+                        action_id=row.id,
+                        status=1,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
 
     return {
         "company_id": company_id,

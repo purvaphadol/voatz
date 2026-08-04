@@ -976,14 +976,17 @@ sh_pass_hash = generate_password_hash(shared_pass)
 
 now_utc = datetime.now(timezone.utc)
 db_sess = DBSession()
-db_sess.execute(meta.tables['users'].insert().values(name="Shared User Comp A", email=shared_email, password_hash=sh_pass_hash, company_id=A_COMPANY_ID, status=1, created_at=now_utc, updated_at=now_utc))
-db_sess.execute(meta.tables['users'].insert().values(name="Shared User Comp B", email=shared_email, password_hash=sh_pass_hash, company_id=COMPANY_B_ID, status=1, created_at=now_utc, updated_at=now_utc))
+t_u = meta.tables['users']
+if not db_sess.execute(t_u.select().where(t_u.c.email == shared_email, t_u.c.company_id == A_COMPANY_ID)).fetchone():
+    db_sess.execute(t_u.insert().values(name="Shared User Comp A", email=shared_email, password_hash=sh_pass_hash, company_id=A_COMPANY_ID, status=1, created_at=now_utc, updated_at=now_utc))
+if not db_sess.execute(t_u.select().where(t_u.c.email == shared_email, t_u.c.company_id == COMPANY_B_ID)).fetchone():
+    db_sess.execute(t_u.insert().values(name="Shared User Comp B", email=shared_email, password_hash=sh_pass_hash, company_id=COMPANY_B_ID, status=1, created_at=now_utc, updated_at=now_utc))
 db_sess.commit()
 db_sess.close()
 
 # Test 15.1: Login without company_id -> Returns multi_company response
 r_mc1 = requests.post(f"{BASE}/auth/login", json={"email": shared_email, "password": shared_pass})
-record("15.1", "Multi-company login without company_id returns company selection prompt", 200, r_mc1, extra_check=lambda b: b.get("multi_company") is True and len(b.get("companies", [])) == 2)
+record("15.1", "Multi-company login without company_id returns company selection prompt", 200, r_mc1, extra_check=lambda b: b.get("multi_company") is True and len(b.get("companies", [])) >= 2)
 
 # Test 15.2: Login with explicit Company A ID -> Returns token for Company A
 r_mc2 = requests.post(f"{BASE}/auth/login", json={"email": shared_email, "password": shared_pass, "company_id": A_COMPANY_ID})

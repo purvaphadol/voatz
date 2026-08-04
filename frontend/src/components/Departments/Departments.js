@@ -34,6 +34,8 @@ import {
 import { departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { showDeleteConfirm } from '../../utils/swal';
+import { validateNonNumericText } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -156,7 +158,8 @@ const Departments = () => {
   };
 
   const handleDelete = async (departmentId) => {
-    if (window.confirm('Are you sure you want to delete this department?')) {
+    const confirmed = await showDeleteConfirm('this department');
+    if (confirmed) {
       try {
         await departmentsAPI.delete(departmentId);
         setSuccess('Department deleted successfully');
@@ -175,8 +178,9 @@ const Departments = () => {
     setError('');
     setSuccess('');
 
-    if (!formData.department_name.trim()) {
-      setError('Department name is required');
+    const nameErr = validateNonNumericText(formData.department_name, 'Department name', 2, 100);
+    if (nameErr) {
+      setError(nameErr);
       return;
     }
 
@@ -388,8 +392,9 @@ const Departments = () => {
             {!editingDepartment && !viewMode && (
               isPlatformAdmin ? (
                 <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
-                  <InputLabel>Company *</InputLabel>
+                  <InputLabel id="dept-company-select-label">Company *</InputLabel>
                   <Select
+                    labelId="dept-company-select-label"
                     value={formData.company_id || ''}
                     onChange={(e) => setFormData({
                       ...formData, company_id: e.target.value
@@ -397,8 +402,8 @@ const Departments = () => {
                     label="Company *"
                     required
                   >
-                    <MenuItem value="">
-                      <em>Select Company</em>
+                    <MenuItem value="" disabled hidden>
+                      Select Company
                     </MenuItem>
                     {companies.map(c => (
                       <MenuItem key={c.id} value={c.id}>

@@ -139,7 +139,7 @@ def get_audit_summary_api():
     })
 
 @audit_bp.route('/user/<int:user_id>', methods=['GET'])
-@require_permission('Users', 'view')
+@require_permission('AuditLogs', 'view')
 def get_user_audit_logs(user_id):
     """Get audit logs for specific user"""
     from app.utils import is_administrator

@@ -14,7 +14,7 @@ import string
 import logging
 import os
 
-from app.utils.validators import parse_pagination
+from app.utils.validators import parse_pagination, validate_candidate_input
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
 from app.utils.query_helpers import get_active_candidates_query
@@ -122,10 +122,10 @@ def create_candidate():
     """Create a new candidate"""
     company_id = get_current_company_id()
     current_user = get_current_user()
-    data = request.get_json()
-    
-    if not data or not data.get('name') or not data.get('ballot_id'):
-        return jsonify({'error': 'name and ballot_id are required'}), 400
+    data = request.get_json() or {}
+    cleaned_data, err = validate_candidate_input(data, is_create=True)
+    if err:
+        return err
     
     try:
         ballot_id = int(data['ballot_id'])
@@ -275,8 +275,9 @@ def update_candidate(candidate_id):
     candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id, is_active=True).first_or_404()
     
     data = request.get_json()
-    
-    # Check if election is active
+    cleaned_data, err = validate_candidate_input(data, is_create=False)
+    if err:
+        return err
     if candidate.ballot.election.status == 'active':
         return jsonify({'error': 'Cannot modify candidates for active elections'}), 400
     

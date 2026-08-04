@@ -148,8 +148,8 @@ def create_user():
     email = cleaned_data['email']
     name = cleaned_data['name']
     
-    # Check if email already exists within the company
-    if User.query.filter_by(email=email, company_id=company_id).first():
+    # Check if email already exists within active users in the company
+    if User.query.filter_by(email=email, company_id=company_id).filter(User.status == STATUS_ACTIVE).first():
         return jsonify({'error': 'Email already exists in this company'}), 400
     
     user = User()
@@ -233,8 +233,8 @@ def update_user(user_id):
         
     if 'email' in cleaned_data:
         email = cleaned_data['email']
-        # Check if email already exists within the company (excluding current user)
-        existing_user = User.query.filter_by(email=email, company_id=company_id).first()
+        # Check if email already exists within active users in the company (excluding current user)
+        existing_user = User.query.filter_by(email=email, company_id=company_id).filter(User.status == STATUS_ACTIVE).first()
         if existing_user and existing_user.id != user_id:
             return jsonify({'error': 'Email already exists in this company'}), 400
         user.email = email

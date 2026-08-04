@@ -29,6 +29,8 @@ import {
 } from '@mui/icons-material';
 import { companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
+import { showDeleteConfirm } from '../../utils/swal';
+import { validateNonNumericText, validateEmail, validatePhone, validateUrl } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -128,7 +130,8 @@ const Companies = () => {
   };
 
   const handleDelete = async (companyId) => {
-    if (window.confirm('Are you sure you want to delete this company? This will affect all related data.')) {
+    const confirmed = await showDeleteConfirm('this company (and all related data)');
+    if (confirmed) {
       try {
         await companiesAPI.delete(companyId);
         setSuccess('Company deleted successfully');
@@ -144,9 +147,34 @@ const Companies = () => {
     setError('');
     setSuccess('');
 
-    if (!formData.company_name.trim()) {
-      setError('Company name is required');
+    const nameErr = validateNonNumericText(formData.company_name, 'Company name', 2, 100);
+    if (nameErr) {
+      setError(nameErr);
       return;
+    }
+
+    if (formData.email) {
+      const emailErr = validateEmail(formData.email);
+      if (emailErr) {
+        setError(emailErr);
+        return;
+      }
+    }
+
+    if (formData.phone) {
+      const phoneErr = validatePhone(formData.phone);
+      if (phoneErr) {
+        setError(phoneErr);
+        return;
+      }
+    }
+
+    if (formData.website) {
+      const urlErr = validateUrl(formData.website);
+      if (urlErr) {
+        setError(urlErr);
+        return;
+      }
     }
 
     try {

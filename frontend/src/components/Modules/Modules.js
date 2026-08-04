@@ -47,6 +47,7 @@ import {
 } from '@mui/icons-material';
 import { modulesAPI, moduleActionsAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
+import { showDeleteConfirm, showConfirmDialog } from '../../utils/swal';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -171,7 +172,8 @@ const Modules = () => {
   };
 
   const handleDelete = async (moduleId) => {
-    if (window.confirm('Are you sure you want to delete this module? This will affect all related permissions.')) {
+    const confirmed = await showDeleteConfirm('this module (and all related permissions)');
+    if (confirmed) {
       try {
         await modulesAPI.delete(moduleId);
         setSuccess('Module deleted successfully');
@@ -286,7 +288,8 @@ const Modules = () => {
   };
 
   const handleDeleteAction = async (actionId) => {
-    if (window.confirm('Are you sure you want to delete this action? This may affect permissions.')) {
+    const confirmed = await showDeleteConfirm('this action');
+    if (confirmed) {
       try {
         await moduleActionsAPI.deleteAction(actionId);
         setSuccess('Action deleted successfully');

@@ -33,6 +33,8 @@ import {
 import { rolesAPI, departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { showDeleteConfirm } from '../../utils/swal';
+import { validateNonNumericText } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -154,7 +156,8 @@ const Roles = () => {
   };
 
   const handleDelete = async (roleId) => {
-    if (window.confirm('Are you sure you want to delete this role?')) {
+    const confirmed = await showDeleteConfirm('this role');
+    if (confirmed) {
       try {
         await rolesAPI.delete(roleId);
         setSuccess('Role deleted successfully');
@@ -173,8 +176,9 @@ const Roles = () => {
     setError('');
     setSuccess('');
 
-    if (isPlatformAdmin && !editingRole && !formData.company_id) {
-      setError('Please select a company');
+    const nameErr = validateNonNumericText(formData.role_name, 'Role name', 2, 100);
+    if (nameErr) {
+      setError(nameErr);
       return;
     }
 
@@ -395,8 +399,9 @@ const Roles = () => {
             {!editingRole ? (
               isPlatformAdmin ? (
                 <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
-                  <InputLabel>Company *</InputLabel>
+                  <InputLabel id="roles-company-label">Company *</InputLabel>
                   <Select
+                    labelId="roles-company-label"
                     value={formData.company_id}
                     label="Company *"
                     onChange={(e) => {
@@ -408,8 +413,8 @@ const Roles = () => {
                     }}
                     required
                   >
-                    <MenuItem value="">
-                      <em>Select Company</em>
+                    <MenuItem value="" disabled hidden>
+                      Select Company
                     </MenuItem>
                     {companies.map((comp) => (
                       <MenuItem key={comp.id} value={comp.id}>
@@ -449,16 +454,17 @@ const Roles = () => {
 
             {/* 2. Department Field SECOND (Dynamic dependent dropdown) */}
             <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
-              <InputLabel>Department *</InputLabel>
+              <InputLabel id="roles-department-label">Department *</InputLabel>
               <Select
+                labelId="roles-department-label"
                 value={formData.department_id}
                 label="Department *"
                 onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
                 required
                 disabled={isPlatformAdmin && !formData.company_id && !editingRole}
               >
-                <MenuItem value="">
-                  <em>{isPlatformAdmin && !formData.company_id && !editingRole ? 'Select Company First' : 'Select Department'}</em>
+                <MenuItem value="" disabled hidden>
+                  {isPlatformAdmin && !formData.company_id && !editingRole ? 'Select Company First' : 'Select Department'}
                 </MenuItem>
                 {departments.map((dept) => (
                   <MenuItem key={dept.id} value={dept.id}>

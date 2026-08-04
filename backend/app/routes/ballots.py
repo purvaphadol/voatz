@@ -6,7 +6,7 @@ from app.models.election import Election
 from app.models.candidate import Candidate
 from app.models.vote import Vote
 from app.utils import get_current_company_id, require_permission, get_current_user
-from app.utils.validators import parse_pagination
+from app.utils.validators import parse_pagination, validate_ballot_input
 from app.utils.query_helpers import get_active_ballots_query
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
@@ -107,10 +107,10 @@ def create_ballot():
     """Create a new ballot"""
     company_id = get_current_company_id()
     current_user = get_current_user()
-    data = request.get_json()
-    
-    if not data or not data.get('title') or not data.get('election_id') or not data.get('ballot_type'):
-        return jsonify({'error': 'Title, election_id, and ballot_type are required'}), 400
+    data = request.get_json() or {}
+    cleaned_data, err = validate_ballot_input(data, is_create=True)
+    if err:
+        return err
     
     try:
         election_id = int(data['election_id'])
