@@ -218,9 +218,11 @@ def update_department(department_id):
     if 'department_name' in cleaned_data:
         existing = Department.query.filter(
             Department.department_name.ilike(cleaned_data['department_name']),
-            Department.company_id == company_id
-        ).filter(Department.status != STATUS_INACTIVE).first()
-        if existing and existing.id != department_id:
+            Department.company_id == company_id,
+            Department.status == STATUS_ACTIVE,
+            Department.id != department_id
+        ).first()
+        if existing:
             return jsonify({'error': 'Department name already exists in this company'}), 400
         department.department_name = cleaned_data['department_name']
 

@@ -34,7 +34,7 @@ import { rolesAPI, departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { showDeleteConfirm } from '../../utils/swal';
-import { validateNonNumericText } from '../../utils/validators';
+import { validateNonNumericText, capitalizeError } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -72,6 +72,7 @@ const Roles = () => {
     department_id: '',
   });
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
 
   const canView = hasPermission('Roles', 'view') || hasPermission('Settings', 'view');
@@ -129,8 +130,15 @@ const Roles = () => {
     }
   };
 
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setFormError('');
+    setEditingRole(null);
+  };
+
   const handleAdd = () => {
     setEditingRole(null);
+    setFormError('');
     setFormData({
       role_name: '',
       description: '',
@@ -142,6 +150,7 @@ const Roles = () => {
 
   const handleEdit = (role) => {
     setEditingRole(role);
+    setFormError('');
     const roleCompId = role.company_id || '';
     setFormData({
       role_name: role.role_name,
@@ -164,8 +173,10 @@ const Roles = () => {
         loadRoles();
       } catch (error) {
         setError(
-          (error.response && error.response.data && error.response.data.error)
-          || 'Failed to delete role'
+          capitalizeError(
+            (error.response && error.response.data && error.response.data.error)
+            || 'Failed to delete role'
+          )
         );
       }
     }
@@ -173,17 +184,12 @@ const Roles = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setSuccess('');
 
     const nameErr = validateNonNumericText(formData.role_name, 'Role name', 2, 100);
     if (nameErr) {
-      setError(nameErr);
-      return;
-    }
-
-    if (!formData.department_id) {
-      setError('Please select a department');
+      setFormError(capitalizeError(nameErr));
       return;
     }
 
@@ -191,7 +197,7 @@ const Roles = () => {
       const payload = {
         role_name: formData.role_name,
         description: formData.description,
-        department_id: formData.department_id,
+        department_id: formData.department_id || null,
       };
       if (isPlatformAdmin && formData.company_id) {
         payload.company_id = formData.company_id;
@@ -207,7 +213,7 @@ const Roles = () => {
       setDialogOpen(false);
       loadRoles();
     } catch (error) {
-      setError((error.response && error.response.data && error.response.data.error) || 'Operation failed');
+      setFormError(capitalizeError((error.response && error.response.data && error.response.data.error) || 'Operation failed'));
     }
   };
 
@@ -374,13 +380,13 @@ const Roles = () => {
         />
       </Paper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <form onSubmit={handleSubmit}>
           <DialogTitle>
             {editingRole ? 'Edit Role' : 'Add New Role'}
           </DialogTitle>
           <DialogContent>
-            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
 
             <TextField
               autoFocus
@@ -452,19 +458,18 @@ const Roles = () => {
               />
             )}
 
-            {/* 2. Department Field SECOND (Dynamic dependent dropdown) */}
+            {/* 2. Department Field SECOND (Dynamic dependent dropdown - Optional) */}
             <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
-              <InputLabel id="roles-department-label">Department *</InputLabel>
+              <InputLabel id="roles-department-label">Department (Optional)</InputLabel>
               <Select
                 labelId="roles-department-label"
                 value={formData.department_id}
-                label="Department *"
+                label="Department (Optional)"
                 onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-                required
                 disabled={isPlatformAdmin && !formData.company_id && !editingRole}
               >
-                <MenuItem value="" disabled hidden>
-                  {isPlatformAdmin && !formData.company_id && !editingRole ? 'Select Company First' : 'Select Department'}
+                <MenuItem value="">
+                  <em>None (Company-wide / No Department)</em>
                 </MenuItem>
                 {departments.map((dept) => (
                   <MenuItem key={dept.id} value={dept.id}>

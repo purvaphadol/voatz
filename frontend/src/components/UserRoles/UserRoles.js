@@ -44,6 +44,7 @@ import { userRolesAPI, usersAPI, rolesAPI, departmentsAPI, companiesAPI } from '
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { showConfirmDialog } from '../../utils/swal';
+import { capitalizeError } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -91,6 +92,7 @@ const UserRoles = () => {
   const [formUsers, setFormUsers] = useState([]);
 
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
 
   const isPlatformAdmin = currentUser?.is_administrator;
@@ -162,6 +164,7 @@ const UserRoles = () => {
 
   const handleAdd = () => {
     const initialCompanyId = !isPlatformAdmin && currentUser?.company_id ? currentUser.company_id : '';
+    setFormError('');
     setFormData({
       company_id: initialCompanyId,
       user_id: '',
@@ -246,11 +249,11 @@ const UserRoles = () => {
 
   const handleAssignRole = async (e) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setSuccess('');
 
     if (!formData.user_id || !formData.role_id) {
-      setError('User and Role are required');
+      setFormError(capitalizeError('User and Role are required'));
       return;
     }
 
@@ -270,7 +273,7 @@ const UserRoles = () => {
       
       await refreshPermissions();
     } catch (error) {
-      setError((error.response && error.response.data && error.response.data.error) || 'Failed to assign role');
+      setFormError(capitalizeError((error.response && error.response.data && error.response.data.error) || 'Failed to assign role'));
     }
   };
 
@@ -294,8 +297,10 @@ const UserRoles = () => {
         await refreshPermissions();
       } catch (error) {
         setError(
-          (error.response && error.response.data && error.response.data.error)
-          || 'Failed to unassign role'
+          capitalizeError(
+            (error.response && error.response.data && error.response.data.error)
+            || 'Failed to unassign role'
+          )
         );
       }
     }
@@ -303,7 +308,7 @@ const UserRoles = () => {
 
   const handleCloseDialog = () => {
     setDialogOpen(false);
-    setError('');
+    setFormError('');
   };
 
   const getUserName = (userId) => {
@@ -563,7 +568,6 @@ const UserRoles = () => {
         </Grid>
       </Grid>
 
-      {/* Assign Role Dialog */}
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <DialogTitle>
           <Box display="flex" alignItems="center">
@@ -573,7 +577,7 @@ const UserRoles = () => {
         </DialogTitle>
         <form onSubmit={handleAssignRole}>
           <DialogContent>
-            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             
             {/* 1. Company Field FIRST */}
             {isPlatformAdmin ? (

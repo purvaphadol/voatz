@@ -30,7 +30,7 @@ import { usersAPI, departmentsAPI, companiesAPI, handleApiError } from '../../se
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { showDeleteConfirm } from '../../utils/swal';
-import { validateNonNumericText, validateEmail } from '../../utils/validators';
+import { validateNonNumericText, validateEmail, capitalizeError } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -68,6 +68,7 @@ const Users = () => {
     company_id: '',
   });
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -147,8 +148,15 @@ const Users = () => {
     }
   };
 
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setFormError('');
+    setEditingUser(null);
+  };
+
   const handleAdd = () => {
     setEditingUser(null);
+    setFormError('');
     setFormData({
       name: '',
       email: '',
@@ -161,6 +169,7 @@ const Users = () => {
 
   const handleEdit = (user) => {
     setEditingUser(user);
+    setFormError('');
     const compId = user.company_id || '';
     setFormData({
       name: user.name,
@@ -183,14 +192,14 @@ const Users = () => {
         setSuccess('User deleted successfully');
         loadUsers();
       } catch (error) {
-        setError(handleApiError(error));
+        setError(capitalizeError(handleApiError(error)));
       }
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setSuccess('');
 
     const cleanedData = {
@@ -200,44 +209,44 @@ const Users = () => {
     };
 
     if (isPlatformAdmin && !editingUser && !formData.company_id) {
-      setError('Please select a company');
+      setFormError(capitalizeError('Please select a company'));
       return;
     }
 
     const nameErr = validateNonNumericText(cleanedData.name, 'Full Name', 2, 100);
     if (nameErr) {
-      setError(nameErr);
+      setFormError(capitalizeError(nameErr));
       return;
     }
 
     const emailErr = validateEmail(cleanedData.email);
     if (emailErr) {
-      setError(emailErr);
+      setFormError(capitalizeError(emailErr));
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(cleanedData.email)) {
-      setError('Invalid email address format');
+      setFormError(capitalizeError('Invalid email address format'));
       return;
     }
     
     if (!editingUser && !cleanedData.password) {
-      setError('Password is required');
+      setFormError(capitalizeError('Password is required'));
       return;
     }
     
     if (cleanedData.password) {
       if (cleanedData.password.length < 8) {
-        setError('Password must be at least 8 characters long');
+        setFormError(capitalizeError('Password must be at least 8 characters long'));
         return;
       }
       if (!/[a-zA-Z]/.test(cleanedData.password)) {
-        setError('Password must contain at least one letter');
+        setFormError(capitalizeError('Password must contain at least one letter'));
         return;
       }
       if (!/[0-9]/.test(cleanedData.password)) {
-        setError('Password must contain at least one number');
+        setFormError(capitalizeError('Password must contain at least one number'));
         return;
       }
     }
@@ -260,7 +269,7 @@ const Users = () => {
       setDialogOpen(false);
       loadUsers();
     } catch (error) {
-      setError(handleApiError(error));
+      setFormError(capitalizeError(handleApiError(error)));
     } finally {
       setIsSubmitting(false);
     }
@@ -436,12 +445,14 @@ const Users = () => {
         />
       </Paper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <form onSubmit={handleSubmit}>
           <DialogTitle>
             {editingUser ? 'Edit User' : 'Add New User'}
           </DialogTitle>
           <DialogContent>
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
+
             <TextField
               autoFocus
               margin="dense"

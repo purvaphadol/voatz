@@ -63,6 +63,18 @@ export const showSuccessToast = (title = 'Success!') => {
 };
 
 /**
+ * Quick helper for success modal alert
+ */
+export const showSuccessAlert = (message = 'Operation completed successfully.', title = 'Success') => {
+  return MySwal.fire({
+    icon: 'success',
+    title,
+    text: message,
+    confirmButtonColor: '#1976d2',
+  });
+};
+
+/**
  * Quick helper for error alert
  */
 export const showErrorAlert = (message = 'An unexpected error occurred.') => {

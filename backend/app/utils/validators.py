@@ -215,8 +215,6 @@ def validate_role_input(data, is_create=False):
         return None, (jsonify({'error': 'Request data is required'}), 400)
     cleaned = {}
     if is_create:
-        if not data.get('department_id') and not data.get('is_super_admin'):
-            return None, (jsonify({'error': 'department_id is required'}), 400)
         role_name, err = validate_role_name(data.get('role_name'))
         if err:
             return None, err

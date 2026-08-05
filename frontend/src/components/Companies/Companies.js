@@ -29,8 +29,8 @@ import {
 } from '@mui/icons-material';
 import { companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
-import { showDeleteConfirm } from '../../utils/swal';
-import { validateNonNumericText, validateEmail, validatePhone, validateUrl } from '../../utils/validators';
+import { showDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import { validateNonNumericText, validateEmail, validatePhone, validateUrl, capitalizeError } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -61,6 +61,7 @@ const Companies = () => {
     description: '',
   });
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
 
   const canView = hasPermission('Companies', 'view');
@@ -90,6 +91,7 @@ const Companies = () => {
   const handleAdd = () => {
     setEditingCompany(null);
     setViewMode(false);
+    setFormError('');
     setFormData({
       company_name: '',
       address: '',
@@ -104,6 +106,7 @@ const Companies = () => {
   const handleEdit = (company) => {
     setEditingCompany(company);
     setViewMode(false);
+    setFormError('');
     setFormData({
       company_name: company.company_name,
       address: company.address || '',
@@ -118,6 +121,7 @@ const Companies = () => {
   const handleView = (company) => {
     setEditingCompany(company);
     setViewMode(true);
+    setFormError('');
     setFormData({
       company_name: company.company_name,
       address: company.address || '',
@@ -130,33 +134,34 @@ const Companies = () => {
   };
 
   const handleDelete = async (companyId) => {
-    const confirmed = await showDeleteConfirm('this company (and all related data)');
+    const confirmed = await showDeleteConfirm('this company (and all related user data)');
     if (confirmed) {
       try {
         await companiesAPI.delete(companyId);
-        setSuccess('Company deleted successfully');
+        await showSuccessAlert('Company deleted successfully');
         loadCompanies();
       } catch (error) {
-        setError('Failed to delete company');
+        const errMsg = (error.response && error.response.data && error.response.data.error) || 'Failed to delete company';
+        showErrorAlert(capitalizeError(errMsg));
       }
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setSuccess('');
 
     const nameErr = validateNonNumericText(formData.company_name, 'Company name', 2, 100);
     if (nameErr) {
-      setError(nameErr);
+      setFormError(capitalizeError(nameErr));
       return;
     }
 
     if (formData.email) {
       const emailErr = validateEmail(formData.email);
       if (emailErr) {
-        setError(emailErr);
+        setFormError(capitalizeError(emailErr));
         return;
       }
     }
@@ -164,7 +169,7 @@ const Companies = () => {
     if (formData.phone) {
       const phoneErr = validatePhone(formData.phone);
       if (phoneErr) {
-        setError(phoneErr);
+        setFormError(capitalizeError(phoneErr));
         return;
       }
     }
@@ -172,7 +177,7 @@ const Companies = () => {
     if (formData.website) {
       const urlErr = validateUrl(formData.website);
       if (urlErr) {
-        setError(urlErr);
+        setFormError(capitalizeError(urlErr));
         return;
       }
     }
@@ -180,21 +185,25 @@ const Companies = () => {
     try {
       if (editingCompany) {
         await companiesAPI.update(editingCompany.id, formData);
-        setSuccess('Company updated successfully');
+        setDialogOpen(false);
+        loadCompanies();
+        await showSuccessAlert('Company updated successfully');
       } else {
         await companiesAPI.create(formData);
-        setSuccess('Company created successfully');
+        setDialogOpen(false);
+        loadCompanies();
+        await showSuccessAlert('Company created successfully');
       }
-      setDialogOpen(false);
-      loadCompanies();
     } catch (error) {
-      setError((error.response && error.response.data && error.response.data.error) || 'Operation failed');
+      const errMsg = (error.response && error.response.data && error.response.data.error) || 'Operation failed';
+      setFormError(capitalizeError(errMsg));
+      showErrorAlert(capitalizeError(errMsg));
     }
   };
 
   const handleCloseDialog = () => {
     setDialogOpen(false);
-    setError('');
+    setFormError('');
     setEditingCompany(null);
     setViewMode(false);
   };
@@ -316,7 +325,7 @@ const Companies = () => {
         </DialogTitle>
         <form onSubmit={handleSubmit}>
           <DialogContent>
-            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
 
             <TextField
               autoFocus

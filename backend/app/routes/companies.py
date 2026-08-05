@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required
 from app import db
 from app.models.company import Company
@@ -108,29 +108,36 @@ def create_company():
     if error:
         return error[0], error[1]
         
-    # Case-insensitive duplicate check
-    existing = Company.query.filter(
-        Company.company_name.ilike(cleaned_data['company_name']),
-        Company.status != STATUS_INACTIVE
+    # Case-insensitive duplicate check across all statuses (including deactivated status=9)
+    existing = Company.query.with_deactivated().filter(
+        Company.company_name.ilike(cleaned_data['company_name'])
     ).first()
     
     if existing:
-        return jsonify({'error': 'Company name already exists'}), 400
-        
-    company = Company()
-    for key, value in cleaned_data.items():
-        setattr(company, key, value)
-        
-    set_audit_fields(company, is_create=True)
-    db.session.add(company)
+        if existing.status == STATUS_ACTIVE:
+            return jsonify({'error': 'Company name already exists'}), 400
+        else:
+            # Reactivate soft-deleted/deactivated record and update fields
+            company = existing
+            for key, value in cleaned_data.items():
+                setattr(company, key, value)
+            company.status = STATUS_ACTIVE
+            set_audit_fields(company, is_create=False)
+    else:
+        company = Company()
+        for key, value in cleaned_data.items():
+            setattr(company, key, value)
+        set_audit_fields(company, is_create=True)
+        db.session.add(company)
     
     try:
         db.session.flush()
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': 'Company name already exists'}), 400
+        current_app.logger.error(f"Error during company create/reactivate flush: {str(e)}")
+        return jsonify({'error': f'Failed to create company: {str(e)}'}), 400
 
-    # Automatically provision SystemModules for the new company
+    # Automatically provision SystemModules for the company
     from app.models.module import SystemModule, CompanyModule
     system_module_ids = data.get('system_module_ids') if data else None
     
@@ -140,12 +147,17 @@ def create_company():
         target_sys_mods = SystemModule.query.filter(SystemModule.status == STATUS_ACTIVE).all()
 
     for sys_mod in target_sys_mods:
-        comp_mod = CompanyModule()
-        comp_mod.company_id = company.id
-        comp_mod.system_module_id = sys_mod.id
-        comp_mod.status = STATUS_ACTIVE
-        set_audit_fields(comp_mod, is_create=True)
-        db.session.add(comp_mod)
+        existing_cm = CompanyModule.query.with_deactivated().filter_by(company_id=company.id, system_module_id=sys_mod.id).first()
+        if existing_cm:
+            existing_cm.status = STATUS_ACTIVE
+            set_audit_fields(existing_cm, is_create=False)
+        else:
+            comp_mod = CompanyModule()
+            comp_mod.company_id = company.id
+            comp_mod.system_module_id = sys_mod.id
+            comp_mod.status = STATUS_ACTIVE
+            set_audit_fields(comp_mod, is_create=True)
+            db.session.add(comp_mod)
         
     return safe_commit(
         (jsonify({'message': 'Company created', 'company_id': company.id}), 201),
@@ -201,7 +213,7 @@ def update_company(company_id):
     if 'company_name' in cleaned_data:
         existing = Company.query.filter(
             Company.company_name.ilike(cleaned_data['company_name']),
-            Company.status != STATUS_INACTIVE,
+            Company.status == STATUS_ACTIVE,
             Company.id != company_id
         ).first()
         if existing:
@@ -213,9 +225,10 @@ def update_company(company_id):
     set_audit_fields(company, is_create=False)
     try:
         db.session.flush()
-    except Exception:
+    except Exception as e:
         db.session.rollback()
-        return jsonify({'error': 'Company name already exists'}), 400
+        current_app.logger.error(f"Error during company update flush: {str(e)}")
+        return jsonify({'error': f'Failed to update company: {str(e)}'}), 400
         
     return safe_commit(
         (jsonify({'message': 'Company updated'}), 200),
@@ -249,15 +262,18 @@ def delete_company(company_id):
     if not company:
         return jsonify({'error': 'Company not found'}), 404
         
-    active_users = User.query.filter(
+    # Cascade soft-delete to associated users
+    associated_users = User.query.filter(
         User.company_id == company_id,
         User.status != STATUS_INACTIVE
-    ).count()
-    
-    if active_users > 0:
-        return jsonify({'error': f'Cannot delete company. There are {active_users} active users associated with this company.'}), 400
+    ).all()
+    for u in associated_users:
+        u.status = STATUS_INACTIVE
+        set_audit_fields(u, is_create=False)
         
     company.status = STATUS_INACTIVE
+    if not company.company_name.endswith(f"__del_{company.id}"):
+        company.company_name = f"{company.company_name}__del_{company.id}"
     set_audit_fields(company, is_create=False)
     
     return safe_commit(

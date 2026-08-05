@@ -48,6 +48,7 @@ import {
 import { modulesAPI, moduleActionsAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { showDeleteConfirm, showConfirmDialog } from '../../utils/swal';
+import { capitalizeError } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -87,6 +88,7 @@ const Modules = () => {
   });
   const [editingAction, setEditingAction] = useState(null);
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
 
   const canView = hasPermission('Modules', 'view');
@@ -126,6 +128,7 @@ const Modules = () => {
   const handleAdd = () => {
     setEditingModule(null);
     setViewMode(false);
+    setFormError('');
     setFormData({
       module_name: '',
       route_name: '',
@@ -140,6 +143,7 @@ const Modules = () => {
   const handleEdit = (module) => {
     setEditingModule(module);
     setViewMode(false);
+    setFormError('');
     setFormData({
       module_name: module.module_name,
       route_name: module.route_name || '',
@@ -154,6 +158,7 @@ const Modules = () => {
   const handleView = (module) => {
     setEditingModule(module);
     setViewMode(true);
+    setFormError('');
     setFormData({
       module_name: module.module_name,
       route_name: module.route_name || '',
@@ -167,6 +172,7 @@ const Modules = () => {
 
   const handleManageActions = (module) => {
     setSelectedModule(module);
+    setFormError('');
     loadModuleActions(module.id);
     setActionsDialogOpen(true);
   };
@@ -179,7 +185,7 @@ const Modules = () => {
         setSuccess('Module deleted successfully');
         loadModules();
       } catch (error) {
-        setError(error.response?.data?.error || 'Failed to delete module');
+        setError(capitalizeError(error.response?.data?.error || 'Failed to delete module'));
       }
     }
   };
@@ -190,17 +196,17 @@ const Modules = () => {
       setSuccess('Module reactivated successfully');
       loadModules();
     } catch (error) {
-      setError(error.response?.data?.error || 'Failed to reactivate module');
+      setError(capitalizeError(error.response?.data?.error || 'Failed to reactivate module'));
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setSuccess('');
 
     if (!formData.module_name.trim()) {
-      setError('Module name is required');
+      setFormError(capitalizeError('Module name is required'));
       return;
     }
 
@@ -240,16 +246,16 @@ const Modules = () => {
       setDialogOpen(false);
       loadModules();
     } catch (error) {
-      setError((error.response && error.response.data && error.response.data.error) || 'Operation failed');
+      setFormError(capitalizeError((error.response && error.response.data && error.response.data.error) || 'Operation failed'));
     }
   };
 
   const handleActionSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
 
     if (!actionFormData.action_name.trim() || !actionFormData.action_url.trim()) {
-      setError('Action name and URL are required');
+      setFormError(capitalizeError('Action name and URL are required'));
       return;
     }
 
@@ -274,12 +280,13 @@ const Modules = () => {
       setEditingAction(null);
       loadModuleActions(selectedModule.id);
     } catch (error) {
-      setError(error.response?.data?.error || 'Failed to save action');
+      setFormError(capitalizeError(error.response?.data?.error || 'Failed to save action'));
     }
   };
 
   const handleEditAction = (action) => {
     setEditingAction(action);
+    setFormError('');
     setActionFormData({
       action_name: action.action_name,
       action_url: action.action_url,
@@ -295,14 +302,14 @@ const Modules = () => {
         setSuccess('Action deleted successfully');
         loadModuleActions(selectedModule.id);
       } catch (error) {
-        setError(error.response?.data?.error || 'Failed to delete action');
+        setFormError(capitalizeError(error.response?.data?.error || 'Failed to delete action'));
       }
     }
   };
 
   const handleCloseDialog = () => {
     setDialogOpen(false);
-    setError('');
+    setFormError('');
     setEditingModule(null);
     setViewMode(false);
   };
@@ -313,7 +320,7 @@ const Modules = () => {
     setModuleActions([]);
     setActionFormData({ action_name: '', action_url: '', status: true });
     setEditingAction(null);
-    setError('');
+    setFormError('');
   };
 
   const columns = [
@@ -489,7 +496,7 @@ const Modules = () => {
         </DialogTitle>
         <form onSubmit={handleSubmit}>
           <DialogContent>
-            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             
             <TextField
               autoFocus
@@ -596,7 +603,7 @@ const Modules = () => {
           </Box>
         </DialogTitle>
         <DialogContent>
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
           {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
           
           <Grid container spacing={3}>

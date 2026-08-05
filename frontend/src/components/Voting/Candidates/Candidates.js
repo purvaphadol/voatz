@@ -66,7 +66,7 @@ import {
 import { candidatesAPI, ballotsAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import { showDeleteConfirm, showConfirmDialog } from '../../../utils/swal';
-import { validateNonNumericText, validateEmail, validatePhone, validateUrl } from '../../../utils/validators';
+import { validateNonNumericText, validateEmail, validatePhone, validateUrl, capitalizeError } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -123,6 +123,7 @@ const Candidates = () => {
     withdrawal_date: '',
   });
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
@@ -233,8 +234,15 @@ const Candidates = () => {
     }
   };
 
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setFormError('');
+    setEditingCandidate(null);
+  };
+
   const handleAdd = () => {
     setEditingCandidate(null);
+    setFormError('');
     setFormData({
       ballot_id: '',
       name: '',
@@ -267,6 +275,7 @@ const Candidates = () => {
 
   const handleEdit = (candidate) => {
     setEditingCandidate(candidate);
+    setFormError('');
     setFormData({
       ballot_id: candidate.ballot_id || '',
       name: candidate.name || '',
@@ -303,7 +312,7 @@ const Candidates = () => {
       setSelectedCandidate(response.data);
       setDetailsDialogOpen(true);
     } catch (error) {
-      setError('Failed to load candidate details');
+      setError(capitalizeError('Failed to load candidate details'));
     }
   };
 
@@ -316,7 +325,7 @@ const Candidates = () => {
         loadCandidates();
         loadStats();
       } catch (error) {
-        setError('Failed to delete candidate');
+        setError(capitalizeError('Failed to delete candidate'));
       }
     }
   };
@@ -338,7 +347,7 @@ const Candidates = () => {
       loadCandidates();
       loadStats();
     } catch (error) {
-      setError('Failed to withdraw candidate');
+      setError(capitalizeError('Failed to withdraw candidate'));
     }
   };
 
@@ -357,23 +366,26 @@ const Candidates = () => {
         loadCandidates();
         loadStats();
       } catch (error) {
-        setError('Failed to reinstate candidate');
+        setError(capitalizeError('Failed to reinstate candidate'));
       }
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setFormError('');
+    setSuccess('');
+
     const nameErr = validateNonNumericText(formData.name, 'Candidate name', 2, 100);
     if (nameErr) {
-      setError(nameErr);
+      setFormError(capitalizeError(nameErr));
       return;
     }
 
     if (formData.email) {
       const emailErr = validateEmail(formData.email);
       if (emailErr) {
-        setError(emailErr);
+        setFormError(capitalizeError(emailErr));
         return;
       }
     }
@@ -381,7 +393,7 @@ const Candidates = () => {
     if (formData.phone) {
       const phoneErr = validatePhone(formData.phone);
       if (phoneErr) {
-        setError(phoneErr);
+        setFormError(capitalizeError(phoneErr));
         return;
       }
     }
@@ -389,7 +401,7 @@ const Candidates = () => {
     if (formData.image_url) {
       const urlErr = validateUrl(formData.image_url);
       if (urlErr) {
-        setError(urlErr);
+        setFormError(capitalizeError(urlErr));
         return;
       }
     }
@@ -407,7 +419,7 @@ const Candidates = () => {
       loadStats();
     } catch (error) {
       console.error('Candidate operation failed:', error);
-      setError((error.response?.data?.error) || 'Operation failed');
+      setFormError(capitalizeError((error.response?.data?.error) || 'Operation failed'));
     }
   };
 
@@ -719,7 +731,7 @@ const Candidates = () => {
       {/* Add/Edit Dialog */}
       <Dialog 
         open={dialogOpen} 
-        onClose={() => setDialogOpen(false)}
+        onClose={handleCloseDialog}
         maxWidth="md"
         fullWidth
       >
@@ -728,6 +740,7 @@ const Candidates = () => {
         </DialogTitle>
         <form onSubmit={handleSubmit}>
           <DialogContent>
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
                 <Tooltip title="Select which ballot this candidate will appear on">

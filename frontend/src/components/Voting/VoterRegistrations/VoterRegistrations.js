@@ -85,6 +85,7 @@ import {
 import { voterRegistrationsAPI, electionsAPI, votersAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import { showDeleteConfirm, showErrorAlert } from '../../../utils/swal';
+import { capitalizeError } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, onBulkApprove, onQuickProcess, onImportRegistrations, onExportReport, hasCreatePermission, hasUpdatePermission, selectedRows }) => (
   <GridToolbarContainer>
@@ -177,6 +178,7 @@ const VoterRegistrations = () => {
     notify_voters: true,
   });
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
 
   const canView = hasPermission('VoterRegistrations', 'view');
@@ -311,8 +313,15 @@ const VoterRegistrations = () => {
     }
   };
 
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setFormError('');
+    setEditingRegistration(null);
+  };
+
   const handleAdd = () => {
     setEditingRegistration(null);
+    setFormError('');
     setFormData({
       voter_id: '',
       election_id: '',
@@ -328,6 +337,7 @@ const VoterRegistrations = () => {
 
   const handleEdit = (registration) => {
     setEditingRegistration(registration);
+    setFormError('');
     setFormData({
       voter_id: registration.voter_id || '',
       election_id: registration.election_id || '',
@@ -347,7 +357,7 @@ const VoterRegistrations = () => {
       setSelectedRegistration(response.data);
       setDetailsDialogOpen(true);
     } catch (error) {
-      setError('Failed to load registration details');
+      setError(capitalizeError('Failed to load registration details'));
     }
   };
 
@@ -360,7 +370,7 @@ const VoterRegistrations = () => {
         loadRegistrations();
         loadStats();
       } catch (error) {
-        setError('Failed to delete registration');
+        setError(capitalizeError('Failed to delete registration'));
       }
     }
   };
@@ -399,7 +409,7 @@ const VoterRegistrations = () => {
       loadRegistrations();
       loadStats();
     } catch (error) {
-      setError('Failed to approve registration');
+      setError(capitalizeError('Failed to approve registration'));
     }
   };
 
@@ -411,7 +421,7 @@ const VoterRegistrations = () => {
       loadRegistrations();
       loadStats();
     } catch (error) {
-      setError('Failed to reject registration');
+      setError(capitalizeError('Failed to reject registration'));
     }
   };
 
@@ -427,13 +437,13 @@ const VoterRegistrations = () => {
       loadRegistrations();
       loadStats();
     } catch (error) {
-      setError('Failed to bulk approve registrations');
+      setError(capitalizeError('Failed to bulk approve registrations'));
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setSuccess('');
 
     try {
@@ -448,7 +458,7 @@ const VoterRegistrations = () => {
       loadRegistrations();
       loadStats();
     } catch (error) {
-      setError((error.response?.data?.error) || 'Operation failed');
+      setFormError(capitalizeError((error.response?.data?.error) || 'Operation failed'));
     }
   };
 
@@ -801,7 +811,7 @@ const VoterRegistrations = () => {
       {/* Add/Edit Dialog */}
       <Dialog 
         open={dialogOpen} 
-        onClose={() => setDialogOpen(false)}
+        onClose={handleCloseDialog}
         maxWidth="md"
         fullWidth
       >
@@ -810,6 +820,7 @@ const VoterRegistrations = () => {
         </DialogTitle>
         <form onSubmit={handleSubmit}>
           <DialogContent>
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
                 <FormControl fullWidth required>

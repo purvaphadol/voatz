@@ -132,7 +132,7 @@ def create_role():
         return error[0], error[1]
 
     role_name = cleaned_data['role_name']
-    dept_id = data.get('department_id')
+    dept_id = data.get('department_id') if data and data.get('department_id') else None
     is_super_admin = bool(data.get('is_super_admin', False))
 
     if dept_id:
@@ -141,12 +141,18 @@ def create_role():
         if dept_error:
             return dept_error[0], dept_error[1]
 
-    if Role.query.filter_by(
-        role_name=role_name,
-        department_id=dept_id,
-        company_id=company_id
-    ).filter(Role.status != STATUS_INACTIVE).first():
-        return jsonify({'error': 'Role name already exists in this department'}), 400
+    existing_query = Role.query.filter(
+        Role.role_name.ilike(role_name),
+        Role.company_id == company_id,
+        Role.status == STATUS_ACTIVE
+    )
+    if dept_id:
+        existing_query = existing_query.filter(Role.department_id == dept_id)
+    else:
+        existing_query = existing_query.filter(Role.department_id.is_(None))
+
+    if existing_query.first():
+        return jsonify({'error': 'Role name already exists'}), 400
 
     role = Role()
     role.role_name = role_name
@@ -165,26 +171,28 @@ def create_role():
 @roles_bp.route('/<int:role_id>', methods=['GET'])
 @require_permission('Roles', 'view')
 def get_role(role_id):
-    """Retrieve a single role.  STATUS_DEACTIVATED records are never returned."""
+    """Retrieve a single role by ID.
+
+    Regular users may only view roles in their company. Platform
+    Administrators may view any role. STATUS_DEACTIVATED records are
+    never returned.
+    """
     if is_administrator():
-        role = Role.query.outerjoin(Department).filter(
-            Role.id == role_id,
-            Role.status != STATUS_INACTIVE,
-            Role.status != STATUS_DEACTIVATED,
+        role = Role.query.filter_by(id=role_id).filter(
+            Role.status != STATUS_INACTIVE
         ).first_or_404()
     else:
         company_id = get_current_company_id()
-        role = Role.query.outerjoin(Department).filter(
-            Role.id == role_id,
-            Role.company_id == company_id,
-            Role.status != STATUS_INACTIVE,
-            Role.status != STATUS_DEACTIVATED,
+        role = Role.query.filter_by(id=role_id, company_id=company_id).filter(
+            Role.status != STATUS_INACTIVE
         ).first_or_404()
+
     return jsonify({
         'id': role.id,
         'role_name': role.role_name,
         'description': role.description or '',
         'company_id': role.company_id,
+        'company_name': role.company.company_name if role.company else None,
         'department_id': role.department_id,
         'department_name': role.department.department_name if role.department else None,
         'created_at': role.created_at.isoformat() if role.created_at else None,
@@ -222,28 +230,39 @@ def update_role(role_id):
     # Guard: the protected Company Super Admin role cannot be renamed or
     # moved to a different department.
     if role.is_super_admin:
-        if 'role_name' in cleaned_data or 'department_id' in cleaned_data:
+        if 'role_name' in cleaned_data or 'department_id' in data:
             return jsonify({
                 'error': 'The Company Super Admin role cannot be renamed '
                          'or reassigned to a different department'
             }), 403
 
-    if 'department_id' in cleaned_data:
-        department = Department.query.filter_by(
-            id=cleaned_data['department_id'], company_id=company_id
-        ).first()
-        dept_error = validate_department_active(department)
-        if dept_error:
-            return dept_error[0], dept_error[1]
-        role.department_id = cleaned_data['department_id']
+    if 'department_id' in data:
+        dept_id_val = data['department_id'] if data['department_id'] else None
+        if dept_id_val:
+            department = Department.query.filter_by(
+                id=dept_id_val, company_id=company_id
+            ).first()
+            dept_error = validate_department_active(department)
+            if dept_error:
+                return dept_error[0], dept_error[1]
+            role.department_id = dept_id_val
+        else:
+            role.department_id = None
 
     if 'role_name' in cleaned_data:
-        existing_role = Role.query.filter_by(
-            role_name=cleaned_data['role_name'],
-            department_id=role.department_id
-        ).filter(Role.status != STATUS_INACTIVE).first()
-        if existing_role and existing_role.id != role_id:
-            return jsonify({'error': 'Role name already exists in this department'}), 400
+        existing_query = Role.query.filter(
+            Role.role_name.ilike(cleaned_data['role_name']),
+            Role.company_id == company_id,
+            Role.status == STATUS_ACTIVE,
+            Role.id != role_id
+        )
+        if role.department_id:
+            existing_query = existing_query.filter(Role.department_id == role.department_id)
+        else:
+            existing_query = existing_query.filter(Role.department_id.is_(None))
+
+        if existing_query.first():
+            return jsonify({'error': 'Role name already exists'}), 400
         role.role_name = cleaned_data['role_name']
 
     if 'description' in cleaned_data:

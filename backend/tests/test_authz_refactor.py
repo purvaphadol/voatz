@@ -600,7 +600,7 @@ record("10.20", "Company B Super Admin list-depts → 200, no Company A rows", 2
 r_get_dept_b = requests.get(f"{BASE}/departments/{B_DEPT_ID}", headers=ah(A_SUPER_TOKEN))
 record("10.21", "Company A Super Admin cannot get Company B dept → 404", 404, r_get_dept_b)
 
-r_put_dept_b = requests.put(f"{BASE}/departments/{B_DEPT_ID}", headers=ah(A_SUPER_TOKEN), json={"department_name": "HackName"})
+r_put_dept_b = requests.put(f"{BASE}/departments/{B_DEPT_ID}", headers=ah(A_SUPER_TOKEN), json={"department_name": "TestDeptUpdate"})
 record("10.22", "Company A Super Admin cannot update Company B dept → 404", 404, r_put_dept_b)
 
 r_del_dept_b = requests.delete(f"{BASE}/departments/{B_DEPT_ID}", headers=ah(A_SUPER_TOKEN))
@@ -667,7 +667,7 @@ r_get_mod_b = requests.get(f"{BASE}/modules/{mod_a_id}", headers=ah(A_SUPER_TOKE
 record("11.3", "Company A Super Admin get master system module → 200", 200, r_get_mod_b)
 
 # 11.4 - Company A Super Admin cannot update master system module (non-admin update)
-r_put_mod_b = requests.put(f"{BASE}/modules/{mod_a_id}", headers=ah(A_SUPER_TOKEN), json={"module_name": "HackName"})
+r_put_mod_b = requests.put(f"{BASE}/modules/{mod_a_id}", headers=ah(A_SUPER_TOKEN), json={"module_name": "TestModUpdate"})
 record("11.4", "Company A Super Admin can update master system module if permitted → 200 or 403", r_put_mod_b.status_code, r_put_mod_b)
 
 # 11.5 - Company A Super Admin delete system module (check permission)
@@ -679,15 +679,15 @@ r_act_a = requests.get(f"{BASE}/module-actions/module/{mod_a_id}/actions", heade
 record("11.6", "Company A Super Admin get-module-actions for system module → 200", 200, r_act_a)
 
 # 11.8 - Company A Super Admin cannot update Company B module action
-r_put_act_b = requests.put(f"{BASE}/module-actions/action/{act_b_id}", headers=ah(A_SUPER_TOKEN), json={"action_name": "HackAct"})
+r_put_act_b = requests.put(f"{BASE}/module-actions/action/{act_b_id}", headers=ah(A_SUPER_TOKEN), json={"action_name": "TestActUpdate"})
 record("11.8", "Company A Super Admin cannot update Company B module action → 404", 404, r_put_act_b)
 
 # 11.8b - Company A Super Admin cannot create action on Company B module
-r_post_act_b = requests.post(f"{BASE}/module-actions/module/{mod_b_id}/actions", headers=ah(A_SUPER_TOKEN), json={"action_name": "HackAct", "action_url": "/hack"})
+r_post_act_b = requests.post(f"{BASE}/module-actions/module/{mod_b_id}/actions", headers=ah(A_SUPER_TOKEN), json={"action_name": "TestActUpdate", "action_url": "/test"})
 record("11.8b", "Company A Super Admin cannot create action on Company B module → 404", 404, r_post_act_b)
 
 # 11.8c - Company A Super Admin cannot bulk create actions on Company B module
-r_bulk_act_b = requests.post(f"{BASE}/module-actions/actions/bulk", headers=ah(A_SUPER_TOKEN), json={"module_id": mod_b_id, "actions": [{"action_name": "HackBulk", "action_url": "/bulk"}]})
+r_bulk_act_b = requests.post(f"{BASE}/module-actions/actions/bulk", headers=ah(A_SUPER_TOKEN), json={"module_id": mod_b_id, "actions": [{"action_name": "TestBulkUpdate", "action_url": "/bulk"}]})
 record("11.8c", "Company A Super Admin cannot bulk create actions on Company B module → 404", 404, r_bulk_act_b)
 
 # 11.8d - Company A Super Admin cannot delete Company B module action

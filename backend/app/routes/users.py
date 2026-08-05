@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash
 from app import db
@@ -67,7 +67,7 @@ def list_users():
         ).join(Company).options(
             joinedload(User.company), 
             joinedload(User.department)
-        ).filter(Company.status != STATUS_INACTIVE)
+        ).filter(Company.status == STATUS_ACTIVE)
 
         if filter_company_id:
             try:
@@ -84,7 +84,7 @@ def list_users():
         ).join(Company).options(
             joinedload(User.company), 
             joinedload(User.department)
-        ).filter(Company.status != STATUS_INACTIVE)
+        ).filter(Company.status == STATUS_ACTIVE)
 
     query = query.order_by(User.updated_at.desc(), User.created_at.desc())
 
@@ -233,10 +233,14 @@ def update_user(user_id):
         
     if 'email' in cleaned_data:
         email = cleaned_data['email']
-        # Check if email already exists within active users in the company (excluding current user)
-        existing_user = User.query.filter_by(email=email, company_id=company_id).filter(User.status == STATUS_ACTIVE).first()
-        if existing_user and existing_user.id != user_id:
-            return jsonify({'error': 'Email already exists in this company'}), 400
+        # Check if email already exists within active users (excluding current user)
+        existing_user = User.query.filter(
+            User.email.ilike(email),
+            User.status == STATUS_ACTIVE,
+            User.id != user_id
+        ).first()
+        if existing_user:
+            return jsonify({'error': 'Email already exists'}), 400
         user.email = email
         
     if data.get('password'):
@@ -255,6 +259,13 @@ def update_user(user_id):
         
     set_audit_fields(user, is_create=False)
     
+    try:
+        db.session.flush()
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error during user update flush: {str(e)}")
+        return jsonify({'error': f'Failed to update user: {str(e)}'}), 400
+
     return safe_commit((jsonify({'message': 'User updated'}), 200), 'Internal server error during user update')
 
 @users_bp.route('/<int:user_id>', methods=['DELETE'])
@@ -295,11 +306,10 @@ def delete_user(user_id):
         if is_super_admin:
             return jsonify({"error": "Super Admin users cannot be deleted"}), 403
     
-    # Do NOT delete related user role mappings physically for now
-    # UserRoleMapping.query.filter_by(user_id=user_id).delete()
-    
     # Soft delete instead of hard delete
     user.status = STATUS_INACTIVE
+    if not user.email.endswith(f"__del_{user.id}"):
+        user.email = f"{user.email}__del_{user.id}"
     set_audit_fields(user, is_create=False)
     
     return safe_commit((jsonify({'message': 'User deleted'}), 200), 'Internal server error during user deletion')

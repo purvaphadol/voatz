@@ -56,7 +56,7 @@ import { electionsAPI, companiesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import { useAuth } from '../../../contexts/AuthContext';
 import { showDeleteConfirm, showConfirmDialog } from '../../../utils/swal';
-import { validateNonNumericText, validateDateRange } from '../../../utils/validators';
+import { validateNonNumericText, validateDateRange, capitalizeError } from '../../../utils/validators';
 import ElectionResults from './ElectionResults';
 import ElectionWorkflow from './ElectionWorkflow';
 
@@ -118,6 +118,7 @@ const Elections = () => {
     paper_trail_required: true,
   });
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
 
   const canView = hasPermission('Elections', 'view');
@@ -170,8 +171,15 @@ const Elections = () => {
     }
   };
 
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setFormError('');
+    setEditingElection(null);
+  };
+
   const handleAdd = () => {
     setEditingElection(null);
+    setFormError('');
     setFormData({
       company_id: '',
       title: '',
@@ -202,6 +210,7 @@ const Elections = () => {
 
   const handleEdit = (election) => {
     setEditingElection(election);
+    setFormError('');
     setFormData({
       company_id: election.company_id || '',
       title: election.title || '',
@@ -236,7 +245,7 @@ const Elections = () => {
       setSelectedElection(response.data);
       setDetailsDialogOpen(true);
     } catch (error) {
-      setError('Failed to load election details');
+      setError(capitalizeError('Failed to load election details'));
     }
   };
 
@@ -265,7 +274,7 @@ const Elections = () => {
         loadElections();
         loadStats();
       } catch (error) {
-        setError('Failed to delete election');
+        setError(capitalizeError('Failed to delete election'));
       }
     }
   };
@@ -276,7 +285,7 @@ const Elections = () => {
       setSuccess('Election activated successfully');
       loadElections();
     } catch (error) {
-      setError('Failed to activate election');
+      setError(capitalizeError('Failed to activate election'));
     }
   };
 
@@ -294,7 +303,7 @@ const Elections = () => {
         setSuccess('Results published successfully');
         loadElections();
       } catch (error) {
-        setError('Failed to publish results');
+        setError(capitalizeError('Failed to publish results'));
       }
     }
   };
@@ -321,26 +330,26 @@ const Elections = () => {
         setSuccess(`Election status changed to ${statusLabels[newStatus]} successfully`);
         loadElections();
       } catch (error) {
-        setError('Failed to change election status');
+        setError(capitalizeError('Failed to change election status'));
       }
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setSuccess('');
 
     const titleErr = validateNonNumericText(formData.title, 'Election title', 3, 150);
     if (titleErr) {
-      setError(titleErr);
+      setFormError(capitalizeError(titleErr));
       return;
     }
 
     if (formData.start_date && formData.end_date) {
       const dateErr = validateDateRange(formData.start_date, formData.end_date);
       if (dateErr) {
-        setError(dateErr);
+        setFormError(capitalizeError(dateErr));
         return;
       }
     }
@@ -357,7 +366,7 @@ const Elections = () => {
       loadElections();
       loadStats();
     } catch (error) {
-      setError((error.response?.data?.error) || 'Operation failed');
+      setFormError(capitalizeError((error.response?.data?.error) || 'Operation failed'));
     }
   };
 
@@ -678,7 +687,7 @@ const Elections = () => {
       {/* Add/Edit Dialog */}
       <Dialog 
         open={dialogOpen} 
-        onClose={() => setDialogOpen(false)}
+        onClose={handleCloseDialog}
         maxWidth="lg"
         fullWidth
       >
@@ -687,6 +696,7 @@ const Elections = () => {
         </DialogTitle>
         <form onSubmit={handleSubmit}>
           <DialogContent>
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             <Grid container spacing={2}>
               {/* Basic Information */}
               <Grid item xs={12}>

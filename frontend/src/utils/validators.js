@@ -102,3 +102,16 @@ export const validateDateRange = (startDate, endDate) => {
   }
   return null;
 };
+
+/**
+ * Capitalizes the first letter of an error message string.
+ * @param {string} msg
+ * @returns {string}
+ */
+export const capitalizeError = (msg) => {
+  if (!msg || typeof msg !== 'string') return '';
+  const trimmed = msg.trim();
+  if (!trimmed) return '';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+};
+

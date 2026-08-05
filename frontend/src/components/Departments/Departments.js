@@ -35,7 +35,7 @@ import { departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { showDeleteConfirm } from '../../utils/swal';
-import { validateNonNumericText } from '../../utils/validators';
+import { validateNonNumericText, capitalizeError } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -71,6 +71,7 @@ const Departments = () => {
     company_id: '',
   });
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchInput, setSearchInput] = useState('');
@@ -127,6 +128,7 @@ const Departments = () => {
   const handleAdd = () => {
     setEditingDepartment(null);
     setViewMode(false);
+    setFormError('');
     setFormData({
       department_name: '',
       description: '',
@@ -138,6 +140,7 @@ const Departments = () => {
   const handleEdit = (department) => {
     setEditingDepartment(department);
     setViewMode(false);
+    setFormError('');
     setFormData({
       department_name: department.department_name,
       company_id: department.company_id || '',
@@ -149,6 +152,7 @@ const Departments = () => {
   const handleView = (department) => {
     setEditingDepartment(department);
     setViewMode(true);
+    setFormError('');
     setFormData({
       department_name: department.department_name,
       company_id: department.company_id || '',
@@ -166,8 +170,10 @@ const Departments = () => {
         loadDepartments();
       } catch (error) {
         setError(
-          (error.response && error.response.data && error.response.data.error)
-          || 'Failed to delete department'
+          capitalizeError(
+            (error.response && error.response.data && error.response.data.error)
+            || 'Failed to delete department'
+          )
         );
       }
     }
@@ -175,12 +181,12 @@ const Departments = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setSuccess('');
 
     const nameErr = validateNonNumericText(formData.department_name, 'Department name', 2, 100);
     if (nameErr) {
-      setError(nameErr);
+      setFormError(capitalizeError(nameErr));
       return;
     }
 
@@ -206,7 +212,7 @@ const Departments = () => {
       setDialogOpen(false);
       loadDepartments();
     } catch (error) {
-      setError((error.response && error.response.data && error.response.data.error) || 'Operation failed');
+      setFormError(capitalizeError((error.response && error.response.data && error.response.data.error) || 'Operation failed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -214,7 +220,7 @@ const Departments = () => {
 
   const handleCloseDialog = () => {
     setDialogOpen(false);
-    setError('');
+    setFormError('');
     setEditingDepartment(null);
     setViewMode(false);
   };
@@ -373,7 +379,7 @@ const Departments = () => {
         </DialogTitle>
         <form onSubmit={handleSubmit}>
           <DialogContent>
-            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             
             <TextField
               autoFocus

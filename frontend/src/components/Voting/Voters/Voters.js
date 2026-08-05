@@ -75,7 +75,7 @@ import { votersAPI, usersAPI, companiesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import { useAuth } from '../../../contexts/AuthContext';
 import { showDeleteConfirm } from '../../../utils/swal';
-import { validateNonNumericText, validateEmail, validatePhone } from '../../../utils/validators';
+import { validateNonNumericText, validateEmail, validatePhone, capitalizeError } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -169,6 +169,7 @@ const Voters = () => {
   });
   const [createLinked, setCreateLinked] = useState(false);
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
 
   const canView = hasPermission('Voters', 'view');
@@ -233,9 +234,16 @@ const Voters = () => {
   };
 
   // Enhanced handler functions
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setFormError('');
+    setEditingVoter(null);
+  };
+
   const handleAdd = () => {
     setEditingVoter(null);
     setCreateLinked(false);
+    setFormError('');
     setFormData({
       company_id: '',
       user_id: '',
@@ -267,6 +275,7 @@ const Voters = () => {
   const handleEdit = (voter) => {
     setEditingVoter(voter);
     setCreateLinked(voter.user_id !== null);
+    setFormError('');
     setFormData({
       company_id: voter.company_id || '',
       user_id: voter.user_id || '',
@@ -302,7 +311,7 @@ const Voters = () => {
       setActiveTab(0);
       setDetailsDialogOpen(true);
     } catch (error) {
-      setError('Failed to load voter details');
+      setError(capitalizeError('Failed to load voter details'));
     }
   };
 
@@ -315,7 +324,7 @@ const Voters = () => {
         loadVoters();
         loadStats();
       } catch (error) {
-        setError('Failed to delete voter');
+        setError(capitalizeError('Failed to delete voter'));
       }
     }
   };
@@ -372,16 +381,19 @@ const Voters = () => {
       loadVoters();
       setVerificationDialogOpen(false);
     } catch (error) {
-      setError(`Failed to update ${verificationType} verification`);
+      setError(capitalizeError(`Failed to update ${verificationType} verification`));
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setFormError('');
+    setSuccess('');
+
     if (formData.name) {
       const nameErr = validateNonNumericText(formData.name, 'Voter name', 2, 100);
       if (nameErr) {
-        setError(nameErr);
+        setFormError(capitalizeError(nameErr));
         return;
       }
     }
@@ -389,7 +401,7 @@ const Voters = () => {
     if (formData.email) {
       const emailErr = validateEmail(formData.email);
       if (emailErr) {
-        setError(emailErr);
+        setFormError(capitalizeError(emailErr));
         return;
       }
     }
@@ -397,13 +409,13 @@ const Voters = () => {
     if (formData.phone_number) {
       const phoneErr = validatePhone(formData.phone_number);
       if (phoneErr) {
-        setError(phoneErr);
+        setFormError(capitalizeError(phoneErr));
         return;
       }
     }
 
     if (isPlatformAdmin && !editingVoter && !formData.company_id) {
-      setError('Please select a company');
+      setFormError(capitalizeError('Please select a company'));
       return;
     }
 
@@ -419,7 +431,7 @@ const Voters = () => {
       loadVoters();
       loadStats();
     } catch (error) {
-      setError((error.response?.data?.error) || 'Operation failed');
+      setFormError(capitalizeError((error.response?.data?.error) || 'Operation failed'));
     }
   };
 
@@ -722,10 +734,9 @@ const Voters = () => {
         />
       </Paper>
 
-      {/* Add/Edit Dialog */}
       <Dialog 
         open={dialogOpen} 
-        onClose={() => setDialogOpen(false)}
+        onClose={handleCloseDialog}
         maxWidth="md"
         fullWidth
       >
@@ -734,6 +745,7 @@ const Voters = () => {
         </DialogTitle>
         <form onSubmit={handleSubmit}>
           <DialogContent>
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             <Grid container spacing={2}>
               {/* Company Selection Field */}
               <Grid item xs={12} sm={6}>

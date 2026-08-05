@@ -79,7 +79,7 @@ import {
 import { ballotsAPI, electionsAPI, candidatesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import { showDeleteConfirm } from '../../../utils/swal';
-import { validateNonNumericText } from '../../../utils/validators';
+import { validateNonNumericText, capitalizeError } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -161,6 +161,7 @@ const Ballots = () => {
     },
   });
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
 
   const canView = hasPermission('Ballots', 'view');
@@ -216,8 +217,15 @@ const Ballots = () => {
     }
   };
 
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setFormError('');
+    setEditingBallot(null);
+  };
+
   const handleAdd = () => {
     setEditingBallot(null);
+    setFormError('');
     setFormData({
       election_id: '',
       title: '',
@@ -246,6 +254,7 @@ const Ballots = () => {
 
   const handleEdit = (ballot) => {
     setEditingBallot(ballot);
+    setFormError('');
     setFormData({
       election_id: ballot.election_id || '',
       title: ballot.title || '',
@@ -278,7 +287,7 @@ const Ballots = () => {
       setSelectedBallot(response.data);
       setDetailsDialogOpen(true);
     } catch (error) {
-      setError('Failed to load ballot details');
+      setError(capitalizeError('Failed to load ballot details'));
     }
   };
 
@@ -288,7 +297,7 @@ const Ballots = () => {
       await loadBallotCandidates(ballot.id);
       setCandidatesDialogOpen(true);
     } catch (error) {
-      setError('Failed to load ballot candidates');
+      setError(capitalizeError('Failed to load ballot candidates'));
     }
   };
 
@@ -301,7 +310,7 @@ const Ballots = () => {
         loadBallots();
         loadStats();
       } catch (error) {
-        setError('Failed to delete ballot');
+        setError(capitalizeError('Failed to delete ballot'));
       }
     }
   };
@@ -312,7 +321,7 @@ const Ballots = () => {
       setSuccess('Ballot published successfully');
       loadBallots();
     } catch (error) {
-      setError('Failed to publish ballot');
+      setError(capitalizeError('Failed to publish ballot'));
     }
   };
 
@@ -322,7 +331,7 @@ const Ballots = () => {
       setSuccess('Ballot unpublished successfully');
       loadBallots();
     } catch (error) {
-      setError('Failed to unpublish ballot');
+      setError(capitalizeError('Failed to unpublish ballot'));
     }
   };
 
@@ -335,7 +344,7 @@ const Ballots = () => {
       loadBallots();
       loadStats();
     } catch (error) {
-      setError('Failed to duplicate ballot');
+      setError(capitalizeError('Failed to duplicate ballot'));
     }
   };
 
@@ -607,14 +616,17 @@ const Ballots = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setFormError('');
+    setSuccess('');
+
     const titleErr = validateNonNumericText(formData.title, 'Ballot title', 3, 200);
     if (titleErr) {
-      setError(titleErr);
+      setFormError(capitalizeError(titleErr));
       return;
     }
 
     if (formData.min_selections > formData.max_selections) {
-      setError('Minimum selections cannot exceed maximum selections');
+      setFormError(capitalizeError('Minimum selections cannot exceed maximum selections'));
       return;
     }
 
@@ -630,7 +642,7 @@ const Ballots = () => {
       loadBallots();
       loadStats();
     } catch (error) {
-      setError((error.response?.data?.error) || 'Operation failed');
+      setFormError(capitalizeError((error.response?.data?.error) || 'Operation failed'));
     }
   };
 
@@ -730,7 +742,7 @@ const Ballots = () => {
       {/* Enhanced Add/Edit Dialog */}
       <Dialog 
         open={dialogOpen} 
-        onClose={() => setDialogOpen(false)}
+        onClose={handleCloseDialog}
         maxWidth="lg"
         fullWidth
       >
@@ -739,6 +751,7 @@ const Ballots = () => {
         </DialogTitle>
         <form onSubmit={handleSubmit}>
           <DialogContent>
+            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)}>
               <Tab label="Basic Information" icon={<ViewIcon />} />
               <Tab label="Voting Rules" icon={<RulesIcon />} />
