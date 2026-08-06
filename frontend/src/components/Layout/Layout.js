@@ -145,36 +145,45 @@ const Layout = ({ children }) => {
       
       <List>
         {(() => {
-          // Create a map of hardcoded modules for icon and path mapping
+          const normalizeKey = (str) => {
+            if (!str) return '';
+            return str.toString().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+          };
+
           const hardcodedModuleMap = {};
           navigationItems.forEach((item) => {
-            hardcodedModuleMap[item.permission] = {
-              path: item.path,
-              label: item.label,
-              icon: item.icon
-            };
+            const keys = [
+              item.permission,
+              item.path.replace('/', ''),
+              normalizeKey(item.permission),
+              normalizeKey(item.path.replace('/', ''))
+            ];
+            keys.forEach(k => {
+              if (k) hardcodedModuleMap[k] = item;
+            });
           });
 
-          // Use the backend menu which is already sorted by order_index
-          // The backend menu only includes active modules with proper ordering
           const allMenuItems = [];
           
           menu.forEach((moduleItem) => {
-            // Check if user has permission for this module
-            if (hasPermission(moduleItem.module, 'view')) {
-              if (hardcodedModuleMap[moduleItem.module]) {
-                // Use hardcoded item (icon, path, label)
-                const hardcodedItem = hardcodedModuleMap[moduleItem.module];
+            if (hasPermission(moduleItem.module, 'view') || hasPermission(moduleItem.route_name || '', 'view') || hasPermission(moduleItem.route || '', 'view')) {
+              const hardcodedItem = 
+                hardcodedModuleMap[moduleItem.module] ||
+                (moduleItem.route_name && hardcodedModuleMap[moduleItem.route_name]) ||
+                (moduleItem.route && hardcodedModuleMap[moduleItem.route]) ||
+                hardcodedModuleMap[normalizeKey(moduleItem.module)] ||
+                (moduleItem.route_name && hardcodedModuleMap[normalizeKey(moduleItem.route_name)]);
+
+              if (hardcodedItem) {
                 allMenuItems.push({
                   type: 'hardcoded',
                   path: hardcodedItem.path,
-                  label: hardcodedItem.label,
+                  label: moduleItem.module || hardcodedItem.label,
                   icon: hardcodedItem.icon,
                   module: moduleItem.module,
                   order_index: moduleItem.order_index
                 });
               } else {
-                // Pure dynamic module
                 allMenuItems.push({
                   type: 'dynamic',
                   path: `/${moduleItem.route}`,

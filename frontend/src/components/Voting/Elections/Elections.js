@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -55,7 +55,7 @@ import {
 import { electionsAPI, companiesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import { useAuth } from '../../../contexts/AuthContext';
-import { showDeleteConfirm, showConfirmDialog } from '../../../utils/swal';
+import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../../utils/swal';
 import { validateNonNumericText, validateDateRange, capitalizeError } from '../../../utils/validators';
 import ElectionResults from './ElectionResults';
 import ElectionWorkflow from './ElectionWorkflow';
@@ -120,6 +120,14 @@ const Elections = () => {
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const dialogContentRef = useRef(null);
+
+  useEffect(() => {
+    if (formError && dialogContentRef.current) {
+      dialogContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [formError]);
 
   const canView = hasPermission('Elections', 'view');
   const canCreate = hasPermission('Elections', 'create');
@@ -265,16 +273,44 @@ const Elections = () => {
     setSuccess(`Election status changed to ${newStatus} successfully`);
   };
 
-  const handleDelete = async (electionId) => {
-    const confirmed = await showDeleteConfirm('this election');
-    if (confirmed) {
+  const handleDelete = async (electionId, force = false) => {
+    if (force) {
+      const finalConfirmed = await showDeleteConfirm('this election');
+      if (!finalConfirmed) return;
       try {
-        await electionsAPI.delete(electionId);
-        setSuccess('Election deleted successfully');
+        await electionsAPI.delete(electionId, { force: true });
+        await showSuccessAlert('Election and associated ballots/registrations force-deleted successfully');
         loadElections();
         loadStats();
       } catch (error) {
-        setError(capitalizeError('Failed to delete election'));
+        const errMsg = (error.response?.data?.error) || 'Failed to delete election';
+        showErrorAlert(capitalizeError(errMsg));
+      }
+      return;
+    }
+
+    try {
+      await electionsAPI.delete(electionId);
+      await showSuccessAlert('Election deleted successfully');
+      loadElections();
+      loadStats();
+    } catch (error) {
+      const errData = error.response && error.response.data;
+      if (errData && errData.can_force) {
+        let rawError = capitalizeError(errData.error || '');
+        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
+
+        const forceRequested = await showForceDeleteConfirm({
+          title: 'Active Dependencies Detected',
+          errorText: cleanedError,
+          confirmMessage: 'Are you sure you want to delete this election (and all related ballot and voter registration data)?',
+        });
+        if (forceRequested) {
+          handleDelete(electionId, true);
+        }
+      } else {
+        const errMsg = (errData && errData.error) || 'Failed to delete election';
+        showErrorAlert(capitalizeError(errMsg));
       }
     }
   };
@@ -695,7 +731,7 @@ const Elections = () => {
           {editingElection ? 'Edit Election' : 'Create New Election'}
         </DialogTitle>
         <form onSubmit={handleSubmit}>
-          <DialogContent>
+          <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             <Grid container spacing={2}>
               {/* Basic Information */}

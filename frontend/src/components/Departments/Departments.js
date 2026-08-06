@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -34,7 +34,7 @@ import {
 import { departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { showDeleteConfirm } from '../../utils/swal';
+import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import { validateNonNumericText, capitalizeError } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
@@ -77,6 +77,14 @@ const Departments = () => {
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
+
+  const dialogContentRef = useRef(null);
+
+  useEffect(() => {
+    if (formError && dialogContentRef.current) {
+      dialogContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [formError]);
 
   const canView = hasPermission('Departments', 'view');
   const canCreate = hasPermission('Departments', 'create');
@@ -161,20 +169,45 @@ const Departments = () => {
     setDialogOpen(true);
   };
 
-  const handleDelete = async (departmentId) => {
-    const confirmed = await showDeleteConfirm('this department');
-    if (confirmed) {
+  const handleDelete = async (departmentId, force = false) => {
+    if (force) {
+      const finalConfirmed = await showDeleteConfirm('this department');
+      if (!finalConfirmed) return;
       try {
-        await departmentsAPI.delete(departmentId);
-        setSuccess('Department deleted successfully');
+        await departmentsAPI.delete(departmentId, { force: true });
+        await showSuccessAlert('Department deleted successfully. Assigned users were unassigned and department roles deactivated.');
         loadDepartments();
       } catch (error) {
-        setError(
-          capitalizeError(
-            (error.response && error.response.data && error.response.data.error)
-            || 'Failed to delete department'
-          )
-        );
+        const errMsg = (error.response?.data?.error) || 'Failed to delete department';
+        showErrorAlert(capitalizeError(errMsg));
+      }
+      return;
+    }
+
+    const confirmed = await showDeleteConfirm('this department');
+    if (!confirmed) return;
+
+    try {
+      await departmentsAPI.delete(departmentId);
+      await showSuccessAlert('Department deleted successfully');
+      loadDepartments();
+    } catch (error) {
+      const errData = error.response && error.response.data;
+      if (errData && errData.can_force) {
+        let rawError = capitalizeError(errData.error || '');
+        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
+
+        const forceRequested = await showForceDeleteConfirm({
+          title: 'Active Dependencies Detected',
+          errorText: cleanedError,
+          confirmMessage: 'Are you sure you want to delete this department? Assigned users will be unassigned from this department, and department roles will be deactivated.',
+        });
+        if (forceRequested) {
+          handleDelete(departmentId, true);
+        }
+      } else {
+        const errMsg = (errData && errData.error) || 'Failed to delete department';
+        showErrorAlert(capitalizeError(errMsg));
       }
     }
   };
@@ -378,7 +411,7 @@ const Departments = () => {
           {viewMode ? 'View Department' : editingDepartment ? 'Edit Department' : 'Add New Department'}
         </DialogTitle>
         <form onSubmit={handleSubmit}>
-          <DialogContent>
+          <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             
             <TextField

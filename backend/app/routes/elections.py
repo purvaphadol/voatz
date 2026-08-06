@@ -10,6 +10,7 @@ from app.utils import get_current_company_id, require_permission, get_current_us
 from app.utils.validators import parse_pagination, validate_election_input
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
+from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE, STATUS_DEACTIVATED
 from app.utils.query_helpers import get_active_elections_query, get_election_registrations_query
 from sqlalchemy import or_, and_
 from datetime import datetime, timedelta, timezone
@@ -374,15 +375,69 @@ def delete_election(election_id):
     if election.status == 'active':
         return jsonify({'error': 'Cannot delete active elections'}), 400
     
-    # Check if there are votes cast
+    # Check if there are votes cast (cannot delete election with cast votes under any circumstances)
     vote_count = Vote.query.filter_by(election_id=election_id).count()
     if vote_count > 0:
         return jsonify({'error': 'Cannot delete elections with votes already cast'}), 400
-    
+
+    force = request.args.get('force', 'false').lower() == 'true'
+
+    from app.models.voter_registration import VoterRegistration
+    from app.models.ballot import Ballot
+    from app.models.candidate import Candidate
+
+    active_regs = VoterRegistration.query.filter_by(election_id=election_id).filter(VoterRegistration.status.notin_(['inactive', 'cancelled', 'deleted'])).count()
+    active_ballots = Ballot.query.filter_by(election_id=election_id, is_active=True).count()
+    active_candidates = Candidate.query.join(Ballot).filter(Ballot.election_id == election_id).filter(Candidate.status != STATUS_INACTIVE).count()
+
+    total_active_deps = active_regs + active_ballots + active_candidates
+
+    if total_active_deps > 0 and not force:
+        parts = []
+        if active_regs > 0:
+            parts.append(f"{active_regs} active voter registration(s)")
+        if active_ballots > 0:
+            parts.append(f"{active_ballots} active ballot(s)")
+        if active_candidates > 0:
+            parts.append(f"{active_candidates} candidate(s)")
+
+        deps_str = ", ".join(parts)
+        user_friendly_error = f"Cannot delete election: It currently has {deps_str}. Please cancel or remove these items first."
+
+        return jsonify({
+            'error': user_friendly_error,
+            'can_force': True,
+            'active_dependencies': {
+                'voter_registrations': active_regs,
+                'ballots': active_ballots,
+                'candidates': active_candidates
+            },
+            'message': 'Are you sure you want to delete this election (and all related voter registration, ballot, and candidate data)?'
+        }), 400
+
+    # Deactivate associated entities
+    if active_regs > 0:
+        regs = VoterRegistration.query.filter_by(election_id=election_id).filter(VoterRegistration.status.notin_(['inactive', 'cancelled', 'deleted'])).all()
+        for r in regs:
+            r.status = 'inactive'
+            set_audit_fields(r, is_create=False)
+
+    if active_ballots > 0:
+        ballots = Ballot.query.filter_by(election_id=election_id, is_active=True).all()
+        for b in ballots:
+            b.is_active = False
+            set_audit_fields(b, is_create=False)
+
+    if active_candidates > 0:
+        candidates = Candidate.query.join(Ballot).filter(Ballot.election_id == election_id).filter(Candidate.status != STATUS_INACTIVE).all()
+        for c in candidates:
+            c.status = STATUS_INACTIVE
+            set_audit_fields(c, is_create=False)
+
     # Soft delete by updating status
     election.status = 'cancelled'
     set_audit_fields(election, is_create=False)
-    
+
     return safe_commit(
         (jsonify({'message': 'Election deleted successfully'}), 200),
         'Failed to delete election'

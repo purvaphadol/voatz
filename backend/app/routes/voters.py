@@ -290,10 +290,39 @@ def delete_voter(voter_id):
         company_id = get_current_company_id()
         voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
     
+    # Check if voter has cast votes (cannot delete under any circumstances)
+    from app.models.vote import Vote
+    vote_count = Vote.query.filter_by(voter_id=voter_id).count()
+    if vote_count > 0:
+        return jsonify({'error': 'Cannot delete voter with submitted votes'}), 400
+
+    force = request.args.get('force', 'false').lower() == 'true'
+
+    from app.models.voter_registration import VoterRegistration
+    active_regs = VoterRegistration.query.filter_by(voter_id=voter_id).filter(VoterRegistration.status.notin_(['inactive', 'cancelled', 'deleted'])).count()
+
+    if active_regs > 0 and not force:
+        user_friendly_error = f"Cannot delete voter: It currently has {active_regs} active election registration(s). Please cancel these registrations first."
+        return jsonify({
+            'error': user_friendly_error,
+            'can_force': True,
+            'active_dependencies': {
+                'voter_registrations': active_regs
+            },
+            'message': 'Are you sure you want to delete this voter profile (and cancel all related election registrations)?'
+        }), 400
+
+    # Deactivate active registrations
+    if active_regs > 0:
+        regs = VoterRegistration.query.filter_by(voter_id=voter_id).filter(VoterRegistration.status.notin_(['inactive', 'cancelled', 'deleted'])).all()
+        for r in regs:
+            r.status = 'inactive'
+            set_audit_fields(r, is_create=False)
+
     # Soft delete by updating status
     voter.status = STATUS_INACTIVE
     set_audit_fields(voter, is_create=False)
-    
+
     return safe_commit(
         (jsonify({'message': 'Voter deleted successfully'}), 200),
         'Internal server error during voter deletion'

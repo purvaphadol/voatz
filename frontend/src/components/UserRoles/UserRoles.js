@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -95,6 +95,14 @@ const UserRoles = () => {
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
 
+  const dialogContentRef = useRef(null);
+
+  useEffect(() => {
+    if (formError && dialogContentRef.current) {
+      dialogContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [formError]);
+
   const isPlatformAdmin = currentUser?.is_administrator;
   const canView = hasPermission('UserRoles', 'view');
   const canCreate = hasPermission('UserRoles', 'create');
@@ -189,16 +197,19 @@ const UserRoles = () => {
         setFormRoles([]);
         return;
       }
-      const [deptRes, userRes] = await Promise.all([
+      const [deptRes, userRes, roleRes] = await Promise.all([
         departmentsAPI.getAll({ company_id: companyId }),
         usersAPI.getAll({ company_id: companyId }),
+        rolesAPI.getAll({ company_id: companyId }),
       ]);
       setFormDepartments(deptRes.data.data || []);
       setFormUsers(userRes.data.data || []);
+      setFormRoles(roleRes.data.data || []);
     } catch (err) {
-      console.error('Error loading form departments/users:', err);
+      console.error('Error loading form departments/users/roles:', err);
       setFormDepartments([]);
       setFormUsers([]);
+      setFormRoles([]);
     }
   };
 
@@ -221,16 +232,12 @@ const UserRoles = () => {
       role_id: '' // Clear role selection when department changes
     });
 
-    if (!departmentId) {
-      setFormRoles([]);
-      return;
-    }
-
     try {
-      const response = await rolesAPI.getAll({ 
-        company_id: formData.company_id,
-        department_id: departmentId 
-      });
+      const params = { company_id: formData.company_id };
+      if (departmentId) {
+        params.department_id = departmentId;
+      }
+      const response = await rolesAPI.getAll(params);
       setFormRoles(response.data.data || []);
     } catch (error) {
       console.error('Error loading roles by department:', error);
@@ -576,7 +583,7 @@ const UserRoles = () => {
           </Box>
         </DialogTitle>
         <form onSubmit={handleAssignRole}>
-          <DialogContent>
+          <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             
             {/* 1. Company Field FIRST */}
@@ -631,18 +638,17 @@ const UserRoles = () => {
               </Select>
             </FormControl>
 
-            {/* 3. Department Field SECOND (Scoped to selected Company) */}
+            {/* 3. Department Field (Optional for Company-Wide Roles) */}
             <FormControl fullWidth sx={{ mb: 2 }} disabled={!formData.company_id}>
-              <InputLabel id="ur-form-dept-label">Department *</InputLabel>
+              <InputLabel id="ur-form-dept-label">Department (Optional)</InputLabel>
               <Select
                 labelId="ur-form-dept-label"
                 value={formData.department_id}
                 onChange={(e) => handleFormDepartmentChange(e.target.value)}
-                label="Department *"
-                required
+                label="Department (Optional)"
               >
-                <MenuItem value="" disabled hidden>
-                  {formData.company_id ? 'Select Department' : 'Select Company First'}
+                <MenuItem value="">
+                  <em>None (Company-Wide Role)</em>
                 </MenuItem>
                 {formDepartments.map((department) => (
                   <MenuItem key={department.id} value={department.id}>
@@ -652,8 +658,8 @@ const UserRoles = () => {
               </Select>
             </FormControl>
 
-            {/* 4. Role Field THIRD (Scoped to selected Department) */}
-            <FormControl fullWidth disabled={!formData.department_id}>
+            {/* 4. Role Field (Scoped to selected Company / Department) */}
+            <FormControl fullWidth disabled={!formData.company_id}>
               <InputLabel id="ur-form-role-label">Role *</InputLabel>
               <Select
                 labelId="ur-form-role-label"
@@ -663,11 +669,11 @@ const UserRoles = () => {
                 required
               >
                 <MenuItem value="" disabled hidden>
-                  {formData.department_id ? 'Select Role' : 'Select Department First'}
+                  {formData.company_id ? 'Select Role' : 'Select Company First'}
                 </MenuItem>
                 {formRoles.map((role) => (
                   <MenuItem key={role.id} value={role.id}>
-                    {role.role_name}
+                    {role.role_name} {role.department_name ? `(${role.department_name})` : '(Company-Wide)'}
                   </MenuItem>
                 ))}
               </Select>

@@ -34,7 +34,7 @@ def list_voter_registrations():
         VoterRegistration.company_id == company_id,
         VoterRegistration.status != 'deleted',
         Voter.status != STATUS_INACTIVE,
-        Election.status != str(STATUS_INACTIVE)
+        Election.status != 'cancelled'
     )
     
     if search:
@@ -64,7 +64,12 @@ def list_voter_registrations():
     pagination = query.order_by(VoterRegistration.registered_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
     registrations = pagination.items
     
-    base = VoterRegistration.query.filter_by(company_id=company_id).filter(VoterRegistration.status != 'deleted')
+    base = VoterRegistration.query.join(Voter).join(Election).filter(
+        VoterRegistration.company_id == company_id,
+        VoterRegistration.status != 'deleted',
+        Voter.status != STATUS_INACTIVE,
+        Election.status != 'cancelled'
+    )
     
     return jsonify({
         'data': [{

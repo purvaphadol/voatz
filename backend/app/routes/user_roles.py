@@ -189,10 +189,8 @@ def assign_role_to_user(user_id):
     if role.is_super_admin and not is_administrator():
         return jsonify({'error': 'The Company Super Admin role cannot be assigned via API'}), 403
 
-    dept_id = data.get('department_id')
-    if not role.is_super_admin:
-        if not dept_id:
-            return jsonify({'error': 'Department ID is required for non-super admin roles'}), 400
+    dept_id = data.get('department_id') or None
+    if dept_id:
         department = Department.query.filter_by(id=dept_id, company_id=company_id).first()
         if not department:
             return jsonify({'error': 'Department not found in this company'}), 404

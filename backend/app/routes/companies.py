@@ -158,6 +158,20 @@ def create_company():
             comp_mod.status = STATUS_ACTIVE
             set_audit_fields(comp_mod, is_create=True)
             db.session.add(comp_mod)
+
+    # Automatically provision protected Company Super Admin role
+    from app.models.role import Role
+    existing_root_role = Role.query.filter_by(company_id=company.id, is_super_admin=True).first()
+    if not existing_root_role:
+        root_role = Role()
+        root_role.role_name = "Company Super Admin"
+        root_role.company_id = company.id
+        root_role.department_id = None
+        root_role.is_super_admin = True
+        root_role.status = STATUS_ACTIVE
+        root_role.description = "Protected Company Super Admin role"
+        set_audit_fields(root_role, is_create=True)
+        db.session.add(root_role)
         
     return safe_commit(
         (jsonify({'message': 'Company created', 'company_id': company.id}), 201),
@@ -262,22 +276,89 @@ def delete_company(company_id):
     if not company:
         return jsonify({'error': 'Company not found'}), 404
         
-    # Cascade soft-delete to associated users
-    associated_users = User.query.filter(
-        User.company_id == company_id,
-        User.status != STATUS_INACTIVE
-    ).all()
+    force = request.args.get('force', 'false').lower() == 'true'
+
+    from app.models.department import Department
+    from app.models.role import Role
+    from app.models.election import Election
+    from app.models.voter import Voter
+    from app.models.module import CompanyModule
+
+    active_users = User.query.filter(User.company_id == company_id, User.status != STATUS_INACTIVE, User.status != STATUS_DEACTIVATED).count()
+    active_departments = Department.query.filter(Department.company_id == company_id, Department.status != STATUS_INACTIVE, Department.status != STATUS_DEACTIVATED).count()
+    active_roles = Role.query.filter(Role.company_id == company_id, Role.status != STATUS_INACTIVE, Role.status != STATUS_DEACTIVATED).count()
+    active_elections = Election.query.filter(Election.company_id == company_id, Election.status != 'cancelled').count()
+    active_voters = Voter.query.filter(Voter.company_id == company_id, Voter.status != STATUS_INACTIVE, Voter.status != STATUS_DEACTIVATED).count()
+
+    total_active_deps = active_users + active_departments + active_roles + active_elections + active_voters
+
+    if total_active_deps > 0 and not force:
+        parts = []
+        if active_users > 0:
+            parts.append(f"{active_users} active user(s)")
+        if active_departments > 0:
+            parts.append(f"{active_departments} active department(s)")
+        if active_roles > 0:
+            parts.append(f"{active_roles} active role(s)")
+        if active_elections > 0:
+            parts.append(f"{active_elections} active election(s)")
+        if active_voters > 0:
+            parts.append(f"{active_voters} active voter(s)")
+
+        deps_str = ", ".join(parts)
+        user_friendly_error = f"Cannot delete company: It currently has {deps_str}. Please deactivate these items first."
+
+        return jsonify({
+            'error': user_friendly_error,
+            'can_force': True,
+            'active_dependencies': {
+                'users': active_users,
+                'departments': active_departments,
+                'roles': active_roles,
+                'elections': active_elections,
+                'voters': active_voters
+            },
+            'message': 'Are you sure you want to delete this company (and all related user, department, role, election, and voter data)?'
+        }), 400
+
+    # Cascade soft-delete across all associated entities
+    associated_users = User.query.filter(User.company_id == company_id, User.status != STATUS_INACTIVE).all()
     for u in associated_users:
         u.status = STATUS_INACTIVE
         set_audit_fields(u, is_create=False)
-        
+
+    associated_depts = Department.query.filter(Department.company_id == company_id, Department.status != STATUS_INACTIVE).all()
+    for d in associated_depts:
+        d.status = STATUS_INACTIVE
+        set_audit_fields(d, is_create=False)
+
+    associated_roles = Role.query.filter(Role.company_id == company_id, Role.status != STATUS_INACTIVE).all()
+    for r in associated_roles:
+        r.status = STATUS_INACTIVE
+        set_audit_fields(r, is_create=False)
+
+    associated_cms = CompanyModule.query.filter(CompanyModule.company_id == company_id, CompanyModule.status != STATUS_DEACTIVATED).all()
+    for cm in associated_cms:
+        cm.status = STATUS_DEACTIVATED
+        set_audit_fields(cm, is_create=False)
+
+    associated_elections = Election.query.filter(Election.company_id == company_id, Election.status != 'cancelled').all()
+    for el in associated_elections:
+        el.status = 'cancelled'
+        set_audit_fields(el, is_create=False)
+
+    associated_voters = Voter.query.filter(Voter.company_id == company_id, Voter.status != STATUS_INACTIVE).all()
+    for v in associated_voters:
+        v.status = STATUS_INACTIVE
+        set_audit_fields(v, is_create=False)
+
     company.status = STATUS_INACTIVE
     if not company.company_name.endswith(f"__del_{company.id}"):
         company.company_name = f"{company.company_name}__del_{company.id}"
     set_audit_fields(company, is_create=False)
-    
+
     return safe_commit(
-        (jsonify({'message': 'Company deleted'}), 200),
+        (jsonify({'message': 'Company deleted successfully'}), 200),
         'Internal server error during company deletion'
     )
 

@@ -195,6 +195,26 @@ def require_company_context(f):
             return jsonify({'error': 'Authentication error', 'message': str(e)}), 401
     return decorated_function
 
+def normalize_module_key(name):
+    if not name:
+        return ""
+    import re
+    return re.sub(r'[^a-zA-Z0-9]', '', str(name)).lower()
+
+def get_module_keys(mod_obj):
+    keys = set()
+    if mod_obj.module_name:
+        keys.add(mod_obj.module_name)
+    if mod_obj.route_name:
+        keys.add(mod_obj.route_name)
+        camel_route = ''.join(word.capitalize() for word in mod_obj.route_name.replace('_', '-').split('-'))
+        keys.add(camel_route)
+    if mod_obj.display_route:
+        keys.add(mod_obj.display_route)
+        camel_display = ''.join(word.capitalize() for word in mod_obj.display_route.replace('_', '-').split('-'))
+        keys.add(camel_display)
+    return keys
+
 def check_user_permission(module_name, action_name):
     """Check if current user has permission for a specific module/action using SystemModule catalog."""
     try:
@@ -222,8 +242,16 @@ def check_user_permission(module_name, action_name):
             Role.status != 9
         ).count() > 0 if role_ids else False
 
-        # 2. Get system module by name
-        sys_module = SystemModule.query.filter_by(module_name=module_name).filter(SystemModule.status != 9).first()
+        # 2. Get system module by normalized name or route_name
+        norm_req = normalize_module_key(module_name)
+        sys_modules = SystemModule.query.filter(SystemModule.status != 9).all()
+        sys_module = None
+        for m in sys_modules:
+            m_keys = get_module_keys(m)
+            if any(normalize_module_key(k) == norm_req for k in m_keys):
+                sys_module = m
+                break
+
         if not sys_module:
             logger.warning(f"SystemModule '{module_name}' not found")
             return False
@@ -339,10 +367,13 @@ def get_user_permissions_summary():
         sys_modules = SystemModule.query.filter(SystemModule.status != 9).order_by(SystemModule.order_index.asc()).all()
         permissions = {}
         for m in sys_modules:
-            permissions[m.module_name] = [
+            module_keys = get_module_keys(m)
+            actions_list = [
                 {'action': act, 'source': 'administrator', 'url': f'/{act}'}
                 for act in ['view', 'create', 'update', 'delete']
             ]
+            for key in module_keys:
+                permissions[key] = actions_list
         return permissions
 
     from app.utils.query_helpers import get_active_user_role_mappings, get_active_role_permissions
@@ -352,8 +383,48 @@ def get_user_permissions_summary():
 
     company_id = user.company_id
 
+    # Check Company Super Admin status
     active_mappings = get_active_user_role_mappings(user.id, company_id)
     role_ids = [ur.role_id for ur in active_mappings]
+    from app.models.role import Role
+    is_super_admin = Role.query.filter(
+        Role.id.in_(role_ids),
+        Role.is_super_admin == True,
+        Role.status != 0,
+        Role.status != 9
+    ).count() > 0 if role_ids else False
+
+    sys_modules = SystemModule.query.join(
+        CompanyModule, CompanyModule.system_module_id == SystemModule.id
+    ).filter(
+        CompanyModule.company_id == company_id,
+        CompanyModule.status != 9,
+        SystemModule.status != 9
+    ).order_by(SystemModule.order_index.asc()).all()
+    if not sys_modules:
+        sys_modules = SystemModule.query.filter(SystemModule.status != 9).order_by(SystemModule.order_index.asc()).all()
+
+    actions_map = {a.id: a for a in SystemModuleAction.query.filter(SystemModuleAction.status != 9).all()}
+
+    if is_super_admin:
+        permissions = {}
+        for m in sys_modules:
+            mod_actions = [a for a in actions_map.values() if a.system_module_id == m.id]
+            if mod_actions:
+                actions_list = [
+                    {'action': act.action_name, 'source': 'company-super-admin', 'url': act.action_url}
+                    for act in mod_actions
+                ]
+            else:
+                actions_list = [
+                    {'action': act, 'source': 'company-super-admin', 'url': f'/{act}'}
+                    for act in ['view', 'create', 'update', 'delete']
+                ]
+            module_keys = get_module_keys(m)
+            for key in module_keys:
+                permissions[key] = actions_list
+        return permissions
+
     role_permissions = get_active_role_permissions(role_ids, company_id)
 
     user_permissions = UserPermissionMapping.query.filter(
@@ -362,48 +433,46 @@ def get_user_permissions_summary():
         UserPermissionMapping.status != 9
     ).all()
 
-    sys_modules = SystemModule.query.join(
-        CompanyModule, CompanyModule.system_module_id == SystemModule.id
-    ).filter(
-        CompanyModule.company_id == company_id,
-        CompanyModule.status != 9,
-        SystemModule.status != 9
-    ).all()
-    if not sys_modules:
-        sys_modules = SystemModule.query.filter(SystemModule.status != 9).all()
-
     modules_map = {m.id: m for m in sys_modules}
-    actions_map = {a.id: a for a in SystemModuleAction.query.filter(SystemModuleAction.status != 9).all()}
-
     permissions = {}
+
+    def add_action(mod_obj, act_obj, source):
+        keys = get_module_keys(mod_obj)
+        for k in keys:
+            if k not in permissions:
+                permissions[k] = []
+            existing_actions = {p['action'] for p in permissions[k]}
+            if act_obj.action_name not in existing_actions:
+                permissions[k].append({
+                    'action': act_obj.action_name,
+                    'source': source,
+                    'url': act_obj.action_url
+                })
 
     for rp in role_permissions:
         module = modules_map.get(rp.module_id)
         action = actions_map.get(rp.action_id)
         if module and action:
-            if module.module_name not in permissions:
-                permissions[module.module_name] = []
-            permissions[module.module_name].append({
-                'action': action.action_name,
-                'source': 'role',
-                'url': action.action_url
-            })
+            add_action(module, action, 'role')
 
     for up in user_permissions:
         module = modules_map.get(up.module_id)
         action = actions_map.get(up.action_id)
         if module and action:
-            if module.module_name not in permissions:
-                permissions[module.module_name] = []
-            permissions[module.module_name] = [
-                p for p in permissions[module.module_name]
-                if p['action'] != action.action_name
-            ]
-            if up.permission_type == 1:
-                permissions[module.module_name].append({
-                    'action': action.action_name,
-                    'source': 'user-override',
-                    'url': action.action_url
-                })
+            keys = get_module_keys(module)
+            for k in keys:
+                if k in permissions:
+                    permissions[k] = [
+                        p for p in permissions[k]
+                        if p['action'] != action.action_name
+                    ]
+                else:
+                    permissions[k] = []
+                if up.permission_type == 1:
+                    permissions[k].append({
+                        'action': action.action_name,
+                        'source': 'user-override',
+                        'url': action.action_url
+                    })
 
     return permissions

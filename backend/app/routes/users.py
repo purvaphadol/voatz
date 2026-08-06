@@ -48,6 +48,7 @@ def list_users():
     """
     search = request.args.get('search')
     filter_company_id = request.args.get('company_id')
+    filter_department_id = request.args.get('department_id')
     
     page, per_page, error = parse_pagination(request)
     if error:
@@ -85,6 +86,12 @@ def list_users():
             joinedload(User.company), 
             joinedload(User.department)
         ).filter(Company.status == STATUS_ACTIVE)
+
+    if filter_department_id:
+        try:
+            query = query.filter(User.department_id == int(filter_department_id))
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid department_id parameter'}), 400
 
     query = query.order_by(User.updated_at.desc(), User.created_at.desc())
 
@@ -233,9 +240,10 @@ def update_user(user_id):
         
     if 'email' in cleaned_data:
         email = cleaned_data['email']
-        # Check if email already exists within active users (excluding current user)
+        # Check if email already exists within active users in the same company (excluding current user)
         existing_user = User.query.filter(
             User.email.ilike(email),
+            User.company_id == company_id,
             User.status == STATUS_ACTIVE,
             User.id != user_id
         ).first()
@@ -292,27 +300,81 @@ def delete_user(user_id):
         company_id = get_current_company_id()
         user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
     
-    # Check if target user has Super Admin role
-    super_admin_role = Role.query.filter(
-        Role.role_name.ilike('super admin'),
-        Role.company_id == company_id
+    # Check if target user holds protected is_super_admin role
+    from app.models.role import Role
+    from app.models.voter import Voter
+    from app.models.user_permission import UserPermissionMapping
+
+    has_protected_role = db.session.query(UserRoleMapping).join(
+        Role, UserRoleMapping.role_id == Role.id
+    ).filter(
+        UserRoleMapping.user_id == user_id,
+        UserRoleMapping.company_id == company_id,
+        UserRoleMapping.status != STATUS_INACTIVE,
+        Role.is_super_admin == True
     ).first()
 
-    if super_admin_role:
-        is_super_admin = UserRoleMapping.query.filter_by(
-            user_id=user_id, 
-            role_id=super_admin_role.id
-        ).first()
-        if is_super_admin:
-            return jsonify({"error": "Super Admin users cannot be deleted"}), 403
-    
-    # Soft delete instead of hard delete
+    if has_protected_role:
+        return jsonify({"error": "Super Admin users cannot be deleted"}), 403
+
+    force = request.args.get('force', 'false').lower() == 'true'
+
+    active_voters = Voter.query.filter_by(user_id=user_id, company_id=company_id).filter(Voter.status != STATUS_INACTIVE).count()
+    active_roles = UserRoleMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserRoleMapping.status != STATUS_INACTIVE).count()
+    active_perms = UserPermissionMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserPermissionMapping.status != STATUS_INACTIVE).count()
+
+    total_active_deps = active_voters + active_roles + active_perms
+
+    if total_active_deps > 0 and not force:
+        parts = []
+        if active_voters > 0:
+            parts.append(f"{active_voters} linked voter profile")
+        if active_roles > 0:
+            parts.append(f"{active_roles} assigned role(s)")
+        if active_perms > 0:
+            parts.append(f"{active_perms} custom permission override(s)")
+
+        deps_str = ", ".join(parts)
+        user_friendly_error = f"Cannot delete user: It currently has {deps_str}. Please deactivate these items first."
+
+        return jsonify({
+            'error': user_friendly_error,
+            'can_force': True,
+            'active_dependencies': {
+                'voter_profile': active_voters,
+                'user_roles': active_roles,
+                'user_permissions': active_perms
+            },
+            'message': 'Are you sure you want to delete this user (and all related voter profile and role mapping data)?'
+        }), 400
+
+    # Deactivate linked voter profile
+    if active_voters > 0:
+        voters = Voter.query.filter_by(user_id=user_id, company_id=company_id).filter(Voter.status != STATUS_INACTIVE).all()
+        for v in voters:
+            v.status = STATUS_INACTIVE
+            set_audit_fields(v, is_create=False)
+
+    # Deactivate user roles & permissions
+    if active_roles > 0:
+        user_roles = UserRoleMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserRoleMapping.status != STATUS_INACTIVE).all()
+        for ur in user_roles:
+            ur.status = STATUS_INACTIVE
+            set_audit_fields(ur, is_create=False)
+
+    if active_perms > 0:
+        user_perms = UserPermissionMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserPermissionMapping.status != STATUS_INACTIVE).all()
+        for up in user_perms:
+            up.status = STATUS_INACTIVE
+            set_audit_fields(up, is_create=False)
+
+    # Soft delete user
     user.status = STATUS_INACTIVE
     if not user.email.endswith(f"__del_{user.id}"):
         user.email = f"{user.email}__del_{user.id}"
     set_audit_fields(user, is_create=False)
     
-    return safe_commit((jsonify({'message': 'User deleted'}), 200), 'Internal server error during user deletion')
+    return safe_commit((jsonify({'message': 'User deleted successfully'}), 200), 'Internal server error during user deletion')
 
 
 @users_bp.route('/<int:user_id>/permanent', methods=['DELETE'])

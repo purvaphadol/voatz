@@ -122,7 +122,7 @@ export const usersAPI = {
   getById: (id) => api.get(`/users/${id}`),
   create: (data) => api.post('/users/', data),
   update: (id, data) => api.put(`/users/${id}`, data),
-  delete: (id) => api.delete(`/users/${id}`),
+  delete: (id, params = {}) => api.delete(`/users/${id}`, { params }),
 };
 
 // Roles API
@@ -131,7 +131,7 @@ export const rolesAPI = {
   getById: (id) => api.get(`/roles/${id}`),
   create: (data) => api.post('/roles/', data),
   update: (id, data) => api.put(`/roles/${id}`, data),
-  delete: (id) => api.delete(`/roles/${id}`),
+  delete: (id, params = {}) => api.delete(`/roles/${id}`, { params }),
 };
 
 // Departments API
@@ -140,7 +140,7 @@ export const departmentsAPI = {
   getById: (id) => api.get(`/departments/${id}`),
   create: (data) => api.post('/departments/', data),
   update: (id, data) => api.put(`/departments/${id}`, data),
-  delete: (id) => api.delete(`/departments/${id}`),
+  delete: (id, params = {}) => api.delete(`/departments/${id}`, { params }),
 };
 
 // Companies API
@@ -149,7 +149,7 @@ export const companiesAPI = {
   getById: (id) => api.get(`/companies/${id}`),
   create: (data) => api.post('/companies/', data),
   update: (id, data) => api.put(`/companies/${id}`, data),
-  delete: (id) => api.delete(`/companies/${id}`),
+  delete: (id, params = {}) => api.delete(`/companies/${id}`, { params }),
 };
 
 // Modules API
@@ -158,7 +158,7 @@ export const modulesAPI = {
   getById: (id) => api.get(`/modules/${id}`),
   create: (data) => api.post('/modules/', data),
   update: (id, data) => api.put(`/modules/${id}`, data),
-  delete: (id) => api.delete(`/modules/${id}`),
+  delete: (id, params = {}) => api.delete(`/modules/${id}`, { params }),
 };
 
 // Module Actions API
@@ -224,7 +224,7 @@ export const votersAPI = {
   getById: (id) => api.get(`/voters/${id}`),
   create: (data) => api.post('/voters/', data),
   update: (id, data) => api.put(`/voters/${id}`, data),
-  delete: (id) => api.delete(`/voters/${id}`),
+  delete: (id, params = {}) => api.delete(`/voters/${id}`, { params }),
   verify: (id, data) => api.post(`/voters/${id}/verify`, data),
   getRegistrations: (id) => api.get(`/voters/${id}/registrations`),
   getVotes: (id) => api.get(`/voters/${id}/votes`),
@@ -237,7 +237,7 @@ export const electionsAPI = {
   getById: (id) => api.get(`/elections/${id}`),
   create: (data) => api.post('/elections/', data),
   update: (id, data) => api.put(`/elections/${id}`, data),
-  delete: (id) => api.delete(`/elections/${id}`),
+  delete: (id, params = {}) => api.delete(`/elections/${id}`, { params }),
   activate: (id) => api.post(`/elections/${id}/activate`),
   publishResults: (id) => api.post(`/elections/${id}/publish-results`),
   changeStatus: (id, status) => api.post(`/elections/${id}/change-status`, { status }),
@@ -252,7 +252,7 @@ export const ballotsAPI = {
   getById: (id) => api.get(`/ballots/${id}`),
   create: (data) => api.post('/ballots/', data),
   update: (id, data) => api.put(`/ballots/${id}`, data),
-  delete: (id) => api.delete(`/ballots/${id}`),
+  delete: (id, params = {}) => api.delete(`/ballots/${id}`, { params }),
   publish: (id) => api.post(`/ballots/${id}/publish`),
   unpublish: (id) => api.post(`/ballots/${id}/unpublish`),
   getCandidates: (id) => api.get(`/ballots/${id}/candidates`),
@@ -267,7 +267,7 @@ export const candidatesAPI = {
   getById: (id) => api.get(`/candidates/${id}`),
   create: (data) => api.post('/candidates/', data),
   update: (id, data) => api.put(`/candidates/${id}`, data),
-  delete: (id) => api.delete(`/candidates/${id}`),
+  delete: (id, params = {}) => api.delete(`/candidates/${id}`, { params }),
   withdraw: (id, data) => api.post(`/candidates/${id}/withdraw`, data),
   reinstate: (id) => api.post(`/candidates/${id}/reinstate`),
   getStats: () => api.get('/candidates/stats'),

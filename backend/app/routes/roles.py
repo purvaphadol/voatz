@@ -230,45 +230,76 @@ def update_role(role_id):
     # Guard: the protected Company Super Admin role cannot be renamed or
     # moved to a different department.
     if role.is_super_admin:
-        if 'role_name' in cleaned_data or 'department_id' in data:
+        new_name = cleaned_data.get('role_name')
+        if new_name and new_name.strip().lower() != role.role_name.lower():
             return jsonify({
                 'error': 'The Company Super Admin role cannot be renamed '
                          'or reassigned to a different department'
             }), 403
 
+        if 'department_id' in data and data['department_id'] is not None and data['department_id'] != '':
+            try:
+                dept_val = int(data['department_id'])
+            except (ValueError, TypeError):
+                dept_val = None
+            if dept_val != role.department_id:
+                return jsonify({
+                    'error': 'The Company Super Admin role cannot be renamed '
+                             'or reassigned to a different department'
+                }), 403
+
+    # Calculate target department_id
     if 'department_id' in data:
         dept_id_val = data['department_id'] if data['department_id'] else None
         if dept_id_val:
+            try:
+                dept_id_val = int(dept_id_val)
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Invalid department_id format'}), 400
             department = Department.query.filter_by(
                 id=dept_id_val, company_id=company_id
             ).first()
             dept_error = validate_department_active(department)
             if dept_error:
                 return dept_error[0], dept_error[1]
-            role.department_id = dept_id_val
+            target_dept_id = dept_id_val
         else:
-            role.department_id = None
+            target_dept_id = None
+    else:
+        target_dept_id = role.department_id
 
+    target_role_name = cleaned_data.get('role_name', role.role_name)
+
+    # Check for duplicate role name in the target department/company
+    existing_query = Role.query.filter(
+        Role.role_name.ilike(target_role_name),
+        Role.company_id == company_id,
+        Role.status != STATUS_INACTIVE,
+        Role.id != role_id
+    )
+    if target_dept_id:
+        existing_query = existing_query.filter(Role.department_id == target_dept_id)
+    else:
+        existing_query = existing_query.filter(Role.department_id.is_(None))
+
+    if existing_query.first():
+        return jsonify({'error': 'Role name already exists'}), 400
+
+    # Apply modifications
+    if 'department_id' in data:
+        role.department_id = target_dept_id
     if 'role_name' in cleaned_data:
-        existing_query = Role.query.filter(
-            Role.role_name.ilike(cleaned_data['role_name']),
-            Role.company_id == company_id,
-            Role.status == STATUS_ACTIVE,
-            Role.id != role_id
-        )
-        if role.department_id:
-            existing_query = existing_query.filter(Role.department_id == role.department_id)
-        else:
-            existing_query = existing_query.filter(Role.department_id.is_(None))
-
-        if existing_query.first():
-            return jsonify({'error': 'Role name already exists'}), 400
         role.role_name = cleaned_data['role_name']
-
     if 'description' in cleaned_data:
         role.description = cleaned_data['description']
 
     set_audit_fields(role, is_create=False)
+    try:
+        db.session.flush()
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Role name already exists in this department'}), 400
+
     return safe_commit(
         (jsonify({'message': 'Role updated'}), 200),
         'Internal server error during role update'
@@ -280,18 +311,59 @@ def update_role(role_id):
               get_target_id=lambda *a, **kw: kw.get('role_id'))
 def delete_role(role_id):
     if is_administrator():
-        role = Role.query.filter_by(id=role_id).first_or_404()
+        role = Role.query.filter_by(id=role_id).filter(Role.status != STATUS_INACTIVE).first_or_404()
     else:
         company_id = get_current_company_id()
-        role = Role.query.filter_by(id=role_id, company_id=company_id).first_or_404()
+        role = Role.query.filter_by(id=role_id, company_id=company_id).filter(Role.status != STATUS_INACTIVE).first_or_404()
 
     if role.is_super_admin:
         return jsonify({'error': 'The Company Super Admin role cannot be deleted'}), 403
 
+    force = request.args.get('force', 'false').lower() == 'true'
+
+    from app.models.user_role import UserRoleMapping
+    from app.models.role_permission import RolePermissionMapping
+
+    assigned_users = UserRoleMapping.query.filter_by(
+        role_id=role_id,
+        company_id=role.company_id
+    ).filter(UserRoleMapping.status != STATUS_INACTIVE).count()
+
+    if assigned_users > 0 and not force:
+        user_friendly_error = f"Cannot delete role: It currently has {assigned_users} active user assignment(s). Please reassign these users first."
+        return jsonify({
+            'error': user_friendly_error,
+            'can_force': True,
+            'active_dependencies': {
+                'assigned_users': assigned_users
+            },
+            'message': 'Are you sure you want to delete this role (and deactivate all related user role mappings)?'
+        }), 400
+
+    # Deactivate active user role mappings for this role
+    active_mappings = UserRoleMapping.query.filter_by(
+        role_id=role_id,
+        company_id=role.company_id
+    ).filter(UserRoleMapping.status != STATUS_INACTIVE).all()
+
+    for m in active_mappings:
+        m.status = STATUS_INACTIVE
+        set_audit_fields(m, is_create=False)
+
+    # Deactivate active role permission mappings for this role
+    active_perms = RolePermissionMapping.query.filter_by(
+        role_id=role_id,
+        company_id=role.company_id
+    ).filter(RolePermissionMapping.status != STATUS_INACTIVE).all()
+
+    for p in active_perms:
+        p.status = STATUS_INACTIVE
+        set_audit_fields(p, is_create=False)
+
     role.status = STATUS_INACTIVE
     set_audit_fields(role, is_create=False)
     return safe_commit(
-        (jsonify({'message': 'Role deleted'}), 200),
+        (jsonify({'message': 'Role deleted successfully'}), 200),
         'Internal server error during role deletion'
     )
 

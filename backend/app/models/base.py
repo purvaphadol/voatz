@@ -26,6 +26,11 @@ class TimestampAuditMixin:
     updated_by  = Column(Integer, nullable=True)
     status      = Column(Integer, default=1, nullable=False)
 
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
 
 @event.listens_for(Session, "do_orm_execute")
 def _auto_filter_deactivated(execute_state):

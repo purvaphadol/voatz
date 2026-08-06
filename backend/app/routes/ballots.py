@@ -10,6 +10,7 @@ from app.utils.validators import parse_pagination, validate_ballot_input
 from app.utils.query_helpers import get_active_ballots_query
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
+from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE, STATUS_DEACTIVATED
 from sqlalchemy import or_
 from datetime import datetime, timezone
 import secrets
@@ -94,7 +95,7 @@ def list_ballots():
         'pages': pagination.pages,
         'summary': {
             'total_ballots': pagination.total,
-            'active_ballots': pagination.total,
+            'active_ballots': base.filter_by(is_active=True).count(),
             'published_ballots': base.filter_by(is_published=True).count(),
             'draft_ballots': base.filter_by(is_published=False).count()
         }
@@ -325,11 +326,34 @@ def delete_ballot(ballot_id):
     vote_count = Vote.query.filter_by(ballot_id=ballot_id).count()
     if vote_count > 0:
         return jsonify({'error': 'Cannot delete ballots with votes already cast'}), 400
-    
+
+    force = request.args.get('force', 'false').lower() == 'true'
+
+    from app.models.candidate import Candidate
+    active_candidates = Candidate.query.filter_by(ballot_id=ballot_id).filter(Candidate.status != STATUS_INACTIVE).count()
+
+    if active_candidates > 0 and not force:
+        user_friendly_error = f"Cannot delete ballot: It currently has {active_candidates} active candidate(s). Please remove or deactivate these candidates first."
+        return jsonify({
+            'error': user_friendly_error,
+            'can_force': True,
+            'active_dependencies': {
+                'candidates': active_candidates
+            },
+            'message': 'Are you sure you want to delete this ballot (and deactivate all related candidate assignments)?'
+        }), 400
+
+    # Deactivate active candidates on this ballot
+    if active_candidates > 0:
+        candidates = Candidate.query.filter_by(ballot_id=ballot_id).filter(Candidate.status != STATUS_INACTIVE).all()
+        for c in candidates:
+            c.status = STATUS_INACTIVE
+            set_audit_fields(c, is_create=False)
+
     # Soft delete by updating status
     ballot.is_active = False
     set_audit_fields(ballot, is_create=False)
-    
+
     return safe_commit(
         (jsonify({'message': 'Ballot deleted successfully'}), 200),
         'Failed to delete ballot'
@@ -488,7 +512,8 @@ def duplicate_ballot(ballot_id):
             new_candidate.ballot_id = new_ballot.id
             new_candidate.company_id = company_id
             new_candidate.name = original_candidate.name
-            new_candidate.candidate_code = f"{original_candidate.candidate_code}_COPY"
+            from app.routes.candidates import generate_candidate_code
+            new_candidate.candidate_code = generate_candidate_code()
             new_candidate.party = original_candidate.party
             new_candidate.party_abbreviation = original_candidate.party_abbreviation
             new_candidate.title = original_candidate.title

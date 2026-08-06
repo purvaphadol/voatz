@@ -77,7 +77,7 @@ def list_candidates():
     base = get_active_candidates_query(company_id)
     summary = {
         'total_candidates': pagination.total,
-        'active_candidates': pagination.total,
+        'active_candidates': base.filter_by(is_active=True).count(),
         'incumbent_candidates': base.filter_by(is_incumbent=True).count(),
         'withdrawn_candidates': Candidate.query.filter_by(company_id=company_id, is_withdrawn=True).count()
     }

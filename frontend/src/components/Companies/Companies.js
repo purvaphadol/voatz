@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -29,7 +29,7 @@ import {
 } from '@mui/icons-material';
 import { companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
-import { showDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import { validateNonNumericText, validateEmail, validatePhone, validateUrl, capitalizeError } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
@@ -63,6 +63,14 @@ const Companies = () => {
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const dialogContentRef = useRef(null);
+
+  useEffect(() => {
+    if (formError && dialogContentRef.current) {
+      dialogContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [formError]);
 
   const canView = hasPermission('Companies', 'view');
   const canCreate = hasPermission('Companies', 'create');
@@ -133,15 +141,45 @@ const Companies = () => {
     setDialogOpen(true);
   };
 
-  const handleDelete = async (companyId) => {
-    const confirmed = await showDeleteConfirm('this company (and all related user data)');
-    if (confirmed) {
+  const handleDelete = async (companyId, force = false) => {
+    if (force) {
+      const finalConfirmed = await showDeleteConfirm('this company');
+      if (!finalConfirmed) return;
       try {
-        await companiesAPI.delete(companyId);
-        await showSuccessAlert('Company deleted successfully');
+        await companiesAPI.delete(companyId, { force: true });
+        await showSuccessAlert('Company and all related data force-deleted successfully');
         loadCompanies();
       } catch (error) {
-        const errMsg = (error.response && error.response.data && error.response.data.error) || 'Failed to delete company';
+        const errMsg = (error.response?.data?.error) || 'Failed to delete company';
+        showErrorAlert(capitalizeError(errMsg));
+      }
+      return;
+    }
+
+    const confirmed = await showDeleteConfirm('this company');
+    if (!confirmed) return;
+
+    try {
+      await companiesAPI.delete(companyId);
+      await showSuccessAlert('Company deleted successfully');
+      loadCompanies();
+    } catch (error) {
+      const errData = error.response && error.response.data;
+      if (errData && errData.can_force) {
+        let rawError = capitalizeError(errData.error || '');
+        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
+
+        const forceRequested = await showForceDeleteConfirm({
+          title: 'Active Dependencies Detected',
+          errorText: cleanedError,
+          confirmMessage: 'Are you sure you want to delete this company (and all related user, department, role, election, and voter data)?',
+        });
+
+        if (forceRequested) {
+          handleDelete(companyId, true);
+        }
+      } else {
+        const errMsg = (errData && errData.error) || 'Failed to delete company';
         showErrorAlert(capitalizeError(errMsg));
       }
     }
@@ -324,7 +362,7 @@ const Companies = () => {
           {viewMode ? 'View Company' : editingCompany ? 'Edit Company' : 'Add New Company'}
         </DialogTitle>
         <form onSubmit={handleSubmit}>
-          <DialogContent>
+          <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
 
             <TextField

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -47,7 +47,8 @@ import {
 } from '@mui/icons-material';
 import { modulesAPI, moduleActionsAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
-import { showDeleteConfirm, showConfirmDialog } from '../../utils/swal';
+import { useAuth } from '../../contexts/AuthContext';
+import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import { capitalizeError } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
@@ -65,9 +66,13 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
 
 const Modules = () => {
   const { hasPermission } = usePermissions();
+  const { user } = useAuth();
+  const isPlatformAdmin = user?.is_administrator === true;
+
   const [modules, setModules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
   const [actionsDialogOpen, setActionsDialogOpen] = useState(false);
   const [editingModule, setEditingModule] = useState(null);
   const [selectedModule, setSelectedModule] = useState(null);
@@ -90,6 +95,14 @@ const Modules = () => {
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const dialogContentRef = useRef(null);
+
+  useEffect(() => {
+    if (formError && dialogContentRef.current) {
+      dialogContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [formError]);
 
   const canView = hasPermission('Modules', 'view');
   const canCreate = hasPermission('Modules', 'create');
@@ -126,6 +139,10 @@ const Modules = () => {
   };
 
   const handleAdd = () => {
+    if (!isPlatformAdmin) {
+      setRequestModalOpen(true);
+      return;
+    }
     setEditingModule(null);
     setViewMode(false);
     setFormError('');
@@ -177,15 +194,43 @@ const Modules = () => {
     setActionsDialogOpen(true);
   };
 
-  const handleDelete = async (moduleId) => {
-    const confirmed = await showDeleteConfirm('this module (and all related permissions)');
-    if (confirmed) {
+  const handleDelete = async (moduleId, force = false) => {
+    if (force) {
+      const finalConfirmed = await showDeleteConfirm('this system module');
+      if (!finalConfirmed) return;
       try {
-        await modulesAPI.delete(moduleId);
-        setSuccess('Module deleted successfully');
+        await modulesAPI.delete(moduleId, { force: true });
+        await showSuccessAlert('System module and all related permissions force-deleted successfully');
         loadModules();
       } catch (error) {
-        setError(capitalizeError(error.response?.data?.error || 'Failed to delete module'));
+        const errMsg = (error.response?.data?.error) || 'Failed to delete system module';
+        showErrorAlert(capitalizeError(errMsg));
+      }
+      return;
+    }
+
+    try {
+      await modulesAPI.delete(moduleId);
+      await showSuccessAlert('System module deleted successfully');
+      loadModules();
+    } catch (error) {
+      const errData = error.response && error.response.data;
+      if (errData && errData.can_force) {
+        let rawError = capitalizeError(errData.error || '');
+        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
+
+        const forceRequested = await showForceDeleteConfirm({
+          title: 'Active Dependencies Detected',
+          errorText: cleanedError,
+          confirmMessage: errData.message || 'Are you sure you want to delete this system module (and unassign all related company and role permissions)?',
+        });
+
+        if (forceRequested) {
+          handleDelete(moduleId, true);
+        }
+      } else {
+        const errMsg = (errData && errData.error) || 'Failed to delete system module';
+        showErrorAlert(capitalizeError(errMsg));
       }
     }
   };
@@ -193,20 +238,23 @@ const Modules = () => {
   const handleReactivate = async (moduleId) => {
     try {
       await modulesAPI.updateStatus(moduleId, { status: 1 });
-      setSuccess('Module reactivated successfully');
+      await showSuccessAlert('Module reactivated successfully');
       loadModules();
     } catch (error) {
-      setError(capitalizeError(error.response?.data?.error || 'Failed to reactivate module'));
+      const errMsg = capitalizeError(error.response?.data?.error || 'Failed to reactivate module');
+      setError(errMsg);
+      showErrorAlert(errMsg);
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError('');
-    setSuccess('');
 
     if (!formData.module_name.trim()) {
-      setFormError(capitalizeError('Module name is required'));
+      const errMsg = capitalizeError('Module name is required');
+      setFormError(errMsg);
+      showErrorAlert(errMsg);
       return;
     }
 
@@ -221,13 +269,15 @@ const Modules = () => {
         if (formData.status !== editingModule.status) updateData.status = formData.status;
 
         await modulesAPI.update(editingModule.id, updateData);
-        setSuccess('Module updated successfully');
+        window.dispatchEvent(new Event('permissionsUpdated'));
+        setDialogOpen(false);
+        loadModules();
+        await showSuccessAlert('Module updated successfully');
       } else {
         const submitData = {
           ...formData
         };
         const response = await modulesAPI.create(submitData);
-        setSuccess('Module created successfully');
         
         // If module was created successfully, optionally create default actions
         if (response.data && response.data.module_id) {
@@ -242,11 +292,15 @@ const Modules = () => {
             console.warn('Failed to create default actions:', actionError);
           }
         }
+        window.dispatchEvent(new Event('permissionsUpdated'));
+        setDialogOpen(false);
+        loadModules();
+        await showSuccessAlert('Module created successfully');
       }
-      setDialogOpen(false);
-      loadModules();
     } catch (error) {
-      setFormError(capitalizeError((error.response && error.response.data && error.response.data.error) || 'Operation failed'));
+      const errMsg = capitalizeError((error.response && error.response.data && error.response.data.error) || 'Operation failed');
+      setFormError(errMsg);
+      showErrorAlert(errMsg);
     }
   };
 
@@ -255,7 +309,9 @@ const Modules = () => {
     setFormError('');
 
     if (!actionFormData.action_name.trim() || !actionFormData.action_url.trim()) {
-      setFormError(capitalizeError('Action name and URL are required'));
+      const errMsg = capitalizeError('Action name and URL are required');
+      setFormError(errMsg);
+      showErrorAlert(errMsg);
       return;
     }
 
@@ -266,21 +322,23 @@ const Modules = () => {
           action_url: actionFormData.action_url,
           status: actionFormData.status ? 1 : 0,
         });
-        setSuccess('Action updated successfully');
+        await showSuccessAlert('Action updated successfully');
       } else {
         await moduleActionsAPI.createAction(selectedModule.id, {
           action_name: actionFormData.action_name,
           action_url: actionFormData.action_url,
           status: actionFormData.status ? 1 : 0,
         });
-        setSuccess('Action created successfully');
+        await showSuccessAlert('Action created successfully');
       }
       
       setActionFormData({ action_name: '', action_url: '', status: true });
       setEditingAction(null);
       loadModuleActions(selectedModule.id);
     } catch (error) {
-      setFormError(capitalizeError(error.response?.data?.error || 'Failed to save action'));
+      const errMsg = capitalizeError(error.response?.data?.error || 'Failed to save action');
+      setFormError(errMsg);
+      showErrorAlert(errMsg);
     }
   };
 
@@ -413,26 +471,28 @@ const Modules = () => {
             />
           );
           
-          actions.push(
-            <GridActionsCellItem
-              icon={<SettingsIcon />}
-              label="Manage Actions"
-              onClick={() => handleManageActions(params.row)}
-            />
-          );
-
-          if (params.row.status === 9) {
+          if (isPlatformAdmin) {
             actions.push(
               <GridActionsCellItem
-                icon={<RestoreIcon />}
-                label="Reactivate"
-                onClick={() => handleReactivate(params.row.id)}
+                icon={<SettingsIcon />}
+                label="Manage Actions"
+                onClick={() => handleManageActions(params.row)}
               />
             );
+
+            if (params.row.status === 9) {
+              actions.push(
+                <GridActionsCellItem
+                  icon={<RestoreIcon />}
+                  label="Reactivate"
+                  onClick={() => handleReactivate(params.row.id)}
+                />
+              );
+            }
           }
         }
         
-        if (canDelete) {
+        if (canDelete && isPlatformAdmin) {
           actions.push(
             <GridActionsCellItem
               icon={<DeleteIcon />}
@@ -495,7 +555,7 @@ const Modules = () => {
           {viewMode ? 'View Module' : editingModule ? 'Edit Module' : 'Add New Module'}
         </DialogTitle>
         <form onSubmit={handleSubmit}>
-          <DialogContent>
+          <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             
             <TextField
@@ -602,7 +662,7 @@ const Modules = () => {
             Manage Actions for "{selectedModule?.module_name}"
           </Box>
         </DialogTitle>
-        <DialogContent>
+        <DialogContent ref={dialogContentRef}>
           {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
           {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
           
@@ -750,6 +810,38 @@ const Modules = () => {
         <DialogActions>
           <Button onClick={handleCloseActionsDialog}>
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Request Custom Module Dialog */}
+      <Dialog 
+        open={requestModalOpen} 
+        onClose={() => setRequestModalOpen(false)} 
+        maxWidth="sm" 
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 'bold' }}>
+          Request Custom Module
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mt: 1, mb: 2 }}>
+            Adding / deleting a new module requires software route configuration. To add a custom module to your company subscription plan, please contact your Platform Administrator at <strong>admin@voatz.com</strong>.
+          </Alert>
+          <Typography variant="body2" color="text.secondary">
+            Custom modules include dedicated backend API endpoints, database schemas, and tailored frontend application views.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRequestModalOpen(false)}>
+            Close
+          </Button>
+          <Button 
+            variant="contained" 
+            color="primary" 
+            href="mailto:admin@voatz.com?subject=Custom%20Module%20Request"
+          >
+            Contact Admin
           </Button>
         </DialogActions>
       </Dialog>

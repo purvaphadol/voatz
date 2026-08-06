@@ -48,6 +48,36 @@ export const showDeleteConfirm = async (itemDescription = 'this item') => {
 };
 
 /**
+ * Quick helper for force delete confirmation
+ */
+export const showForceDeleteConfirm = async ({
+  title = 'Active Dependencies Detected',
+  errorText = 'Cannot delete item because active dependencies exist.',
+  confirmMessage = 'Are you sure you want to force delete this item and all associated data?',
+} = {}) => {
+  const result = await MySwal.fire({
+    title,
+    html: `
+      <div style="text-align: left; font-size: 14px; color: #374151;">
+        <div style="background-color: #fee2e2; border-left: 4px solid #ef4444; padding: 12px; border-radius: 4px; margin-bottom: 16px; color: #991b1b; font-weight: 500;">
+          ${errorText}
+        </div>
+        <p style="margin: 0; font-weight: 500;">${confirmMessage}</p>
+      </div>
+    `,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Force Delete',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: '#d32f2f',
+    cancelButtonColor: '#757575',
+    reverseButtons: true,
+  });
+
+  return result.isConfirmed;
+};
+
+/**
  * Quick helper for success toast
  */
 export const showSuccessToast = (title = 'Success!') => {

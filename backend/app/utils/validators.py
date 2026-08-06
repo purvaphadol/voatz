@@ -470,6 +470,12 @@ def validate_non_numeric_text(text, field_name="Field", min_length=2, max_length
     if not re.search(r'[a-zA-Z]', val):
         return None, (jsonify({'error': f'{field_name} must contain at least one letter'}), 400)
 
+    # Auto-capitalize display name so it renders cleanly in lists
+    if val.islower():
+        val = val.title()
+    elif val[0].islower():
+        val = val[0].upper() + val[1:]
+
     return val, None
 
 
@@ -564,6 +570,8 @@ def validate_ballot_input(data, is_create=False):
             return None, (jsonify({'error': 'Ballot title is required'}), 400)
         if not data.get('election_id'):
             return None, (jsonify({'error': 'election_id is required'}), 400)
+        if not data.get('ballot_type'):
+            return None, (jsonify({'error': 'ballot_type is required'}), 400)
 
     if 'title' in data and data['title'] is not None:
         title, err = validate_non_numeric_text(data['title'], field_name="Ballot title", min_length=3, max_length=200, required=is_create)

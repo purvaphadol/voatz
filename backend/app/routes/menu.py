@@ -19,7 +19,7 @@ def format_action_label(action_name):
 @require_company_context
 def get_user_sidebar():
     """Generate dynamic sidebar menu based on user permissions"""
-    from app.utils import is_administrator, get_current_user
+    from app.utils import is_administrator, get_current_user, get_module_keys
     permissions = get_user_permissions_summary()
     
     if is_administrator():
@@ -33,43 +33,55 @@ def get_user_sidebar():
             CompanyModule.status == STATUS_ACTIVE,
             SystemModule.status == STATUS_ACTIVE
         ).order_by(SystemModule.order_index.asc(), SystemModule.module_name.asc()).all()
+        if not modules:
+            modules = SystemModule.query.filter(SystemModule.status == STATUS_ACTIVE).order_by(SystemModule.order_index.asc(), SystemModule.module_name.asc()).all()
         
-    module_routes = {module.module_name: module.display_route for module in modules}
-    module_orders = {module.module_name: module.order_index for module in modules}
-    module_icons = {module.module_name: module.icon for module in modules}
-    
     menu_items = []
-    for module_name, actions in permissions.items():
-        if module_name not in module_routes:
-            continue
-            
-        display_route = module_routes.get(module_name, module_name.lower())
+
+    for module in modules:
+        m_keys = get_module_keys(module)
+        mod_actions = None
+        for k in m_keys:
+            if k in permissions and permissions[k]:
+                mod_actions = permissions[k]
+                break
         
+        if not mod_actions:
+            if is_administrator():
+                mod_actions = [{'action': act, 'source': 'administrator', 'url': f'/{act}'} for act in ['view', 'create', 'update', 'delete']]
+            else:
+                continue
+
+        has_view = any(a['action'] == 'view' for a in mod_actions)
+        if not has_view:
+            continue
+
+        display_route = module.display_route or module.route_name or module.module_name.lower().replace(' ', '-')
+
         menu_item = {
-            'module': module_name,
+            'module': module.module_name,
+            'route_name': module.route_name,
             'route': display_route,
-            'order_index': module_orders.get(module_name, 999),
-            'icon': module_icons.get(module_name, 'folder'),
+            'order_index': module.order_index,
+            'icon': module.icon if module.icon else 'folder',
             'actions': []
         }
-        
-        for action in actions:
-            menu_item['actions'].append({
-                'name': action['action'],
-                'label': format_action_label(action['action']),
-                'url': f"/{display_route}{action['url']}",
-                'source': action['source']
-            })
-        
-        if any(action['action'] == 'view' for action in actions):
-            menu_items.append(menu_item)
+
+        seen_actions = set()
+        for action in mod_actions:
+            if action['action'] not in seen_actions:
+                seen_actions.add(action['action'])
+                menu_item['actions'].append({
+                    'name': action['action'],
+                    'label': format_action_label(action['action']),
+                    'url': f"/{display_route}{action['url']}",
+                    'source': action['source']
+                })
+
+        menu_items.append(menu_item)
     
     def get_module_order(menu_item):
-        module_name = menu_item['module']
-        for module in modules:
-            if module.module_name == module_name:
-                return module.order_index
-        return 999
+        return menu_item.get('order_index', 999)
     
     menu_items.sort(key=get_module_order)
     

@@ -258,25 +258,54 @@ def delete_department(department_id):
             id=department_id, company_id=company_id
         ).filter(Department.status != STATUS_INACTIVE).first_or_404()
 
-    # Check for active roles before deleting
+    force = request.args.get('force', 'false').lower() == 'true'
+
     from app.models.role import Role
+    from app.models.user import User
+
     active_roles = Role.query.filter(
         Role.department_id == department_id,
         Role.status != STATUS_INACTIVE
     ).count()
-    if active_roles > 0:
+
+    active_users = User.query.filter(
+        User.department_id == department_id,
+        User.status != STATUS_INACTIVE
+    ).count()
+
+    if (active_roles > 0 or active_users > 0) and not force:
+        parts = []
+        if active_roles > 0:
+            parts.append(f"{active_roles} assigned role(s)")
+        if active_users > 0:
+            parts.append(f"{active_users} assigned user(s)")
+
+        deps_str = " and ".join(parts)
+        user_friendly_error = f"Cannot delete department: It currently has {deps_str}. Please reassign or deactivate these items first."
+
         return jsonify({
-            'error': f'Cannot delete department with {active_roles} '
-                     f'active role(s). Delete or reassign roles first.'
+            'error': user_friendly_error,
+            'can_force': True,
+            'active_dependencies': {
+                'assigned_roles': active_roles,
+                'assigned_users': active_users
+            },
+            'message': 'Are you sure you want to delete this department? Assigned users will be unassigned from this department, and department roles will be deactivated.'
         }), 400
+
+    # If force=true, deactivate assigned department roles
+    if active_roles > 0:
+        dept_roles = Role.query.filter(Role.department_id == department_id, Role.status != STATUS_INACTIVE).all()
+        for r in dept_roles:
+            r.status = STATUS_INACTIVE
+            set_audit_fields(r, is_create=False)
 
     # Soft delete department and unassign any assigned users
     department.status = STATUS_INACTIVE
-    from app.models.user import User
     User.query.filter_by(department_id=department_id).update({'department_id': None})
     set_audit_fields(department, is_create=False)
     return safe_commit(
-        (jsonify({'message': 'Department deleted'}), 200),
+        (jsonify({'message': 'Department deleted successfully'}), 200),
         'Internal server error during department deletion'
     )
 

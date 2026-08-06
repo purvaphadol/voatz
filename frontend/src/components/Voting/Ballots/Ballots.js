@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -78,7 +78,7 @@ import {
 } from '@mui/icons-material';
 import { ballotsAPI, electionsAPI, candidatesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
-import { showDeleteConfirm } from '../../../utils/swal';
+import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../../utils/swal';
 import { validateNonNumericText, capitalizeError } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
@@ -163,6 +163,14 @@ const Ballots = () => {
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const dialogContentRef = useRef(null);
+
+  useEffect(() => {
+    if (formError && dialogContentRef.current) {
+      dialogContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [formError]);
 
   const canView = hasPermission('Ballots', 'view');
   const canCreate = hasPermission('Ballots', 'create');
@@ -301,16 +309,44 @@ const Ballots = () => {
     }
   };
 
-  const handleDelete = async (ballotId) => {
-    const confirmed = await showDeleteConfirm('this ballot');
-    if (confirmed) {
+  const handleDelete = async (ballotId, force = false) => {
+    if (force) {
+      const finalConfirmed = await showDeleteConfirm('this ballot');
+      if (!finalConfirmed) return;
       try {
-        await ballotsAPI.delete(ballotId);
-        setSuccess('Ballot deleted successfully');
+        await ballotsAPI.delete(ballotId, { force: true });
+        await showSuccessAlert('Ballot and associated candidates force-deleted successfully');
         loadBallots();
         loadStats();
       } catch (error) {
-        setError(capitalizeError('Failed to delete ballot'));
+        const errMsg = (error.response?.data?.error) || 'Failed to delete ballot';
+        showErrorAlert(capitalizeError(errMsg));
+      }
+      return;
+    }
+
+    try {
+      await ballotsAPI.delete(ballotId);
+      await showSuccessAlert('Ballot deleted successfully');
+      loadBallots();
+      loadStats();
+    } catch (error) {
+      const errData = error.response && error.response.data;
+      if (errData && errData.can_force) {
+        let rawError = capitalizeError(errData.error || '');
+        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
+
+        const forceRequested = await showForceDeleteConfirm({
+          title: 'Active Dependencies Detected',
+          errorText: cleanedError,
+          confirmMessage: 'Are you sure you want to delete this ballot (and all related candidate data)?',
+        });
+        if (forceRequested) {
+          handleDelete(ballotId, true);
+        }
+      } else {
+        const errMsg = (errData && errData.error) || 'Failed to delete ballot';
+        showErrorAlert(capitalizeError(errMsg));
       }
     }
   };
@@ -750,7 +786,7 @@ const Ballots = () => {
           {editingBallot ? 'Edit Ballot' : 'Create New Ballot'}
         </DialogTitle>
         <form onSubmit={handleSubmit}>
-          <DialogContent>
+          <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)}>
               <Tab label="Basic Information" icon={<ViewIcon />} />

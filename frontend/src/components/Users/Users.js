@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -29,7 +29,7 @@ import {
 import { usersAPI, departmentsAPI, companiesAPI, handleApiError } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { showDeleteConfirm } from '../../utils/swal';
+import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import { validateNonNumericText, validateEmail, capitalizeError } from '../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
@@ -71,6 +71,14 @@ const Users = () => {
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const dialogContentRef = useRef(null);
+
+  useEffect(() => {
+    if (formError && dialogContentRef.current) {
+      dialogContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [formError]);
   
   // Pagination & Search
   const [page, setPage] = useState(0);
@@ -184,15 +192,45 @@ const Users = () => {
     setDialogOpen(true);
   };
 
-  const handleDelete = async (userId) => {
-    const confirmed = await showDeleteConfirm('this user');
-    if (confirmed) {
+  const handleDelete = async (userId, force = false) => {
+    if (force) {
+      const finalConfirmed = await showDeleteConfirm('this user');
+      if (!finalConfirmed) return;
       try {
-        await usersAPI.delete(userId);
-        setSuccess('User deleted successfully');
+        await usersAPI.delete(userId, { force: true });
+        await showSuccessAlert('User and active roles/voter records force-deleted successfully');
         loadUsers();
       } catch (error) {
-        setError(capitalizeError(handleApiError(error)));
+        const errMsg = (error.response?.data?.error) || 'Failed to delete user';
+        showErrorAlert(capitalizeError(errMsg));
+      }
+      return;
+    }
+
+    const confirmed = await showDeleteConfirm('this user');
+    if (!confirmed) return;
+
+    try {
+      await usersAPI.delete(userId);
+      await showSuccessAlert('User deleted successfully');
+      loadUsers();
+    } catch (error) {
+      const errData = error.response && error.response.data;
+      if (errData && errData.can_force) {
+        let rawError = capitalizeError(errData.error || '');
+        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
+
+        const forceRequested = await showForceDeleteConfirm({
+          title: 'Active Dependencies Detected',
+          errorText: cleanedError,
+          confirmMessage: 'Are you sure you want to delete this user (and all related role mapping and voter profile data)?',
+        });
+        if (forceRequested) {
+          handleDelete(userId, true);
+        }
+      } else {
+        const errMsg = (errData && errData.error) || 'Failed to delete user';
+        showErrorAlert(capitalizeError(errMsg));
       }
     }
   };
@@ -450,7 +488,7 @@ const Users = () => {
           <DialogTitle>
             {editingUser ? 'Edit User' : 'Add New User'}
           </DialogTitle>
-          <DialogContent>
+          <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
 
             <TextField

@@ -136,6 +136,17 @@ export const PermissionProvider = ({ children }) => {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [refreshPermissions]);
 
+  // Listen for instant permission update events (e.g. from Role/Permission management components)
+  useEffect(() => {
+    const handlePermissionsUpdated = () => {
+      console.log('🔄 [PermissionContext] Instant refresh triggered via permissionsUpdated event');
+      refreshPermissions();
+    };
+
+    window.addEventListener('permissionsUpdated', handlePermissionsUpdated);
+    return () => window.removeEventListener('permissionsUpdated', handlePermissionsUpdated);
+  }, [refreshPermissions]);
+
   // Auto-refresh permissions every 2 minutes for other users' changes
   useEffect(() => {
     if (!isAuthenticated() || !autoRefreshEnabled) return;
@@ -147,13 +158,41 @@ export const PermissionProvider = ({ children }) => {
     return () => clearInterval(interval);
   }, [isAuthenticated(), autoRefreshEnabled]);
 
+  const normalizeKey = (str) => {
+    if (!str) return '';
+    return str.toString().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  };
+
   const hasPermission = (module, action) => {
-    const result = permissions[module] && permissions[module][action] === true;
-    return result;
+    if (!module || !action) return false;
+    if (permissions[module] && permissions[module][action] === true) {
+      return true;
+    }
+    const targetNorm = normalizeKey(module);
+    for (const key of Object.keys(permissions)) {
+      if (normalizeKey(key) === targetNorm) {
+        if (permissions[key] && permissions[key][action] === true) {
+          return true;
+        }
+      }
+    }
+    return false;
   };
 
   const hasAnyPermission = (module) => {
-    return permissions[module] && Object.keys(permissions[module]).length > 0;
+    if (!module) return false;
+    if (permissions[module] && Object.keys(permissions[module]).length > 0) {
+      return true;
+    }
+    const targetNorm = normalizeKey(module);
+    for (const key of Object.keys(permissions)) {
+      if (normalizeKey(key) === targetNorm) {
+        if (permissions[key] && Object.keys(permissions[key]).length > 0) {
+          return true;
+        }
+      }
+    }
+    return false;
   };
 
   const getModuleActions = (module) => {

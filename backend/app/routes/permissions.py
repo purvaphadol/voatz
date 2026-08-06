@@ -45,8 +45,10 @@ def _build_user_permissions(user_id, company_id):
     ).all()
 
     if not sys_modules:
-        # Fallback to all non-deactivated system modules if company_modules not populated
-        sys_modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
+        has_any_provisioned = CompanyModule.query.filter_by(company_id=company_id).filter(CompanyModule.status != STATUS_DEACTIVATED).count() > 0
+        if not has_any_provisioned:
+            # Fallback to all non-deactivated system modules only if company has no provisioned module records at all
+            sys_modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
 
     modules_map = {m.id: m for m in sys_modules}
     actions_map = {a.id: a for a in SystemModuleAction.query.filter(SystemModuleAction.status != STATUS_DEACTIVATED).all()}
@@ -178,7 +180,9 @@ def get_modules_with_actions():
             SystemModule.status != STATUS_DEACTIVATED
         ).all()
         if not modules:
-            modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
+            has_any_provisioned = CompanyModule.query.filter_by(company_id=company_id).filter(CompanyModule.status != STATUS_DEACTIVATED).count() > 0
+            if not has_any_provisioned:
+                modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
         
     result = []
 
@@ -299,13 +303,12 @@ def update_role_permissions(role_id):
         for module_id, actions in permissions_data.items():
             for action_id, granted in actions.items():
                 if granted:
-                    permission = RolePermissionMapping(
-                        role_id=role_id,
-                        module_id=int(module_id),
-                        action_id=int(action_id),
-                        company_id=company_id,
-                        status=STATUS_ACTIVE
-                    )
+                    permission = RolePermissionMapping()
+                    permission.role_id = role_id
+                    permission.module_id = int(module_id)
+                    permission.action_id = int(action_id)
+                    permission.company_id = company_id
+                    permission.status = STATUS_ACTIVE
                     set_audit_fields(permission, is_create=True)
                     db.session.add(permission)
 
@@ -413,15 +416,14 @@ def update_user_permissions(user_id):
                         else:
                             overrides_unchanged += 1
                     else:
-                        new_perm = UserPermissionMapping(
-                            user_id=user_id,
-                            role_id=None,
-                            module_id=module_id_int,
-                            action_id=action_id_int,
-                            permission_type=permission_type,
-                            company_id=company_id,
-                            status=STATUS_ACTIVE
-                        )
+                        new_perm = UserPermissionMapping()
+                        new_perm.user_id = user_id
+                        new_perm.role_id = None
+                        new_perm.module_id = module_id_int
+                        new_perm.action_id = action_id_int
+                        new_perm.permission_type = permission_type
+                        new_perm.company_id = company_id
+                        new_perm.status = STATUS_ACTIVE
                         set_audit_fields(new_perm, is_create=True)
                         db.session.add(new_perm)
                         overrides_added += 1
@@ -475,7 +477,9 @@ def get_user_permissions_for_management(user_id):
         SystemModule.status != STATUS_DEACTIVATED
     ).all()
     if not modules:
-        modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
+        has_any_provisioned = CompanyModule.query.filter_by(company_id=company_id).filter(CompanyModule.status != STATUS_DEACTIVATED).count() > 0
+        if not has_any_provisioned:
+            modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
 
     active_mappings = get_active_user_role_mappings(user_id, company_id)
     role_ids = [ur.role_id for ur in active_mappings]

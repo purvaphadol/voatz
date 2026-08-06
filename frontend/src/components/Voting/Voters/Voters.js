@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -74,7 +74,7 @@ import {
 import { votersAPI, usersAPI, companiesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import { useAuth } from '../../../contexts/AuthContext';
-import { showDeleteConfirm } from '../../../utils/swal';
+import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../../utils/swal';
 import { validateNonNumericText, validateEmail, validatePhone, capitalizeError } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
@@ -171,6 +171,14 @@ const Voters = () => {
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const dialogContentRef = useRef(null);
+
+  useEffect(() => {
+    if (formError && dialogContentRef.current) {
+      dialogContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [formError]);
 
   const canView = hasPermission('Voters', 'view');
   const canCreate = hasPermission('Voters', 'create');
@@ -315,16 +323,44 @@ const Voters = () => {
     }
   };
 
-  const handleDelete = async (voterId) => {
-    const confirmed = await showDeleteConfirm('this voter');
-    if (confirmed) {
+  const handleDelete = async (voterId, force = false) => {
+    if (force) {
+      const finalConfirmed = await showDeleteConfirm('this voter');
+      if (!finalConfirmed) return;
       try {
-        await votersAPI.delete(voterId);
-        setSuccess('Voter deleted successfully');
+        await votersAPI.delete(voterId, { force: true });
+        await showSuccessAlert('Voter and voter registrations force-deleted successfully');
         loadVoters();
         loadStats();
       } catch (error) {
-        setError(capitalizeError('Failed to delete voter'));
+        const errMsg = (error.response?.data?.error) || 'Failed to delete voter';
+        showErrorAlert(capitalizeError(errMsg));
+      }
+      return;
+    }
+
+    try {
+      await votersAPI.delete(voterId);
+      await showSuccessAlert('Voter deleted successfully');
+      loadVoters();
+      loadStats();
+    } catch (error) {
+      const errData = error.response && error.response.data;
+      if (errData && errData.can_force) {
+        let rawError = capitalizeError(errData.error || '');
+        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
+
+        const forceRequested = await showForceDeleteConfirm({
+          title: 'Active Dependencies Detected',
+          errorText: cleanedError,
+          confirmMessage: 'Are you sure you want to delete this voter (and all related registration data)?',
+        });
+        if (forceRequested) {
+          handleDelete(voterId, true);
+        }
+      } else {
+        const errMsg = (errData && errData.error) || 'Failed to delete voter';
+        showErrorAlert(capitalizeError(errMsg));
       }
     }
   };
@@ -744,7 +780,7 @@ const Voters = () => {
           {editingVoter ? 'Edit Voter' : 'Add New Voter'}
         </DialogTitle>
         <form onSubmit={handleSubmit}>
-          <DialogContent>
+          <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             <Grid container spacing={2}>
               {/* Company Selection Field */}
