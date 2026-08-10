@@ -27,7 +27,7 @@
  * The redundant 3rd popup (the duplicated "Are you sure?" inside the force branch) is eliminated.
  */
 
-import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../utils/swal';
+import { showDeleteConfirm, showForceDeleteConfirm, showSuccessToast, showErrorAlert } from '../utils/swal';
 import { capitalizeError } from '../utils/validators';
 
 /**
@@ -56,7 +56,7 @@ export function useDeleteWithDependencies({
     try {
       // Step 2: Attempt normal (non-force) delete
       await deleteApi(id);
-      await showSuccessAlert(successMsg);
+      showSuccessToast(successMsg);
       if (onSuccess) onSuccess();
     } catch (error) {
       const errData = error.response && error.response.data;
@@ -76,7 +76,7 @@ export function useDeleteWithDependencies({
           // Step 4: Force delete — no further popup
           try {
             await deleteApi(id, { force: true });
-            await showSuccessAlert(forceSuccessMsg || successMsg);
+            showSuccessToast(forceSuccessMsg || successMsg);
             if (onSuccess) onSuccess();
           } catch (forceError) {
             const errMsg = (forceError.response?.data?.error) || `Failed to delete ${itemLabel}`;
