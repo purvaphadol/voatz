@@ -27,7 +27,7 @@
  * The redundant 3rd popup (the duplicated "Are you sure?" inside the force branch) is eliminated.
  */
 
-import { showDeleteConfirm, showForceDeleteConfirm, showSuccessToast, showErrorAlert } from '../utils/swal';
+import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../utils/swal';
 import { capitalizeError } from '../utils/validators';
 
 /**
@@ -49,44 +49,66 @@ export function useDeleteWithDependencies({
   onSuccess,
 }) {
   const handleDelete = async (id) => {
-    // Step 1: First confirmation popup — always shown before any destructive action
-    const confirmed = await showDeleteConfirm(itemLabel);
-    if (!confirmed) return;
-
     try {
-      // Step 2: Attempt normal (non-force) delete
-      await deleteApi(id);
-      showSuccessToast(successMsg);
-      if (onSuccess) onSuccess();
-    } catch (error) {
-      const errData = error.response && error.response.data;
+      // Step 1: Pre-flight dry-run check to test for dependencies before displaying popups
+      let hasDependencies = false;
+      let depErrData = null;
 
-      if (errData && errData.can_force) {
-        // Step 3: Dependencies found — show force-delete dialog (2nd popup)
-        let rawError = capitalizeError(errData.error || '');
+      try {
+        await deleteApi(id, { dry_run: true });
+      } catch (checkErr) {
+        depErrData = checkErr.response && checkErr.response.data;
+        if (depErrData && depErrData.can_force) {
+          hasDependencies = true;
+        } else if (depErrData) {
+          // Hard error (e.g. 403 Forbidden, protected record)
+          const errMsg = depErrData.error || `Failed to delete ${itemLabel}`;
+          showErrorAlert(capitalizeError(errMsg));
+          return;
+        }
+      }
+
+      if (hasDependencies && depErrData) {
+        // --- Active Dependencies Exist ---
+        // Popup 1: Active Dependencies Warning
+        let rawError = capitalizeError(depErrData.error || '');
         const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
 
         const forceRequested = await showForceDeleteConfirm({
           title: 'Active Dependencies Detected',
           errorText: cleanedError,
-          confirmMessage: forceConfirmMessage || `Are you sure you want to force delete ${itemLabel} and all associated data?`,
+          confirmMessage: forceConfirmMessage || 'Do you want to proceed with force deletion?',
         });
 
-        if (forceRequested) {
-          // Step 4: Force delete — no further popup
-          try {
-            await deleteApi(id, { force: true });
-            showSuccessToast(forceSuccessMsg || successMsg);
-            if (onSuccess) onSuccess();
-          } catch (forceError) {
-            const errMsg = (forceError.response?.data?.error) || `Failed to delete ${itemLabel}`;
-            showErrorAlert(capitalizeError(errMsg));
-          }
+        if (!forceRequested) return;
+
+        // Popup 2: Final Confirmation
+        const finalConfirmed = await showDeleteConfirm(itemLabel);
+        if (!finalConfirmed) return;
+
+        // Execute Force Delete
+        try {
+          await deleteApi(id, { force: true });
+          await showSuccessAlert(forceSuccessMsg || successMsg);
+          if (onSuccess) onSuccess();
+        } catch (forceError) {
+          const errMsg = (forceError.response?.data?.error) || `Failed to delete ${itemLabel}`;
+          showErrorAlert(capitalizeError(errMsg));
         }
       } else {
-        const errMsg = (errData && errData.error) || `Failed to delete ${itemLabel}`;
-        showErrorAlert(capitalizeError(errMsg));
+        // --- No Dependencies Exist ---
+        // Popup 1: Confirmation Popup
+        const confirmed = await showDeleteConfirm(itemLabel);
+        if (!confirmed) return;
+
+        // Execute Normal Delete
+        await deleteApi(id);
+        await showSuccessAlert(successMsg);
+        if (onSuccess) onSuccess();
       }
+    } catch (error) {
+      const errMsg = (error.response?.data?.error) || `Failed to delete ${itemLabel}`;
+      showErrorAlert(capitalizeError(errMsg));
     }
   };
 

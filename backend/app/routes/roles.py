@@ -330,6 +330,7 @@ def delete_role(role_id):
         return jsonify({'error': 'The Company Super Admin role cannot be deleted'}), 403
 
     force = request.args.get('force', 'false').lower() == 'true'
+    dry_run = request.args.get('dry_run', 'false').lower() == 'true'
 
     from app.models.user_role import UserRoleMapping
     from app.models.role_permission import RolePermissionMapping
@@ -349,6 +350,9 @@ def delete_role(role_id):
             },
             'message': 'Are you sure you want to delete this role (and deactivate all related user role mappings)?'
         }), 400
+
+    if dry_run:
+        return jsonify({'message': 'Pre-flight check passed', 'can_delete': True}), 200
 
     # Deactivate active user role mappings for this role
     active_mappings = UserRoleMapping.query.filter_by(

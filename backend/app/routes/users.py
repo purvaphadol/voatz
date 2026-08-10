@@ -318,6 +318,7 @@ def delete_user(user_id):
         return jsonify({"error": "Super Admin users cannot be deleted"}), 403
 
     force = request.args.get('force', 'false').lower() == 'true'
+    dry_run = request.args.get('dry_run', 'false').lower() == 'true'
 
     active_voters = Voter.query.filter_by(user_id=user_id, company_id=company_id).filter(Voter.status != STATUS_INACTIVE).count()
     active_roles = UserRoleMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserRoleMapping.status != STATUS_INACTIVE).count()
@@ -347,6 +348,9 @@ def delete_user(user_id):
             },
             'message': 'Are you sure you want to delete this user (and all related voter profile and role mapping data)?'
         }), 400
+
+    if dry_run:
+        return jsonify({'message': 'Pre-flight check passed', 'can_delete': True}), 200
 
     # Deactivate linked voter profile
     if active_voters > 0:

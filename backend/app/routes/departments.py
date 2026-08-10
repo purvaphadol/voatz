@@ -259,6 +259,7 @@ def delete_department(department_id):
         ).filter(Department.status != STATUS_INACTIVE).first_or_404()
 
     force = request.args.get('force', 'false').lower() == 'true'
+    dry_run = request.args.get('dry_run', 'false').lower() == 'true'
 
     from app.models.role import Role
     from app.models.user import User
@@ -292,6 +293,9 @@ def delete_department(department_id):
             },
             'message': 'Are you sure you want to delete this department? Assigned users will be unassigned from this department, and department roles will be deactivated.'
         }), 400
+
+    if dry_run:
+        return jsonify({'message': 'Pre-flight check passed', 'can_delete': True}), 200
 
     # If force=true, deactivate assigned department roles
     if active_roles > 0:
