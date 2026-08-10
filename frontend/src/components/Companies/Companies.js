@@ -29,8 +29,9 @@ import {
 } from '@mui/icons-material';
 import { companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
-import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import { validateNonNumericText, validateEmail, validatePhone, validateUrl, capitalizeError } from '../../utils/validators';
+import { useDeleteWithDependencies } from '../../hooks/useDeleteWithDependencies';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -141,49 +142,14 @@ const Companies = () => {
     setDialogOpen(true);
   };
 
-  const handleDelete = async (companyId, force = false) => {
-    if (force) {
-      const finalConfirmed = await showDeleteConfirm('this company');
-      if (!finalConfirmed) return;
-      try {
-        await companiesAPI.delete(companyId, { force: true });
-        await showSuccessAlert('Company and all related data force-deleted successfully');
-        loadCompanies();
-      } catch (error) {
-        const errMsg = (error.response?.data?.error) || 'Failed to delete company';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-      return;
-    }
-
-    const confirmed = await showDeleteConfirm('this company');
-    if (!confirmed) return;
-
-    try {
-      await companiesAPI.delete(companyId);
-      await showSuccessAlert('Company deleted successfully');
-      loadCompanies();
-    } catch (error) {
-      const errData = error.response && error.response.data;
-      if (errData && errData.can_force) {
-        let rawError = capitalizeError(errData.error || '');
-        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
-
-        const forceRequested = await showForceDeleteConfirm({
-          title: 'Active Dependencies Detected',
-          errorText: cleanedError,
-          confirmMessage: 'Are you sure you want to delete this company (and all related user, department, role, election, and voter data)?',
-        });
-
-        if (forceRequested) {
-          handleDelete(companyId, true);
-        }
-      } else {
-        const errMsg = (errData && errData.error) || 'Failed to delete company';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-    }
-  };
+  const handleDelete = useDeleteWithDependencies({
+    deleteApi: companiesAPI.delete,
+    itemLabel: 'this company',
+    successMsg: 'Company deleted successfully',
+    forceSuccessMsg: 'Company and all related data force-deleted successfully',
+    forceConfirmMessage: 'Are you sure you want to delete this company (and all related user, department, role, election, and voter data)?',
+    onSuccess: loadCompanies,
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();

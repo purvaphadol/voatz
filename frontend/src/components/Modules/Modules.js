@@ -48,8 +48,9 @@ import {
 import { modulesAPI, moduleActionsAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import { showDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import { capitalizeError } from '../../utils/validators';
+import { useDeleteWithDependencies } from '../../hooks/useDeleteWithDependencies';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -202,49 +203,21 @@ const Modules = () => {
     setActionsDialogOpen(true);
   };
 
-  const handleDelete = async (moduleId, force = false) => {
+  const _handleDeleteModule = useDeleteWithDependencies({
+    deleteApi: modulesAPI.delete,
+    itemLabel: 'this system module',
+    successMsg: 'System module deleted successfully',
+    forceSuccessMsg: 'System module and all related permissions force-deleted successfully',
+    forceConfirmMessage: 'Are you sure you want to delete this system module (and unassign all related company and role permissions)?',
+    onSuccess: loadModules,
+  });
+
+  const handleDelete = (moduleId) => {
     if (!isPlatformAdmin) {
       setRequestModalOpen(true);
       return;
     }
-    if (force) {
-      const finalConfirmed = await showDeleteConfirm('this system module');
-      if (!finalConfirmed) return;
-      try {
-        await modulesAPI.delete(moduleId, { force: true });
-        await showSuccessAlert('System module and all related permissions force-deleted successfully');
-        loadModules();
-      } catch (error) {
-        const errMsg = (error.response?.data?.error) || 'Failed to delete system module';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-      return;
-    }
-
-    try {
-      await modulesAPI.delete(moduleId);
-      await showSuccessAlert('System module deleted successfully');
-      loadModules();
-    } catch (error) {
-      const errData = error.response && error.response.data;
-      if (errData && errData.can_force) {
-        let rawError = capitalizeError(errData.error || '');
-        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
-
-        const forceRequested = await showForceDeleteConfirm({
-          title: 'Active Dependencies Detected',
-          errorText: cleanedError,
-          confirmMessage: errData.message || 'Are you sure you want to delete this system module (and unassign all related company and role permissions)?',
-        });
-
-        if (forceRequested) {
-          handleDelete(moduleId, true);
-        }
-      } else {
-        const errMsg = (errData && errData.error) || 'Failed to delete system module';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-    }
+    _handleDeleteModule(moduleId);
   };
 
   const handleReactivate = async (moduleId) => {

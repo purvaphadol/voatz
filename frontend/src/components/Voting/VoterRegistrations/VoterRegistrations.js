@@ -84,7 +84,8 @@ import {
 } from '@mui/icons-material';
 import { voterRegistrationsAPI, electionsAPI, votersAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
-import { showDeleteConfirm, showErrorAlert } from '../../../utils/swal';
+import { useDeleteWithDependencies } from '../../../hooks/useDeleteWithDependencies';
+import { showErrorAlert } from '../../../utils/swal';
 import { capitalizeError } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, onBulkApprove, onQuickProcess, onImportRegistrations, onExportReport, hasCreatePermission, hasUpdatePermission, selectedRows }) => (
@@ -369,19 +370,14 @@ const VoterRegistrations = () => {
     }
   };
 
-  const handleDelete = async (registrationId) => {
-    const confirmed = await showDeleteConfirm('this registration');
-    if (confirmed) {
-      try {
-        await voterRegistrationsAPI.delete(registrationId);
-        setSuccess('Registration deleted successfully');
-        loadRegistrations();
-        loadStats();
-      } catch (error) {
-        setError(capitalizeError('Failed to delete registration'));
-      }
-    }
-  };
+  const handleDelete = useDeleteWithDependencies({
+    deleteApi: voterRegistrationsAPI.delete,
+    itemLabel: 'this registration',
+    successMsg: 'Registration deleted successfully',
+    forceSuccessMsg: 'Registration force-deleted successfully',
+    forceConfirmMessage: 'Are you sure you want to force delete this registration?',
+    onSuccess: () => { loadRegistrations(); loadStats(); },
+  });
 
   const handleApprove = (registration) => {
     setProcessingRegistration(registration);

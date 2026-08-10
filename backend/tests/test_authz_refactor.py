@@ -169,134 +169,87 @@ COMPANY_B_ID = b_ids["company_id"]
 B_DEPT_ID    = b_ids["department_id"]
 print(f"  Company B id = {COMPANY_B_ID}, dept_id = {B_DEPT_ID}")
 
-# Provision system modules for Company A and Company B in test suite setup
-db_session = DBSession()
-try:
-    t_sm = meta.tables["system_modules"]
-    t_cm = meta.tables["company_modules"]
-    all_sms = db_session.execute(t_sm.select()).fetchall()
-    now_ts = datetime.now(timezone.utc)
-    for cid in [A_COMPANY_ID, COMPANY_B_ID]:
-        if cid:
-            for sm in all_sms:
-                cm_row = db_session.execute(
-                    t_cm.select().where(
-                        t_cm.c.company_id == cid,
-                        t_cm.c.system_module_id == sm.id
-                    )
-                ).first()
-                if not cm_row:
-                    db_session.execute(
-                        t_cm.insert().values(
-                            company_id=cid,
-                            system_module_id=sm.id,
-                            status=1,
-                            created_at=now_ts,
-                            updated_at=now_ts
-                        )
-                    )
-    db_session.commit()
-finally:
-    db_session.close()
-
-B_SUPER_TOKEN = login_user(B_SUPER_EMAIL, B_SUPER_PASS, "B_SUPER")
-
-# Ensure AuditLogs module and permissions exist for Company A so their Super Admin can list audit logs.
+# Provision system modules and seed explicit permissions for Super Admins of Company A and Company B
 db_session = DBSession()
 try:
     t = meta.tables
-    sys_mod = db_session.execute(
-        t["system_modules"].select().where(
-            t["system_modules"].c.module_name == "AuditLogs"
-        )
-    ).first()
-    
-    if not sys_mod:
-        now = datetime.now()
-        mod_id = db_session.execute(
-            t["system_modules"].insert().values(
-                module_name="AuditLogs",
-                order_index=16,
-                status=1,
-                created_at=now,
-                updated_at=now
-            ).returning(t["system_modules"].c.id)
-        ).scalar()
-    else:
-        mod_id = sys_mod.id
+    all_sys_mods = db_session.execute(
+        t["system_modules"].select().where(t["system_modules"].c.status == 1)
+    ).fetchall()
 
-    cm = db_session.execute(
-        t["company_modules"].select().where(
-            t["company_modules"].c.company_id == A_COMPANY_ID,
-            t["company_modules"].c.system_module_id == mod_id
-        )
-    ).first()
-    if not cm:
-        now = datetime.now()
-        db_session.execute(
-            t["company_modules"].insert().values(
-                company_id=A_COMPANY_ID,
-                system_module_id=mod_id,
-                status=1,
-                created_at=now,
-                updated_at=now
-            )
-        )
-
-    # Get super admin role of Company A
-    sa_role = db_session.execute(
-        t["roles"].select().where(
-            t["roles"].c.company_id == A_COMPANY_ID,
-            t["roles"].c.role_name == "Super Admin"
-        )
-    ).first()
-
-    for act in [{"name": "view", "url": "/view"}, {"name": "create", "url": "/create"}, {"name": "update", "url": "/update"}, {"name": "delete", "url": "/delete"}]:
-        act_row = db_session.execute(
-            t["system_module_actions"].select().where(
-                t["system_module_actions"].c.system_module_id == mod_id,
-                t["system_module_actions"].c.action_name == act["name"]
+    for cid in [A_COMPANY_ID, COMPANY_B_ID]:
+        if not cid:
+            continue
+        sa_role = db_session.execute(
+            t["roles"].select().where(
+                t["roles"].c.company_id == cid,
+                t["roles"].c.is_super_admin == True
             )
         ).first()
-        if not act_row:
-            act_id = db_session.execute(
-                t["system_module_actions"].insert().values(
-                    system_module_id=mod_id,
-                    action_name=act["name"],
-                    action_url=act["url"],
-                    status=1,
-                    created_at=datetime.now(),
-                    updated_at=datetime.now()
-                ).returning(t["system_module_actions"].c.id)
-            ).scalar()
-        else:
-            act_id = act_row.id
 
-        if sa_role:
-            rp = db_session.execute(
-                t["role_permission_mapping"].select().where(
-                    t["role_permission_mapping"].c.company_id == A_COMPANY_ID,
-                    t["role_permission_mapping"].c.role_id == sa_role.id,
-                    t["role_permission_mapping"].c.module_id == mod_id,
-                    t["role_permission_mapping"].c.action_id == act_id
+        for sys_mod in all_sys_mods:
+            mod_id = sys_mod.id
+            cm = db_session.execute(
+                t["company_modules"].select().where(
+                    t["company_modules"].c.company_id == cid,
+                    t["company_modules"].c.system_module_id == mod_id
                 )
             ).first()
-            if not rp:
+            if not cm:
+                now = datetime.now()
                 db_session.execute(
-                    t["role_permission_mapping"].insert().values(
-                        company_id=A_COMPANY_ID,
-                        role_id=sa_role.id,
-                        module_id=mod_id,
-                        action_id=act_id,
+                    t["company_modules"].insert().values(
+                        company_id=cid,
+                        system_module_id=mod_id,
                         status=1,
-                        created_at=datetime.now(),
-                        updated_at=datetime.now()
+                        created_at=now,
+                        updated_at=now
                     )
                 )
+
+            actions = db_session.execute(
+                t["system_module_actions"].select().where(
+                    t["system_module_actions"].c.system_module_id == mod_id,
+                    t["system_module_actions"].c.status == 1
+                )
+            ).fetchall()
+
+            if sa_role:
+                for act_row in actions:
+                    rp = db_session.execute(
+                        t["role_permission_mapping"].select().where(
+                            t["role_permission_mapping"].c.company_id == cid,
+                            t["role_permission_mapping"].c.role_id == sa_role.id,
+                            t["role_permission_mapping"].c.module_id == mod_id,
+                            t["role_permission_mapping"].c.action_id == act_row.id
+                        )
+                    ).first()
+                    if not rp:
+                        db_session.execute(
+                            t["role_permission_mapping"].insert().values(
+                                company_id=cid,
+                                role_id=sa_role.id,
+                                module_id=mod_id,
+                                action_id=act_row.id,
+                                status=1,
+                                created_at=datetime.now(),
+                                updated_at=datetime.now()
+                            )
+                        )
+                    else:
+                        db_session.execute(
+                            t["role_permission_mapping"].update().where(
+                                t["role_permission_mapping"].c.id == rp.id
+                            ).values(status=1, updated_at=datetime.now())
+                        )
     db_session.commit()
-    print("  [OK] Seeded AuditLogs for Company A")
+    print("  [OK] Provisioned modules and seeded explicit permissions for Company A and B Super Admins")
 finally:
     db_session.close()
+
+# Refresh tokens so JWT claims / user perms reflect the newly seeded explicit permissions
+A_SUPER_TOKEN = login_user(A_SUPER_EMAIL, A_SUPER_PASS, "A_SUPER (rushiraj)")
+B_SUPER_TOKEN = login_user(B_SUPER_EMAIL, B_SUPER_PASS, "B_SUPER")
 
 # Resolve Company A dept — filter strictly to Company A to avoid picking up
 # freshly-seeded Company B dept which sorts first by updated_at.
@@ -459,7 +412,9 @@ if super_role_id:
         record("6.4", "Company Super Admin can update non-protected role permissions -> 200", 200, r_perm_non_super)
 
     # 6.5 - Platform Administrator CAN update permissions for Company Super Admin role -> 200
-    r_perm_admin = requests.post(f"{BASE}/permissions/role/{super_role_id}", headers=ah(ADMIN_TOKEN), json={"permissions": {}})
+    r_get_perms = requests.get(f"{BASE}/permissions/role/{super_role_id}", headers=ah(ADMIN_TOKEN))
+    existing_perms = r_get_perms.json().get("permissions", {}) if r_get_perms.status_code == 200 else {}
+    r_perm_admin = requests.post(f"{BASE}/permissions/role/{super_role_id}", headers=ah(ADMIN_TOKEN), json={"permissions": existing_perms})
     record("6.5", "Platform Administrator can update Company Super Admin role permissions -> 200", 200, r_perm_admin)
 else:
     print("  [SKIP] 6.1-6.5 — Company Super Admin role not found")
@@ -1155,8 +1110,21 @@ try:
 
     now_utc = datetime.now(timezone.utc)
     db_s.execute(t_cm.delete().where(t_cm.c.company_id == p_ids["company_id"]))
+    t_rpm = meta.tables['role_permission_mapping']
+    t_sma = meta.tables['system_module_actions']
     for m_id in target_mod_ids:
         db_s.execute(t_cm.insert().values(company_id=p_ids["company_id"], system_module_id=m_id, status=1, created_at=now_utc, updated_at=now_utc))
+        actions = db_s.execute(t_sma.select().where(t_sma.c.system_module_id == m_id, t_sma.c.status == 1)).fetchall()
+        for act in actions:
+            db_s.execute(t_rpm.insert().values(
+                company_id=p_ids["company_id"],
+                role_id=p_ids["super_admin_role_id"],
+                module_id=m_id,
+                action_id=act.id,
+                status=1,
+                created_at=now_utc,
+                updated_at=now_utc
+            ))
     db_s.commit()
 finally:
     db_s.close()

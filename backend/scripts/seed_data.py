@@ -346,11 +346,13 @@ def seed_company(
             )
 
     # 6. NOTE: Intentionally do NOT bulk-assign RolePermissionMapping rows for the Super Admin role.
-    # Company Super Admin's access is automatically bounded by CompanyModule provisioning at the
-    # application logic layer (check_user_permission / get_user_permissions_summary).
-    # Seed scripts must never bulk-grant RolePermissionMapping rows to the Super Admin role,
-    # as doing so bypasses the multi-tenant provisioning boundary and grants explicit permissions
-    # for modules that were never provisioned to the company.
+    # Company Super Admin is NOT automatically granted any permissions — it is treated exactly like
+    # any other role. Its capabilities come entirely from explicit RolePermissionMapping rows created
+    # by a Platform Administrator through the Permissions UI. A freshly seeded company's Super Admin
+    # role correctly starts with zero permissions and zero provisioned modules (CompanyModule rows).
+    # Both must be explicitly granted afterward through the real application by a Platform Admin:
+    # granting a permission on the Permissions screen auto-creates the CompanyModule row (provisioning)
+    # AND the RolePermissionMapping row (the actual permission) together in one action.
 
     return {
         "company_id": company_id,

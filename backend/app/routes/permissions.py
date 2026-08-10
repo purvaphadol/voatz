@@ -418,12 +418,10 @@ def update_user_permissions(user_id):
         role_permissions = get_active_role_permissions(role_ids, company_id)
         role_perm_map = {(rp.module_id, rp.action_id): True for rp in role_permissions}
 
-        # Step 2: Fetch existing active user-specific overrides
-        existing_overrides = UserPermissionMapping.query.filter(
-            UserPermissionMapping.user_id == user_id,
-            UserPermissionMapping.company_id == company_id,
-            UserPermissionMapping.status != STATUS_INACTIVE,
-            UserPermissionMapping.status != STATUS_DEACTIVATED
+        # Step 2: Fetch ALL existing user-specific overrides for this user & company (active or inactive)
+        existing_overrides = UserPermissionMapping.query.filter_by(
+            user_id=user_id,
+            company_id=company_id
         ).all()
 
         # Build a map of existing overrides keyed by (module_id, action_id)
@@ -432,58 +430,94 @@ def update_user_permissions(user_id):
             for up in existing_overrides
         }
 
-        # Step 3: Process incoming permissions — diff against existing overrides
+        # Step 3: Auto-provision CompanyModule for any module where at least one action
+        # is being granted (permission_type=1 override, or role doesn't already have it).
+        # This mirrors update_role_permissions() exactly: granting any permission through
+        # the Permissions UI is the only way to provision a module, so we ensure the
+        # CompanyModule row exists before writing UserPermissionMapping rows.
+        modules_granting = set()
+        for module_id_str, actions in permissions_data.items():
+            mod_id_int = int(module_id_str)
+            for action_id_str, granted in actions.items():
+                if bool(granted):
+                    modules_granting.add(mod_id_int)
+
+        for mod_id_int in modules_granting:
+            cm = CompanyModule.query.filter_by(
+                company_id=company_id,
+                system_module_id=mod_id_int
+            ).first()
+            if cm:
+                if cm.status != STATUS_ACTIVE:
+                    cm.status = STATUS_ACTIVE
+                    set_audit_fields(cm, is_create=False)
+            else:
+                cm = CompanyModule(
+                    company_id=company_id,
+                    system_module_id=mod_id_int,
+                    status=STATUS_ACTIVE
+                )
+                set_audit_fields(cm, is_create=True)
+                db.session.add(cm)
+
+        # Step 4: Process incoming permissions — diff against existing overrides
         overrides_added = 0
         overrides_removed = 0
         overrides_unchanged = 0
 
         incoming_keys = set()
 
-        for module_id, actions in permissions_data.items():
-            for action_id, granted in actions.items():
-                module_id_int = int(module_id)
-                action_id_int = int(action_id)
-                key = (module_id_int, action_id_int)
+        for module_id_str, actions in permissions_data.items():
+            mod_id_int = int(module_id_str)
+            for action_id_str, granted in actions.items():
+                action_id_int = int(action_id_str)
+                key = (mod_id_int, action_id_int)
                 incoming_keys.add(key)
 
                 has_from_role = key in role_perm_map
                 granted_bool = bool(granted)
-                needs_override = granted_bool != has_from_role
+                needs_override = (granted_bool != has_from_role)
 
                 existing = existing_map.get(key)
 
                 if needs_override:
-                    permission_type = 1 if granted_bool else 0
+                    target_permission_type = 1 if granted_bool else 0
                     if existing:
-                        if existing.permission_type != permission_type:
-                            existing.permission_type = permission_type
+                        if existing.status == STATUS_ACTIVE and existing.permission_type == target_permission_type:
+                            overrides_unchanged += 1
+                        else:
+                            existing.permission_type = target_permission_type
+                            existing.status = STATUS_ACTIVE
                             set_audit_fields(existing, is_create=False)
                             overrides_added += 1
-                        else:
-                            overrides_unchanged += 1
                     else:
-                        new_perm = UserPermissionMapping()
-                        new_perm.user_id = user_id
-                        new_perm.role_id = None
-                        new_perm.module_id = module_id_int
-                        new_perm.action_id = action_id_int
-                        new_perm.permission_type = permission_type
-                        new_perm.company_id = company_id
-                        new_perm.status = STATUS_ACTIVE
+                        new_perm = UserPermissionMapping(
+                            user_id=user_id,
+                            role_id=None,
+                            module_id=mod_id_int,
+                            action_id=action_id_int,
+                            permission_type=target_permission_type,
+                            company_id=company_id,
+                            status=STATUS_ACTIVE
+                        )
                         set_audit_fields(new_perm, is_create=True)
                         db.session.add(new_perm)
                         overrides_added += 1
                 else:
                     if existing:
-                        existing.status = STATUS_INACTIVE
-                        set_audit_fields(existing, is_create=False)
-                        overrides_removed += 1
+                        if existing.status != STATUS_INACTIVE:
+                            existing.status = STATUS_INACTIVE
+                            set_audit_fields(existing, is_create=False)
+                            overrides_removed += 1
+                        else:
+                            overrides_unchanged += 1
 
         for key, existing in existing_map.items():
             if key not in incoming_keys:
-                existing.status = STATUS_INACTIVE
-                set_audit_fields(existing, is_create=False)
-                overrides_removed += 1
+                if existing.status != STATUS_INACTIVE:
+                    existing.status = STATUS_INACTIVE
+                    set_audit_fields(existing, is_create=False)
+                    overrides_removed += 1
 
         return safe_commit(
             (jsonify({

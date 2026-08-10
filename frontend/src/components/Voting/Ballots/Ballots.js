@@ -78,8 +78,9 @@ import {
 } from '@mui/icons-material';
 import { ballotsAPI, electionsAPI, candidatesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
-import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../../utils/swal';
+import { showSuccessAlert, showErrorAlert } from '../../../utils/swal';
 import { validateNonNumericText, capitalizeError } from '../../../utils/validators';
+import { useDeleteWithDependencies } from '../../../hooks/useDeleteWithDependencies';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -309,47 +310,14 @@ const Ballots = () => {
     }
   };
 
-  const handleDelete = async (ballotId, force = false) => {
-    if (force) {
-      const finalConfirmed = await showDeleteConfirm('this ballot');
-      if (!finalConfirmed) return;
-      try {
-        await ballotsAPI.delete(ballotId, { force: true });
-        await showSuccessAlert('Ballot and associated candidates force-deleted successfully');
-        loadBallots();
-        loadStats();
-      } catch (error) {
-        const errMsg = (error.response?.data?.error) || 'Failed to delete ballot';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-      return;
-    }
-
-    try {
-      await ballotsAPI.delete(ballotId);
-      await showSuccessAlert('Ballot deleted successfully');
-      loadBallots();
-      loadStats();
-    } catch (error) {
-      const errData = error.response && error.response.data;
-      if (errData && errData.can_force) {
-        let rawError = capitalizeError(errData.error || '');
-        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
-
-        const forceRequested = await showForceDeleteConfirm({
-          title: 'Active Dependencies Detected',
-          errorText: cleanedError,
-          confirmMessage: 'Are you sure you want to delete this ballot (and all related candidate data)?',
-        });
-        if (forceRequested) {
-          handleDelete(ballotId, true);
-        }
-      } else {
-        const errMsg = (errData && errData.error) || 'Failed to delete ballot';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-    }
-  };
+  const handleDelete = useDeleteWithDependencies({
+    deleteApi: ballotsAPI.delete,
+    itemLabel: 'this ballot',
+    successMsg: 'Ballot deleted successfully',
+    forceSuccessMsg: 'Ballot and associated candidates force-deleted successfully',
+    forceConfirmMessage: 'Are you sure you want to delete this ballot (and all related candidate data)?',
+    onSuccess: () => { loadBallots(); loadStats(); },
+  });
 
   const handlePublish = async (ballotId) => {
     try {

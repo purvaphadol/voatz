@@ -29,8 +29,9 @@ import {
 import { usersAPI, departmentsAPI, companiesAPI, handleApiError } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import { validateNonNumericText, validateEmail, capitalizeError } from '../../utils/validators';
+import { useDeleteWithDependencies } from '../../hooks/useDeleteWithDependencies';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -192,48 +193,14 @@ const Users = () => {
     setDialogOpen(true);
   };
 
-  const handleDelete = async (userId, force = false) => {
-    if (force) {
-      const finalConfirmed = await showDeleteConfirm('this user');
-      if (!finalConfirmed) return;
-      try {
-        await usersAPI.delete(userId, { force: true });
-        await showSuccessAlert('User and active roles/voter records force-deleted successfully');
-        loadUsers();
-      } catch (error) {
-        const errMsg = (error.response?.data?.error) || 'Failed to delete user';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-      return;
-    }
-
-    const confirmed = await showDeleteConfirm('this user');
-    if (!confirmed) return;
-
-    try {
-      await usersAPI.delete(userId);
-      await showSuccessAlert('User deleted successfully');
-      loadUsers();
-    } catch (error) {
-      const errData = error.response && error.response.data;
-      if (errData && errData.can_force) {
-        let rawError = capitalizeError(errData.error || '');
-        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
-
-        const forceRequested = await showForceDeleteConfirm({
-          title: 'Active Dependencies Detected',
-          errorText: cleanedError,
-          confirmMessage: 'Are you sure you want to delete this user (and all related role mapping and voter profile data)?',
-        });
-        if (forceRequested) {
-          handleDelete(userId, true);
-        }
-      } else {
-        const errMsg = (errData && errData.error) || 'Failed to delete user';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-    }
-  };
+  const handleDelete = useDeleteWithDependencies({
+    deleteApi: usersAPI.delete,
+    itemLabel: 'this user',
+    successMsg: 'User deleted successfully',
+    forceSuccessMsg: 'User and active roles/voter records force-deleted successfully',
+    forceConfirmMessage: 'Are you sure you want to delete this user (and all related role mapping and voter profile data)?',
+    onSuccess: loadUsers,
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();

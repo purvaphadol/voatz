@@ -33,8 +33,9 @@ import {
 import { rolesAPI, departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import { validateNonNumericText, capitalizeError } from '../../utils/validators';
+import { useDeleteWithDependencies } from '../../hooks/useDeleteWithDependencies';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -172,48 +173,14 @@ const Roles = () => {
     setDialogOpen(true);
   };
 
-  const handleDelete = async (roleId, force = false) => {
-    if (force) {
-      const finalConfirmed = await showDeleteConfirm('this role');
-      if (!finalConfirmed) return;
-      try {
-        await rolesAPI.delete(roleId, { force: true });
-        await showSuccessAlert('Role and user role mappings force-deleted successfully');
-        loadRoles();
-      } catch (error) {
-        const errMsg = (error.response?.data?.error) || 'Failed to delete role';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-      return;
-    }
-
-    const confirmed = await showDeleteConfirm('this role');
-    if (!confirmed) return;
-
-    try {
-      await rolesAPI.delete(roleId);
-      await showSuccessAlert('Role deleted successfully');
-      loadRoles();
-    } catch (error) {
-      const errData = error.response && error.response.data;
-      if (errData && errData.can_force) {
-        let rawError = capitalizeError(errData.error || '');
-        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
-
-        const forceRequested = await showForceDeleteConfirm({
-          title: 'Active Dependencies Detected',
-          errorText: cleanedError,
-          confirmMessage: 'Are you sure you want to delete this role (and all related user role mapping data)?',
-        });
-        if (forceRequested) {
-          handleDelete(roleId, true);
-        }
-      } else {
-        const errMsg = (errData && errData.error) || 'Failed to delete role';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-    }
-  };
+  const handleDelete = useDeleteWithDependencies({
+    deleteApi: rolesAPI.delete,
+    itemLabel: 'this role',
+    successMsg: 'Role deleted successfully',
+    forceSuccessMsg: 'Role and user role mappings force-deleted successfully',
+    forceConfirmMessage: 'Are you sure you want to delete this role (and all related user role mapping data)?',
+    onSuccess: loadRoles,
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();

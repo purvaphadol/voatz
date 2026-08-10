@@ -34,8 +34,9 @@ import {
 import { departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import { validateNonNumericText, capitalizeError } from '../../utils/validators';
+import { useDeleteWithDependencies } from '../../hooks/useDeleteWithDependencies';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -169,48 +170,14 @@ const Departments = () => {
     setDialogOpen(true);
   };
 
-  const handleDelete = async (departmentId, force = false) => {
-    if (force) {
-      const finalConfirmed = await showDeleteConfirm('this department');
-      if (!finalConfirmed) return;
-      try {
-        await departmentsAPI.delete(departmentId, { force: true });
-        await showSuccessAlert('Department deleted successfully. Assigned users were unassigned and department roles deactivated.');
-        loadDepartments();
-      } catch (error) {
-        const errMsg = (error.response?.data?.error) || 'Failed to delete department';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-      return;
-    }
-
-    const confirmed = await showDeleteConfirm('this department');
-    if (!confirmed) return;
-
-    try {
-      await departmentsAPI.delete(departmentId);
-      await showSuccessAlert('Department deleted successfully');
-      loadDepartments();
-    } catch (error) {
-      const errData = error.response && error.response.data;
-      if (errData && errData.can_force) {
-        let rawError = capitalizeError(errData.error || '');
-        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
-
-        const forceRequested = await showForceDeleteConfirm({
-          title: 'Active Dependencies Detected',
-          errorText: cleanedError,
-          confirmMessage: 'Are you sure you want to delete this department? Assigned users will be unassigned from this department, and department roles will be deactivated.',
-        });
-        if (forceRequested) {
-          handleDelete(departmentId, true);
-        }
-      } else {
-        const errMsg = (errData && errData.error) || 'Failed to delete department';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-    }
-  };
+  const handleDelete = useDeleteWithDependencies({
+    deleteApi: departmentsAPI.delete,
+    itemLabel: 'this department',
+    successMsg: 'Department deleted successfully',
+    forceSuccessMsg: 'Department deleted successfully. Assigned users were unassigned and department roles deactivated.',
+    forceConfirmMessage: 'Are you sure you want to delete this department? Assigned users will be unassigned from this department, and department roles will be deactivated.',
+    onSuccess: loadDepartments,
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();

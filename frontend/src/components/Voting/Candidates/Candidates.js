@@ -65,7 +65,8 @@ import {
 } from '@mui/icons-material';
 import { candidatesAPI, ballotsAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
-import { showDeleteConfirm, showConfirmDialog } from '../../../utils/swal';
+import { useDeleteWithDependencies } from '../../../hooks/useDeleteWithDependencies';
+import { showConfirmDialog } from '../../../utils/swal';
 import { validateNonNumericText, validateEmail, validatePhone, validateUrl, capitalizeError } from '../../../utils/validators';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
@@ -324,19 +325,14 @@ const Candidates = () => {
     }
   };
 
-  const handleDelete = async (candidateId) => {
-    const confirmed = await showDeleteConfirm('this candidate');
-    if (confirmed) {
-      try {
-        await candidatesAPI.delete(candidateId);
-        setSuccess('Candidate deleted successfully');
-        loadCandidates();
-        loadStats();
-      } catch (error) {
-        setError(capitalizeError('Failed to delete candidate'));
-      }
-    }
-  };
+  const handleDelete = useDeleteWithDependencies({
+    deleteApi: candidatesAPI.delete,
+    itemLabel: 'this candidate',
+    successMsg: 'Candidate deleted successfully',
+    forceSuccessMsg: 'Candidate force-deleted successfully',
+    forceConfirmMessage: 'Are you sure you want to force delete this candidate?',
+    onSuccess: () => { loadCandidates(); loadStats(); },
+  });
 
   const handleWithdraw = (candidate) => {
     setWithdrawCandidate(candidate);

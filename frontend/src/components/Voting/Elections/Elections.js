@@ -55,10 +55,11 @@ import {
 import { electionsAPI, companiesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import { useAuth } from '../../../contexts/AuthContext';
-import { showDeleteConfirm, showForceDeleteConfirm, showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../../utils/swal';
+import { showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../../utils/swal';
 import { validateNonNumericText, validateDateRange, capitalizeError } from '../../../utils/validators';
 import ElectionResults from './ElectionResults';
 import ElectionWorkflow from './ElectionWorkflow';
+import { useDeleteWithDependencies } from '../../../hooks/useDeleteWithDependencies';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -273,47 +274,14 @@ const Elections = () => {
     setSuccess(`Election status changed to ${newStatus} successfully`);
   };
 
-  const handleDelete = async (electionId, force = false) => {
-    if (force) {
-      const finalConfirmed = await showDeleteConfirm('this election');
-      if (!finalConfirmed) return;
-      try {
-        await electionsAPI.delete(electionId, { force: true });
-        await showSuccessAlert('Election and associated ballots/registrations force-deleted successfully');
-        loadElections();
-        loadStats();
-      } catch (error) {
-        const errMsg = (error.response?.data?.error) || 'Failed to delete election';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-      return;
-    }
-
-    try {
-      await electionsAPI.delete(electionId);
-      await showSuccessAlert('Election deleted successfully');
-      loadElections();
-      loadStats();
-    } catch (error) {
-      const errData = error.response && error.response.data;
-      if (errData && errData.can_force) {
-        let rawError = capitalizeError(errData.error || '');
-        const cleanedError = rawError.replace(/,?\s*or use Force Delete\.?$/i, '.');
-
-        const forceRequested = await showForceDeleteConfirm({
-          title: 'Active Dependencies Detected',
-          errorText: cleanedError,
-          confirmMessage: 'Are you sure you want to delete this election (and all related ballot and voter registration data)?',
-        });
-        if (forceRequested) {
-          handleDelete(electionId, true);
-        }
-      } else {
-        const errMsg = (errData && errData.error) || 'Failed to delete election';
-        showErrorAlert(capitalizeError(errMsg));
-      }
-    }
-  };
+  const handleDelete = useDeleteWithDependencies({
+    deleteApi: electionsAPI.delete,
+    itemLabel: 'this election',
+    successMsg: 'Election deleted successfully',
+    forceSuccessMsg: 'Election and associated ballots/registrations force-deleted successfully',
+    forceConfirmMessage: 'Are you sure you want to delete this election (and all related ballot and voter registration data)?',
+    onSuccess: () => { loadElections(); loadStats(); },
+  });
 
   const handleActivate = async (electionId) => {
     try {
