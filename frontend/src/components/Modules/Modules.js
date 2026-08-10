@@ -337,17 +337,17 @@ const Modules = () => {
     });
   };
 
-  const handleDeleteAction = async (actionId) => {
-    const confirmed = await showDeleteConfirm('this action');
-    if (confirmed) {
-      try {
-        await moduleActionsAPI.deleteAction(actionId);
-        setSuccess('Action deleted successfully');
-        loadModuleActions(selectedModule.id);
-      } catch (error) {
-        setFormError(capitalizeError(error.response?.data?.error || 'Failed to delete action'));
-      }
-    }
+  const _handleDeleteAction = useDeleteWithDependencies({
+    deleteApi: moduleActionsAPI.deleteAction,
+    itemLabel: 'this module action',
+    successMsg: 'Module action deleted successfully',
+    onSuccess: () => {
+      if (selectedModule) loadModuleActions(selectedModule.id);
+    },
+  });
+
+  const handleDeleteAction = (actionId) => {
+    _handleDeleteAction(actionId);
   };
 
   const handleCloseDialog = () => {
