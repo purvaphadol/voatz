@@ -163,8 +163,35 @@ export const PermissionProvider = ({ children }) => {
     return str.toString().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
   };
 
-  const hasPermission = (module, action) => {
+  const hasPermissionByRoute = (routeName, action = 'view') => {
+    if (!routeName || !action) return false;
+    const targetNorm = normalizeKey(routeName);
+
+    const item = menu.find(m => {
+      if (m.route_name && normalizeKey(m.route_name) === targetNorm) return true;
+      if (m.route && normalizeKey(m.route) === targetNorm) return true;
+      if (m.module && normalizeKey(m.module) === targetNorm) return true;
+      return false;
+    });
+
+    if (item && item.actions) {
+      return item.actions.some(a => a.name === action);
+    }
+
+    for (const key of Object.keys(permissions)) {
+      if (normalizeKey(key) === targetNorm) {
+        if (permissions[key] && permissions[key][action] === true) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
+  const hasPermission = (module, action = 'view') => {
     if (!module || !action) return false;
+    if (hasPermissionByRoute(module, action)) return true;
     if (permissions[module] && permissions[module][action] === true) {
       return true;
     }
@@ -181,6 +208,7 @@ export const PermissionProvider = ({ children }) => {
 
   const hasAnyPermission = (module) => {
     if (!module) return false;
+    if (hasPermissionByRoute(module, 'view')) return true;
     if (permissions[module] && Object.keys(permissions[module]).length > 0) {
       return true;
     }
@@ -196,7 +224,7 @@ export const PermissionProvider = ({ children }) => {
   };
 
   const getModuleActions = (module) => {
-    const menuItem = menu.find(item => item.module === module);
+    const menuItem = menu.find(item => item.module === module || item.route_name === module || item.route === module);
     return (menuItem && menuItem.actions) || [];
   };
 
@@ -212,6 +240,7 @@ export const PermissionProvider = ({ children }) => {
     lastRefresh,
     autoRefreshEnabled,
     hasPermission,
+    hasPermissionByRoute,
     hasAnyPermission,
     getModuleActions,
     loadPermissions,

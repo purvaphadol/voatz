@@ -1,113 +1,75 @@
-# Coding, Architecture & Security Standards
+# Coding & Security Standards
 
-## 1. Code Architecture & OOP Principles
+## 1. Core Coding Standards
 
-All code in the project must follow clean Object-Oriented Programming (OOP) and DRY (Don't Repeat Yourself) principles:
+### **Immutable Module Keys vs. Editable Display Names**
+- **Rule**: Permission checks, route guards, and navigation items MUST evaluate immutable module codes (`module.code`), NEVER human-editable display names (`module.display_name`).
+- **Backend Guard**: `@require_permission('modules', 'view')`
+- **Frontend Guard**: `hasPermission('modules', 'view')`
 
-- **Single Responsibility Principle**: Route handlers process HTTP requests/responses, models handle data persistence and properties, and validation logic resides strictly in utility modules.
-- **Reusable Utility Functions**: Common operations (such as commit wrappers, datetime parsers, permission checks) must be implemented as clean, reusable functions in `app/utils/`.
-- **Modular Blueprint Structure**: Backend routes must be split into feature-specific Flask Blueprints (`companies_bp`, `elections_bp`, `votes_bp`, etc.).
-
----
-
-## 2. Centralized Input Validation Rules (`app/utils/validators.py`)
-
-All input validation, sanitization, type checking, and boundary rules MUST be centralized inside `app/utils/validators.py`. Route handlers must NOT perform inline ad-hoc input validation.
-
-### Standard Validation Functions Pattern:
-```python
-# Example pattern in app/utils/validators.py
-def validate_election_input(data, is_create=True):
-    cleaned_data = {}
-    if is_create and not data.get('title'):
-        return None, (jsonify({'error': 'Title is required'}), 400)
-    # Perform type conversion, string stripping, sanitization...
-    return cleaned_data, None
-```
-
-### Usage in Route Handlers:
-```python
-cleaned_data, error = validate_election_input(request.get_json(), is_create=True)
-if error:
-    return error
-```
-
----
-
-## 3. Indian Standard Time (IST - UTC+05:30) Standard
-
-All date and time calculations must use **Indian Standard Time (IST)**:
+### **3-Status Entity Lifecycle Standard**
+All domain models MUST adhere to the standard 3-status entity lifecycle:
 
 ```python
-from datetime import datetime, timezone, timedelta
+from enum import IntEnum
 
-# IST Timezone Definition
-IST = timezone(timedelta(hours=5, minutes=30))
-
-def get_current_ist_time():
-    return datetime.now(IST)
-
-def ensure_ist(dt):
-    """Converts naive or aware datetime to IST aware datetime."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=IST)
-    return dt.astimezone(IST)
+class StatusEnum(IntEnum):
+    INACTIVE = 0  # Temporarily disabled/paused by admin
+    ACTIVE = 1    # Fully operational
+    DELETED = 9   # Soft-deleted (excluded from active queries, retained for audit)
 ```
 
-- When comparing database datetime fields against current timestamps, always wrap both in `ensure_ist()` to prevent `TypeError: can't compare offset-naive and offset-aware datetimes`.
+- **UI Toggle**: An `Active <-> Inactive` toggle switch switches status between `1` and `0`.
+- **UI Delete**: The Delete button prompts for confirmation and sets status to `9`.
+
+### **Protected System Roles & Permissions**
+- Roles with `is_system = True` (e.g. `Company Super Admin`) cannot be edited or deleted by Company Super Admins.
+- Backend API endpoints (`PUT /api/roles/<id>`, `DELETE /api/roles/<id>`) return `403 Forbidden` if a non-Platform Admin attempts to modify an `is_system` role.
 
 ---
 
-## 4. Multi-Tenant Security & Isolation Standards
+## 2. API Response & Error Handling Standards
 
-1. **Company Isolation**: All database queries for non-platform admin users MUST filter by `company_id = get_current_company_id()`.
-2. **IDOR & Cross-Tenant Leakage Protection**:
-   - Access attempts to resources belonging to another company must return `404 Not Found` (to avoid leaking resource existence) or `403 Forbidden`.
-3. **Route Permission Decorator**:
-   All protected endpoints MUST be decorated with `@require_permission(module_name, action_name)`:
-   ```python
-   @elections_bp.route('/', methods=['POST'])
-   @require_permission('Elections', 'create')
-   @audit_action('create_election', module='Elections')
-   def create_election():
-       ...
-   ```
-4. **Company Super Admin Privilege**:
-   - Users with a role where `is_super_admin = True` automatically pass `check_user_permission` for any module provisioned for their company.
-   - Company Super Admin roles cannot be deleted, edited, or self-deleted.
+### **Standardized ApiResponse Format**
+All Flask route handlers MUST return consistent JSON responses using the `ApiResponse` class:
 
----
+```python
+# Success Response (HTTP 200/201)
+{
+    "success": true,
+    "message": "Operation completed successfully",
+    "data": { ... }
+}
 
-## 5. Database Transaction Safety (`safe_commit` & `flush`)
+# Error Response (HTTP 400/401/403/404/500)
+{
+    "success": false,
+    "error": "Specific error message explaining the failure",
+    "details": { ... }
+}
+```
 
-1. **Atomic Flush**: When creating dependent entities within a single request (e.g. creating a `Voter` and then registering them), call `db.session.flush()` after adding the first object to generate its primary key before querying or creating child records.
-2. **`safe_commit` Wrapper**: All DB commit operations MUST use the `safe_commit` helper to catch database errors and perform automatic rollback on failure:
-   ```python
-   from app.utils.db_utils import safe_commit
-
-   return safe_commit(
-       (jsonify({'message': 'Resource created successfully', 'id': resource.id}), 201),
-       'Failed to create resource due to internal database error'
-   )
-   ```
+### **Frontend Error Handling Rules**
+- Catch blocks in React components MUST NOT swallow error details or replace them with generic `"Failed to load"` strings.
+- Always extract and display `err.response?.data?.error` to provide actionable feedback to the user.
 
 ---
 
-## 6. Audit Trail Logging (`@audit_action`)
+## 3. Database Scoping & OOP Reusability
 
-- Major state changes (creating companies, updating roles, changing election status, casting votes, publishing results) MUST be annotated with `@audit_action(action_name, module=module_name)`.
-- Audit logs capture `company_id`, `user_id`, `module_name`, `action_name`, `ip_address`, `user_agent`, and `timestamp` in IST.
+- All tenant models inherit from `TenantScopedMixin`.
+- Standard queries use `Model.query_tenant(current_user)` to ensure tenant isolation and soft-delete filtering in a single line.
+
+```python
+# Standard tenant-scoped query
+users = User.query_tenant(current_user).all()
+```
 
 ---
 
-## 7. Entity Lifecycle & Status Standards (`app/utils/constants.py`)
+## 4. Security Standards
 
-All core domain entities utilize a standardized 3-tier lifecycle status defined in `app/utils/constants.py`:
-
-* **`STATUS_ACTIVE = 1` (Active / Operational)**: Currently enabled, operational, and open for standard UI & API operations.
-* **`STATUS_INACTIVE = 0` (Paused / Disabled)**: Exists in the system but temporarily paused or disabled. Can be toggled back to Active later from the UI.
-* **`STATUS_DEACTIVATED = 9` (Deleted / Historical)**: Soft-deleted / purged from standard application views. Never shown on UI lists and excluded from standard queries. The record is preserved in the database strictly for historical/audit integrity, but treated by the application as deleted.
-
-Standard query helpers in `app/utils/query_helpers.py` automatically exclude `STATUS_DEACTIVATED = 9` records from list queries.
+1. **Rate Limiting**: Login routes (`/api/auth/login`) MUST be protected by rate limiting (max 5 failed attempts per minute per IP).
+2. **Password Security**: Passwords hashed using salted PBKDF2/Bcrypt.
+3. **Deny-by-Default Authorization**: Access is denied unless an explicit role-permission or user-permission mapping exists.
+4. **Audit Logging**: All write actions (Create, Update, Delete, Publish, Tally) MUST record an entry in `audit_logs` with IST timestamp, actor `user_id`, and `company_id`.

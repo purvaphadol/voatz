@@ -76,6 +76,7 @@ const Layout = ({ children }) => {
     menu, 
     hasAnyPermission, 
     hasPermission,
+    hasPermissionByRoute,
     permissions,
     loading: permissionsLoading, 
     lastRefresh
@@ -152,27 +153,30 @@ const Layout = ({ children }) => {
 
           const hardcodedModuleMap = {};
           navigationItems.forEach((item) => {
+            const routeSlug = item.path.replace('/', '');
             const keys = [
+              routeSlug,
+              normalizeKey(routeSlug),
               item.permission,
-              item.path.replace('/', ''),
-              normalizeKey(item.permission),
-              normalizeKey(item.path.replace('/', ''))
+              normalizeKey(item.permission)
             ];
             keys.forEach(k => {
-              if (k) hardcodedModuleMap[k] = item;
+              if (k && !hardcodedModuleMap[k]) hardcodedModuleMap[k] = item;
             });
           });
 
           const allMenuItems = [];
           
           menu.forEach((moduleItem) => {
-            if (hasPermission(moduleItem.module, 'view') || hasPermission(moduleItem.route_name || '', 'view') || hasPermission(moduleItem.route || '', 'view')) {
+            const rName = moduleItem.route_name || moduleItem.route || moduleItem.module;
+            if (hasPermissionByRoute(rName, 'view') || hasPermission(moduleItem.module, 'view')) {
               const hardcodedItem = 
-                hardcodedModuleMap[moduleItem.module] ||
                 (moduleItem.route_name && hardcodedModuleMap[moduleItem.route_name]) ||
                 (moduleItem.route && hardcodedModuleMap[moduleItem.route]) ||
-                hardcodedModuleMap[normalizeKey(moduleItem.module)] ||
-                (moduleItem.route_name && hardcodedModuleMap[normalizeKey(moduleItem.route_name)]);
+                (moduleItem.route_name && hardcodedModuleMap[normalizeKey(moduleItem.route_name)]) ||
+                (moduleItem.route && hardcodedModuleMap[normalizeKey(moduleItem.route)]) ||
+                hardcodedModuleMap[moduleItem.module] ||
+                hardcodedModuleMap[normalizeKey(moduleItem.module)];
 
               if (hardcodedItem) {
                 allMenuItems.push({
@@ -186,7 +190,7 @@ const Layout = ({ children }) => {
               } else {
                 allMenuItems.push({
                   type: 'dynamic',
-                  path: `/${moduleItem.route}`,
+                  path: `/${moduleItem.route || moduleItem.route_name}`,
                   label: moduleItem.module,
                   icon: getModuleIcon(moduleItem.module),
                   module: moduleItem.module,
@@ -196,10 +200,18 @@ const Layout = ({ children }) => {
             }
           });
           
-          // The menu is already sorted by the backend, but let's sort by order_index to be sure
           allMenuItems.sort((a, b) => (a.order_index || 999) - (b.order_index || 999));
+
+          if (allMenuItems.length === 0 && !permissionsLoading) {
+            return (
+              <Box sx={{ p: 2, textAlign: 'center' }}>
+                <Typography variant="body2" color="text.secondary">
+                  No modules have been provisioned for your company yet. Please contact your Platform Administrator.
+                </Typography>
+              </Box>
+            );
+          }
           
-          // Render all menu items in sorted order
           return allMenuItems.map((item, index) => {
             const isActive = location.pathname === item.path;
             

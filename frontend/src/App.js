@@ -74,7 +74,7 @@ function App() {
                         <Route 
                           path="/users" 
                           element={
-                            <PermissionGuard module="Users" action="view" showInLayout={true}>
+                            <PermissionGuard route="users" action="view" showInLayout={true}>
                               <Users />
                             </PermissionGuard>
                           } 
@@ -82,7 +82,7 @@ function App() {
                         <Route 
                           path="/roles" 
                           element={
-                            <PermissionGuard module="Roles" action="view" showInLayout={true}>
+                            <PermissionGuard route="roles" action="view" showInLayout={true}>
                               <Roles />
                             </PermissionGuard>
                           } 
@@ -90,7 +90,7 @@ function App() {
                         <Route 
                           path="/departments" 
                           element={
-                            <PermissionGuard module="Departments" action="view" showInLayout={true}>
+                            <PermissionGuard route="departments" action="view" showInLayout={true}>
                               <Departments />
                             </PermissionGuard>
                           } 
@@ -98,7 +98,7 @@ function App() {
                         <Route 
                           path="/companies" 
                           element={
-                            <PermissionGuard module="Companies" action="view" showInLayout={true}>
+                            <PermissionGuard route="companies" action="view" showInLayout={true}>
                               <Companies />
                             </PermissionGuard>
                           } 
@@ -106,7 +106,7 @@ function App() {
                         <Route 
                           path="/modules" 
                           element={
-                            <PermissionGuard module="Modules" action="view" showInLayout={true}>
+                            <PermissionGuard route="modules" action="view" showInLayout={true}>
                               <Modules />
                             </PermissionGuard>
                           } 
@@ -114,7 +114,7 @@ function App() {
                         <Route 
                           path="/permissions" 
                           element={
-                            <PermissionGuard module="Permissions" action="view" showInLayout={true}>
+                            <PermissionGuard route="permissions" action="view" showInLayout={true}>
                               <Permissions />
                             </PermissionGuard>
                           } 
@@ -122,7 +122,7 @@ function App() {
                         <Route 
                           path="/user-roles" 
                           element={
-                            <PermissionGuard module="UserRoles" action="view" showInLayout={true}>
+                            <PermissionGuard route="user-roles" action="view" showInLayout={true}>
                               <UserRoles />
                             </PermissionGuard>
                           } 
@@ -130,7 +130,7 @@ function App() {
                         <Route 
                           path="/audit-logs" 
                           element={
-                            <PermissionGuard module="Settings" action="view" showInLayout={true}>
+                            <PermissionGuard route="audit-logs" action="view" showInLayout={true}>
                               <AuditLogs />
                             </PermissionGuard>
                           } 
@@ -142,7 +142,7 @@ function App() {
                         <Route 
                           path="/voters" 
                           element={
-                            <PermissionGuard module="Voters" action="view" showInLayout={true}>
+                            <PermissionGuard route="voters" action="view" showInLayout={true}>
                               <Voters />
                             </PermissionGuard>
                           } 
@@ -150,7 +150,7 @@ function App() {
                         <Route 
                           path="/elections" 
                           element={
-                            <PermissionGuard module="Elections" action="view" showInLayout={true}>
+                            <PermissionGuard route="elections" action="view" showInLayout={true}>
                               <Elections />
                             </PermissionGuard>
                           } 
@@ -158,7 +158,7 @@ function App() {
                         <Route 
                           path="/ballots" 
                           element={
-                            <PermissionGuard module="Ballots" action="view" showInLayout={true}>
+                            <PermissionGuard route="ballots" action="view" showInLayout={true}>
                               <Ballots />
                             </PermissionGuard>
                           } 
@@ -166,7 +166,7 @@ function App() {
                         <Route 
                           path="/candidates" 
                           element={
-                            <PermissionGuard module="Candidates" action="view" showInLayout={true}>
+                            <PermissionGuard route="candidates" action="view" showInLayout={true}>
                               <Candidates />
                             </PermissionGuard>
                           } 
@@ -174,7 +174,7 @@ function App() {
                         <Route 
                           path="/votes" 
                           element={
-                            <PermissionGuard module="Votes" action="view" showInLayout={true}>
+                            <PermissionGuard route="votes" action="view" showInLayout={true}>
                               <Votes />
                             </PermissionGuard>
                           } 
@@ -182,7 +182,7 @@ function App() {
                         <Route 
                           path="/voter-registrations" 
                           element={
-                            <PermissionGuard module="VoterRegistrations" action="view" showInLayout={true}>
+                            <PermissionGuard route="voter-registrations" action="view" showInLayout={true}>
                               <VoterRegistrations />
                             </PermissionGuard>
                           } 

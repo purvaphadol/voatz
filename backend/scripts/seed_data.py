@@ -183,27 +183,18 @@ def seed_company(
             ).returning(t["companies"].c.id)
         ).scalar()
 
-    # 2. Provision SystemModules to company_modules
+    # 2. Seed the SystemModule catalog definitions (global, not company-scoped).
+    # NOTE: this intentionally does NOT provision any modules to this company.
+    # Module provisioning (which CompanyModule rows exist for a company) is a
+    # real Platform Admin decision made per company, through the actual
+    # application, and must never be bulk-assigned by a seed script — doing
+    # so was the root cause of every newly-seeded company's Company Super
+    # Admin seeing every module on the platform regardless of what should
+    # have actually been provisioned to them. If you need a seeded company to
+    # have specific modules provisioned for local testing, provision them
+    # explicitly through the running application's API/UI after seeding, the
+    # same way a real Platform Administrator would.
     seed_system_modules(session)
-    all_sys_mods = session.execute(t["system_modules"].select()).fetchall()
-    if all_sys_mods:
-        for mod in all_sys_mods:
-            existing_cm = session.execute(
-                t["company_modules"].select().where(
-                    t["company_modules"].c.company_id == company_id,
-                    t["company_modules"].c.system_module_id == mod.id
-                )
-            ).fetchone()
-            if not existing_cm:
-                session.execute(
-                    t["company_modules"].insert().values(
-                        company_id=company_id,
-                        system_module_id=mod.id,
-                        status=1,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
 
     # 3. Department
     existing_dept = session.execute(
@@ -354,33 +345,12 @@ def seed_company(
                 )
             )
 
-    # 6. Assign role permissions to Super Admin role for all system module actions
-    all_sys_actions = session.execute(
-        t["system_module_actions"].select()
-    ).fetchall()
-
-    if all_sys_actions:
-        for row in all_sys_actions:
-            existing_rpm = session.execute(
-                t["role_permission_mapping"].select().where(
-                    t["role_permission_mapping"].c.company_id == company_id,
-                    t["role_permission_mapping"].c.role_id == super_admin_role_id,
-                    t["role_permission_mapping"].c.module_id == row.system_module_id,
-                    t["role_permission_mapping"].c.action_id == row.id,
-                )
-            ).fetchone()
-            if not existing_rpm:
-                session.execute(
-                    t["role_permission_mapping"].insert().values(
-                        company_id=company_id,
-                        role_id=super_admin_role_id,
-                        module_id=row.system_module_id,
-                        action_id=row.id,
-                        status=1,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
+    # 6. NOTE: Intentionally do NOT bulk-assign RolePermissionMapping rows for the Super Admin role.
+    # Company Super Admin's access is automatically bounded by CompanyModule provisioning at the
+    # application logic layer (check_user_permission / get_user_permissions_summary).
+    # Seed scripts must never bulk-grant RolePermissionMapping rows to the Super Admin role,
+    # as doing so bypasses the multi-tenant provisioning boundary and grants explicit permissions
+    # for modules that were never provisioned to the company.
 
     return {
         "company_id": company_id,

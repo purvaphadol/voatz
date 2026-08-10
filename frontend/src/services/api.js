@@ -102,10 +102,16 @@ api.interceptors.response.use(
 // Debug mode (set to false in production)
 window.DEBUG_API = false;
 
-// Reusable API error handler
+// Reusable API error handler supporting standardized ApiResponse error wrappers
 export const handleApiError = (error) => {
-  return error.response?.data?.error || error.message || 'An unexpected error occurred';
+  if (!error) return 'An unexpected error occurred';
+  if (error.response?.data?.error) return error.response.data.error;
+  if (error.response?.data?.message) return error.response.data.message;
+  if (error.response?.data?.details) return String(error.response.data.details);
+  if (error.message) return error.message;
+  return 'An unexpected network error occurred';
 };
+
 
 // Auth API
 export const authAPI = {

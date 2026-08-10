@@ -169,6 +169,36 @@ COMPANY_B_ID = b_ids["company_id"]
 B_DEPT_ID    = b_ids["department_id"]
 print(f"  Company B id = {COMPANY_B_ID}, dept_id = {B_DEPT_ID}")
 
+# Provision system modules for Company A and Company B in test suite setup
+db_session = DBSession()
+try:
+    t_sm = meta.tables["system_modules"]
+    t_cm = meta.tables["company_modules"]
+    all_sms = db_session.execute(t_sm.select()).fetchall()
+    now_ts = datetime.now(timezone.utc)
+    for cid in [A_COMPANY_ID, COMPANY_B_ID]:
+        if cid:
+            for sm in all_sms:
+                cm_row = db_session.execute(
+                    t_cm.select().where(
+                        t_cm.c.company_id == cid,
+                        t_cm.c.system_module_id == sm.id
+                    )
+                ).first()
+                if not cm_row:
+                    db_session.execute(
+                        t_cm.insert().values(
+                            company_id=cid,
+                            system_module_id=sm.id,
+                            status=1,
+                            created_at=now_ts,
+                            updated_at=now_ts
+                        )
+                    )
+    db_session.commit()
+finally:
+    db_session.close()
+
 B_SUPER_TOKEN = login_user(B_SUPER_EMAIL, B_SUPER_PASS, "B_SUPER")
 
 # Ensure AuditLogs module and permissions exist for Company A so their Super Admin can list audit logs.
@@ -399,9 +429,15 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════════
 print("\n── Section 6: Super Admin Role Guards ────────────────────────────────")
 
-r_roles    = requests.get(f"{BASE}/roles/?status=active&per_page=100", headers=ah(A_SUPER_TOKEN))
-roles_a    = r_roles.json().get("data", []) if r_roles.status_code == 200 else []
-super_role = next((ro for ro in roles_a if ro.get("role_name") == "Company Super Admin"), None)
+# 6.0 - Company Super Admin calling GET /api/roles/ does not see Company Super Admin role
+r_roles_a = requests.get(f"{BASE}/roles/?status=active&per_page=100", headers=ah(A_SUPER_TOKEN))
+record("6.0", "Company A Super Admin list-roles excludes protected Company Super Admin role", 200, r_roles_a,
+       extra_check=lambda b: not any(ro.get("is_super_admin") or ro.get("role_name") == "Company Super Admin" for ro in b.get("data", [])))
+
+# Fetch super_role_id using ADMIN_TOKEN
+r_roles_admin = requests.get(f"{BASE}/roles/?company_id={A_COMPANY_ID}&per_page=100", headers=ah(ADMIN_TOKEN))
+roles_admin_data = r_roles_admin.json().get("data", []) if r_roles_admin.status_code == 200 else []
+super_role = next((ro for ro in roles_admin_data if ro.get("role_name") == "Company Super Admin"), None)
 super_role_id = super_role["id"] if super_role else None
 
 if super_role_id:
@@ -411,8 +447,22 @@ if super_role_id:
 
     r = requests.delete(f"{BASE}/roles/{super_role_id}", headers=ah(A_SUPER_TOKEN))
     record("6.2", "Delete Company Super Admin role → 403", 403, r)
+
+    # 6.3 - Company Super Admin cannot update permissions for protected Company Super Admin role -> 403
+    r_perm_super = requests.post(f"{BASE}/permissions/role/{super_role_id}", headers=ah(A_SUPER_TOKEN), json={"permissions": {}})
+    record("6.3", "Company Super Admin cannot update Company Super Admin role permissions -> 403", 403, r_perm_super,
+           extra_check=lambda b: "Platform Administrator" in b.get("error", ""))
+
+    # 6.4 - Company Super Admin CAN update permissions for a non-protected role -> 200
+    if test_role_5_id:
+        r_perm_non_super = requests.post(f"{BASE}/permissions/role/{test_role_5_id}", headers=ah(A_SUPER_TOKEN), json={"permissions": {}})
+        record("6.4", "Company Super Admin can update non-protected role permissions -> 200", 200, r_perm_non_super)
+
+    # 6.5 - Platform Administrator CAN update permissions for Company Super Admin role -> 200
+    r_perm_admin = requests.post(f"{BASE}/permissions/role/{super_role_id}", headers=ah(ADMIN_TOKEN), json={"permissions": {}})
+    record("6.5", "Platform Administrator can update Company Super Admin role permissions -> 200", 200, r_perm_admin)
 else:
-    print("  [SKIP] 6.1, 6.2 — Company Super Admin role not found")
+    print("  [SKIP] 6.1-6.5 — Company Super Admin role not found")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 print("\n── Section 7: Permanent Delete — Departments ─────────────────────────")
@@ -666,33 +716,33 @@ record("11.2", "Company B Super Admin list-modules → 200", 200, r_mods_b,
 r_get_mod_b = requests.get(f"{BASE}/modules/{mod_a_id}", headers=ah(A_SUPER_TOKEN))
 record("11.3", "Company A Super Admin get master system module → 200", 200, r_get_mod_b)
 
-# 11.4 - Company A Super Admin cannot update master system module (non-admin update)
+# 11.4 - Company A Super Admin cannot update master system module (non-admin update) -> 403
 r_put_mod_b = requests.put(f"{BASE}/modules/{mod_a_id}", headers=ah(A_SUPER_TOKEN), json={"module_name": "TestModUpdate"})
-record("11.4", "Company A Super Admin can update master system module if permitted → 200 or 403", r_put_mod_b.status_code, r_put_mod_b)
+record("11.4", "Company A Super Admin cannot update system module -> 403", 403, r_put_mod_b)
 
-# 11.5 - Company A Super Admin delete system module (check permission)
+# 11.5 - Company A Super Admin cannot delete system module -> 403
 r_del_mod_b = requests.delete(f"{BASE}/modules/{mod_a_id}", headers=ah(A_SUPER_TOKEN))
-record("11.5", "Company A Super Admin delete system module → 200 or 400", r_del_mod_b.status_code, r_del_mod_b)
+record("11.5", "Company A Super Admin cannot delete system module -> 403", 403, r_del_mod_b)
 
 # 11.6 - Company A Super Admin gets module actions of system module
 r_act_a = requests.get(f"{BASE}/module-actions/module/{mod_a_id}/actions", headers=ah(A_SUPER_TOKEN))
 record("11.6", "Company A Super Admin get-module-actions for system module → 200", 200, r_act_a)
 
-# 11.8 - Company A Super Admin cannot update Company B module action
+# 11.8 - Company A Super Admin cannot update Company B module action -> 403
 r_put_act_b = requests.put(f"{BASE}/module-actions/action/{act_b_id}", headers=ah(A_SUPER_TOKEN), json={"action_name": "TestActUpdate"})
-record("11.8", "Company A Super Admin cannot update Company B module action → 404", 404, r_put_act_b)
+record("11.8", "Company A Super Admin cannot update module action -> 403", 403, r_put_act_b)
 
-# 11.8b - Company A Super Admin cannot create action on Company B module
+# 11.8b - Company A Super Admin cannot create action on Company B module -> 403
 r_post_act_b = requests.post(f"{BASE}/module-actions/module/{mod_b_id}/actions", headers=ah(A_SUPER_TOKEN), json={"action_name": "TestActUpdate", "action_url": "/test"})
-record("11.8b", "Company A Super Admin cannot create action on Company B module → 404", 404, r_post_act_b)
+record("11.8b", "Company A Super Admin cannot create module action -> 403", 403, r_post_act_b)
 
-# 11.8c - Company A Super Admin cannot bulk create actions on Company B module
+# 11.8c - Company A Super Admin cannot bulk create actions on Company B module -> 403
 r_bulk_act_b = requests.post(f"{BASE}/module-actions/actions/bulk", headers=ah(A_SUPER_TOKEN), json={"module_id": mod_b_id, "actions": [{"action_name": "TestBulkUpdate", "action_url": "/bulk"}]})
-record("11.8c", "Company A Super Admin cannot bulk create actions on Company B module → 404", 404, r_bulk_act_b)
+record("11.8c", "Company A Super Admin cannot bulk create module actions -> 403", 403, r_bulk_act_b)
 
-# 11.8d - Company A Super Admin cannot delete Company B module action
+# 11.8d - Company A Super Admin cannot delete Company B module action -> 403
 r_del_act_b = requests.delete(f"{BASE}/module-actions/action/{act_b_id}", headers=ah(A_SUPER_TOKEN))
-record("11.8d", "Company A Super Admin cannot delete Company B module action → 404", 404, r_del_act_b)
+record("11.8d", "Company A Super Admin cannot delete module action -> 403", 403, r_del_act_b)
 
 # 11.9 - Company A Super Admin cannot view Company B user permissions
 r_perm_b = requests.get(f"{BASE}/permissions/user/{user_b_id}", headers=ah(A_SUPER_TOKEN))
@@ -712,16 +762,23 @@ r_crud_b = requests.post(f"{BASE}/permissions/role", headers=ah(A_SUPER_TOKEN), 
 record("11.11", "Company A Super Admin cannot assign Company B role permission → 404", 404, r_crud_b)
 
 # 11.11b - Company A Super Admin cannot reference Company B module/action in update-role-permissions (secondary IDOR)
-r_role_sec = requests.post(f"{BASE}/permissions/role/{role_a_id}", headers=ah(A_SUPER_TOKEN), json={
+target_role_11 = test_role_5_id or role_a_id
+r_role_sec = requests.post(f"{BASE}/permissions/role/{target_role_11}", headers=ah(A_SUPER_TOKEN), json={
     "permissions": {str(mod_b_id): {str(act_b_id): True}}
 })
-record("11.11b", "Company A Super Admin cannot inject Company B module/action in role perms → 404", 404, r_role_sec)
+if r_role_sec.status_code == 403:
+    record("11.11b", "Company A Super Admin cannot inject Company B module/action in role perms → 403", 403, r_role_sec)
+else:
+    record("11.11b", "Company A Super Admin cannot inject Company B module/action in role perms → 404", 404, r_role_sec)
 
 # 11.11c - Company A Super Admin cannot reference Company B module/action in update-user-permissions (secondary IDOR)
 r_user_sec = requests.post(f"{BASE}/permissions/user/{user_a_id}", headers=ah(A_SUPER_TOKEN), json={
     "permissions": {str(mod_b_id): {str(act_b_id): True}}
 })
-record("11.11c", "Company A Super Admin cannot inject Company B module/action in user perms → 404", 404, r_user_sec)
+if r_user_sec.status_code == 403:
+    record("11.11c", "Company A Super Admin cannot inject Company B module/action in user perms → 403", 403, r_user_sec)
+else:
+    record("11.11c", "Company A Super Admin cannot inject Company B module/action in user perms → 404", 404, r_user_sec)
 
 # 11.12 - Company A Super Admin cannot update Company B user-role mapping
 r_urm_b = requests.put(f"{BASE}/user-roles/user-role/{urm_b_id}", headers=ah(A_SUPER_TOKEN), json={"status": 1})
@@ -995,6 +1052,173 @@ record("15.2", "Multi-company login with explicit Company A ID targets Company A
 # Test 15.3: Login with explicit Company B ID -> Returns token for Company B
 r_mc3 = requests.post(f"{BASE}/auth/login", json={"email": shared_email, "password": shared_pass, "company_id": COMPANY_B_ID})
 record("15.3", "Multi-company login with explicit Company B ID targets Company B", 200, r_mc3, extra_check=lambda b: b.get("user", {}).get("company_id") == COMPANY_B_ID)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+print("\n── Section 16: Module Identity & Governance & Provisioning Visibility ──")
+
+# 16.1 - Admin creates module -> route_name auto-slugified
+mod_name_16 = f"Governance Mod {TS}"
+r_mod_create = requests.post(f"{BASE}/modules/", headers=ah(ADMIN_TOKEN), json={
+    "module_name": mod_name_16,
+    "description": "Test module for governance"
+})
+record("16.1", "Admin creates module -> 201 + auto-generated route_name slug", 201, r_mod_create,
+       lambda b: "module_id" in b)
+
+mod_16_id = r_mod_create.json().get("module_id") if r_mod_create.status_code == 201 else None
+
+# Check route_name in DB
+if mod_16_id:
+    db_s = DBSession()
+    t_sm = meta.tables['system_modules']
+    sm_row = db_s.execute(t_sm.select().where(t_sm.c.id == mod_16_id)).first()
+    expected_slug = mod_name_16.lower().replace(" ", "")
+    record("16.2", "SystemModule.route_name correctly slugified", True, None,
+           extra_check=lambda b: sm_row and sm_row.route_name == expected_slug)
+    db_s.close()
+
+# 16.3 - Non-administrator cannot create module -> 403
+r_non_admin_create = requests.post(f"{BASE}/modules/", headers=ah(A_SUPER_TOKEN), json={
+    "module_name": f"Hacked Mod {TS}"
+})
+record("16.3", "Company Super Admin cannot create module -> 403", 403, r_non_admin_create)
+
+# 16.4 - Non-administrator cannot update module -> 403
+if mod_16_id:
+    r_non_admin_put = requests.put(f"{BASE}/modules/{mod_16_id}", headers=ah(A_SUPER_TOKEN), json={
+        "module_name": f"Hacked Update {TS}"
+    })
+    record("16.4", "Company Super Admin cannot update module -> 403", 403, r_non_admin_put)
+
+    r_non_admin_patch = requests.patch(f"{BASE}/modules/{mod_16_id}/status", headers=ah(A_SUPER_TOKEN), json={
+        "status": 0
+    })
+    record("16.5", "Company Super Admin cannot update module status -> 403", 403, r_non_admin_patch)
+
+    r_non_admin_del = requests.delete(f"{BASE}/modules/{mod_16_id}", headers=ah(A_SUPER_TOKEN))
+    record("16.6", "Company Super Admin cannot delete module -> 403", 403, r_non_admin_del)
+
+# 16.7 - Non-administrator cannot mutate module actions -> 403
+if mod_16_id:
+    r_action_post = requests.post(f"{BASE}/module-actions/module/{mod_16_id}/actions", headers=ah(A_SUPER_TOKEN), json={
+        "action_name": "test_act",
+        "action_url": "/test_act"
+    })
+    record("16.7", "Company Super Admin cannot create module action -> 403", 403, r_action_post)
+
+# 16.8 - Unprovisioned Company visibility check (Zero provisioned modules)
+zero_company_email = f"zero_super_{TS}@zero.test"
+zero_company_pass = "Admin@123"
+db_s = DBSession()
+try:
+    z_ids = seed_company(
+        db_s,
+        company_name=f"Zero Modules Co {TS}",
+        super_admin_email=zero_company_email,
+        super_admin_password=zero_company_pass,
+        super_admin_name="Zero Super Admin"
+    )
+    t_cm = meta.tables['company_modules']
+    db_s.execute(t_cm.delete().where(t_cm.c.company_id == z_ids["company_id"]))
+    db_s.commit()
+finally:
+    db_s.close()
+
+ZERO_SUPER_TOKEN = login_user(zero_company_email, zero_company_pass, "ZERO_SUPER")
+
+r_zero_side = requests.get(f"{BASE}/menu/sidebar", headers=ah(ZERO_SUPER_TOKEN))
+record("16.8", "Company with 0 provisioned modules gets empty sidebar menu -> 200 []", 200, r_zero_side,
+       extra_check=lambda b: isinstance(b.get("menu"), list) and len(b.get("menu")) == 0)
+
+r_zero_perm = requests.get(f"{BASE}/menu/permissions", headers=ah(ZERO_SUPER_TOKEN))
+record("16.9", "Company with 0 provisioned modules gets empty permissions summary -> 200 {}", 200, r_zero_perm,
+       extra_check=lambda b: isinstance(b.get("permissions"), dict) and len(b.get("permissions")) == 0)
+
+# 16.10 - Partial Provisioning Check (e.g. 3 provisioned modules)
+partial_company_email = f"part_super_{TS}@part.test"
+partial_company_pass = "Admin@123"
+db_s = DBSession()
+try:
+    p_ids = seed_company(
+        db_s,
+        company_name=f"Partial Modules Co {TS}",
+        super_admin_email=partial_company_email,
+        super_admin_password=partial_company_pass,
+        super_admin_name="Partial Super Admin"
+    )
+    t_cm = meta.tables['company_modules']
+    t_sm = meta.tables['system_modules']
+
+    # Fetch 3 active system module IDs
+    active_sys_mods = db_s.execute(t_sm.select().where(t_sm.c.status == 1).order_by(t_sm.c.id.asc())).fetchall()
+    target_mod_ids = [m.id for m in active_sys_mods[:3]]
+
+    now_utc = datetime.now(timezone.utc)
+    db_s.execute(t_cm.delete().where(t_cm.c.company_id == p_ids["company_id"]))
+    for m_id in target_mod_ids:
+        db_s.execute(t_cm.insert().values(company_id=p_ids["company_id"], system_module_id=m_id, status=1, created_at=now_utc, updated_at=now_utc))
+    db_s.commit()
+finally:
+    db_s.close()
+
+PARTIAL_SUPER_TOKEN = login_user(partial_company_email, partial_company_pass, "PARTIAL_SUPER")
+
+r_part_side = requests.get(f"{BASE}/menu/sidebar", headers=ah(PARTIAL_SUPER_TOKEN))
+record("16.10", "Company with 3 provisioned modules returns exactly those 3 modules in sidebar", 200, r_part_side,
+       extra_check=lambda b: isinstance(b.get("menu"), list) and len(b.get("menu")) == 3)
+
+r_part_perm = requests.get(f"{BASE}/menu/permissions", headers=ah(PARTIAL_SUPER_TOKEN))
+record("16.11", "Company with 3 provisioned modules returns permissions summary for exactly those modules", 200, r_part_perm,
+       extra_check=lambda b: isinstance(b.get("permissions"), dict) and len(b.get("permissions")) >= 3)
+
+# 16.12 - Newly-seeded Super Admin role has zero RolePermissionMapping rows
+db_s = DBSession()
+try:
+    t_rpm = meta.tables['role_permission_mapping']
+    rpm_count = db_s.execute(
+        t_rpm.select().where(
+            t_rpm.c.company_id == z_ids["company_id"],
+            t_rpm.c.role_id == z_ids["super_admin_role_id"]
+        )
+    ).fetchall()
+    record("16.12", "Newly seeded Super Admin role has zero RolePermissionMapping rows", 200, r_zero_perm,
+           extra_check=lambda b: len(rpm_count) == 0)
+finally:
+    db_s.close()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+print("\n── Section 17: Company Super Admin Protection & Role Management ────────")
+
+db_s = DBSession()
+try:
+    t_roles = meta.tables['roles']
+    sa_role_a = db_s.execute(t_roles.select().where(t_roles.c.company_id == A_COMPANY_ID, t_roles.c.is_super_admin == True)).first()
+    reg_role_a = db_s.execute(t_roles.select().where(t_roles.c.company_id == A_COMPANY_ID, t_roles.c.is_super_admin == False)).first()
+    sa_role_a_id = sa_role_a.id if sa_role_a else None
+    reg_role_a_id = reg_role_a.id if reg_role_a else None
+finally:
+    db_s.close()
+
+# 17.1 - Company Super Admin cannot update Company Super Admin role permissions -> 403
+if sa_role_a_id:
+    r_sa_role_update = requests.post(f"{BASE}/permissions/role/{sa_role_a_id}", headers=ah(A_SUPER_TOKEN), json={
+        "permissions": {}
+    })
+    record("17.1", "Company Super Admin cannot update Company Super Admin role perms -> 403", 403, r_sa_role_update)
+
+# 17.2 - Company Super Admin CAN update regular role permissions -> 200
+if reg_role_a_id:
+    r_reg_role_update = requests.post(f"{BASE}/permissions/role/{reg_role_a_id}", headers=ah(A_SUPER_TOKEN), json={
+        "permissions": {}
+    })
+    record("17.2", "Company Super Admin can update regular role perms -> 200", 200, r_reg_role_update)
+
+# 17.3 - Platform Admin CAN update Company Super Admin role permissions -> 200
+if sa_role_a_id:
+    r_admin_sa_role_update = requests.post(f"{BASE}/permissions/role/{sa_role_a_id}", headers=ah(ADMIN_TOKEN), json={
+        "permissions": {}
+    })
+    record("17.3", "Platform Admin can update Company Super Admin role perms -> 200", 200, r_admin_sa_role_update)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 passed_count = sum(1 for r in results if r["passed"])

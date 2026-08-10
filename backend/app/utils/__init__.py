@@ -242,15 +242,20 @@ def check_user_permission(module_name, action_name):
             Role.status != 9
         ).count() > 0 if role_ids else False
 
-        # 2. Get system module by normalized name or route_name
-        norm_req = normalize_module_key(module_name)
-        sys_modules = SystemModule.query.filter(SystemModule.status != 9).all()
-        sys_module = None
-        for m in sys_modules:
-            m_keys = get_module_keys(m)
-            if any(normalize_module_key(k) == norm_req for k in m_keys):
-                sys_module = m
-                break
+        # 2. Get system module by direct DB lookup (code, name, route) with fallback
+        sys_module = SystemModule.query.filter(
+            (SystemModule.code == module_name.lower()) |
+            (SystemModule.module_name.ilike(module_name)) |
+            (SystemModule.route_name.ilike(module_name)),
+            SystemModule.status != 9
+        ).first()
+
+        if not sys_module:
+            norm_req = normalize_module_key(module_name)
+            for m in SystemModule.query.filter(SystemModule.status != 9).all():
+                if any(normalize_module_key(k) == norm_req for k in get_module_keys(m)):
+                    sys_module = m
+                    break
 
         if not sys_module:
             logger.warning(f"SystemModule '{module_name}' not found")
@@ -262,15 +267,8 @@ def check_user_permission(module_name, action_name):
             system_module_id=sys_module.id
         ).filter(CompanyModule.status != 9).first()
         if not comp_module:
-            # If company_modules mappings exist for this company, enforce strict provisioning
-            has_any_provisioned = CompanyModule.query.filter_by(company_id=company_id).filter(CompanyModule.status != 9).count() > 0
-            if has_any_provisioned:
-                logger.warning(f"SystemModule '{module_name}' not provisioned for company {company_id}")
-                return False
-
-        # Company Super Admin carries automatic full permission for all provisioned modules
-        if is_company_super_admin:
-            return True
+            logger.warning(f"SystemModule '{module_name}' not provisioned for company {company_id}")
+            return False
 
         # 4. Get system action by name
         sys_action = SystemModuleAction.query.filter_by(
@@ -289,6 +287,7 @@ def check_user_permission(module_name, action_name):
              if rp.module_id == sys_module.id and rp.action_id == sys_action.id),
             None
         )
+
 
         if role_permission:
             user_override = UserPermissionMapping.query.filter_by(
@@ -325,7 +324,9 @@ def require_permission(module_name, action_name):
         def decorated_function(*args, **kwargs):
             try:
                 if is_administrator():
-                    logger.info(f"Administrator granted access to {module_name}.{action_name}")
+                    admin_obj = get_current_administrator()
+                    admin_id = admin_obj.id if admin_obj else 'Unknown'
+                    logger.info(f"Platform Administrator (ID: {admin_id}) granted access to {module_name}.{action_name}")
                     return f(*args, **kwargs)
 
                 user = get_current_user()
@@ -401,31 +402,11 @@ def get_user_permissions_summary():
         CompanyModule.status != 9,
         SystemModule.status != 9
     ).order_by(SystemModule.order_index.asc()).all()
-    if not sys_modules:
-        sys_modules = SystemModule.query.filter(SystemModule.status != 9).order_by(SystemModule.order_index.asc()).all()
 
     actions_map = {a.id: a for a in SystemModuleAction.query.filter(SystemModuleAction.status != 9).all()}
 
-    if is_super_admin:
-        permissions = {}
-        for m in sys_modules:
-            mod_actions = [a for a in actions_map.values() if a.system_module_id == m.id]
-            if mod_actions:
-                actions_list = [
-                    {'action': act.action_name, 'source': 'company-super-admin', 'url': act.action_url}
-                    for act in mod_actions
-                ]
-            else:
-                actions_list = [
-                    {'action': act, 'source': 'company-super-admin', 'url': f'/{act}'}
-                    for act in ['view', 'create', 'update', 'delete']
-                ]
-            module_keys = get_module_keys(m)
-            for key in module_keys:
-                permissions[key] = actions_list
-        return permissions
-
     role_permissions = get_active_role_permissions(role_ids, company_id)
+
 
     user_permissions = UserPermissionMapping.query.filter(
         UserPermissionMapping.user_id == user.id,

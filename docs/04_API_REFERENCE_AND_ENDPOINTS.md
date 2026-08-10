@@ -1,109 +1,59 @@
-# Complete API Reference & Endpoint Specification
+# API Reference & Endpoints Specification
 
-All backend endpoints require JSON payloads and return JSON responses. Protected endpoints require a valid JWT token passed via the `Authorization: Bearer <token>` HTTP header.
+## 1. Global API Standards
 
----
+### **Response Envelope (`ApiResponse`)**
+All API endpoints return JSON payloads wrapped in the standard `ApiResponse` envelope:
 
-## 1. Authentication & Menu Endpoints
+```json
+// HTTP 200 / 201 - Success
+{
+  "success": true,
+  "message": "Resource created successfully",
+  "data": { ... }
+}
 
-| Method | Endpoint | Access Level | Description |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/auth/login` | Public | Unified login for Platform Admins, Company Super Admins, and Staff |
-| `POST` | `/api/auth/reset-password` | Public / Token | Resets password using OTP or verification token |
-| `GET` | `/api/users/me/sidebar` | Authenticated | Retrieves persona-specific dynamic sidebar menu items |
-| `GET` | `/api/users/me/permissions` | Authenticated | Returns current user's granted permissions map |
+// HTTP 400 / 401 / 403 / 404 / 500 - Error
+{
+  "success": false,
+  "error": "Descriptive error message for client toast display",
+  "details": { ... }
+}
+```
 
----
-
-## 2. Platform Administration Endpoints (SaaS Level)
-
-| Method | Endpoint | Access Level | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/companies/` | Platform Admin | List all tenant companies |
-| `POST` | `/api/companies/` | Platform Admin | Create a new tenant company |
-| `GET` | `/api/companies/<id>` | Platform Admin | Get company details |
-| `PUT` | `/api/companies/<id>` | Platform Admin | Update company status/metadata |
-| `DELETE` | `/api/companies/<id>` | Platform Admin | Soft-delete company |
-| `POST` | `/api/modules/` | Platform Admin | Provision a module for a company |
-| `POST` | `/api/module-actions/module/<mod_id>/actions` | Platform Admin | Provision an action for a module |
-
----
-
-## 3. Tenant Administration Endpoints (Company Level)
-
-### **3.1 Roles & Users**
-| Method | Endpoint | Required Permission | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/roles/` | `Roles.view` | List company roles |
-| `POST` | `/api/roles/` | `Roles.create` | Create a role (`is_super_admin` flag optional) |
-| `PUT` | `/api/roles/<id>` | `Roles.update` | Update role name/description |
-| `DELETE` | `/api/roles/<id>` | `Roles.delete` | Delete role (Super Admin role protected) |
-| `GET` | `/api/users/` | `Users.view` | List company users |
-| `POST` | `/api/users/` | `Users.create` | Provision a new user account |
-| `POST` | `/api/user-roles/user/<id>/roles` | `UserRoles.create` | Assign role to user |
-
-### **3.2 Permission Management**
-| Method | Endpoint | Required Permission | Description |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/permissions/role` | `Permissions.create` | Map role to module/action permission |
-| `GET` | `/api/permissions/role/<role_id>` | `Permissions.view` | List permissions for a role |
+### **HTTP Status Codes**
+* **`200 OK`**: Request succeeded.
+* **`201 Created`**: Resource created successfully.
+* **`400 Bad Request`**: Payload validation error.
+* **`401 Unauthorized`**: Invalid or missing JWT token.
+* **`403 Forbidden`**: Missing required permission or attempting to access an `is_system` protected role.
+* **`404 Not Found`**: Resource does not exist or belongs to another tenant (`company_id` mismatch).
+* **`500 Internal Server Error`**: Database or unhandled server error (details logged in server log, clean message sent to API client).
 
 ---
 
-## 4. Election Management Endpoints
+## 2. Core API Endpoints Reference
 
-| Method | Endpoint | Required Permission | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/elections/` | `Elections.view` | List company elections |
-| `POST` | `/api/elections/` | `Elections.create` | Create new election |
-| `GET` | `/api/elections/<id>` | `Elections.view` | Get election details & vote stats |
-| `PUT` | `/api/elections/<id>` | `Elections.update` | Update election metadata |
-| `POST` | `/api/elections/<id>/change-status` | `Elections.update` | Change status (`draft`, `active`, `completed`) |
-| `POST` | `/api/elections/<id>/tally` | `Elections.update` | Run automated vote tallying pipeline |
-| `POST` | `/api/elections/<id>/publish-results` | `Elections.update` | Publish election results |
+### **Authentication & System Admin**
+* `POST /api/auth/login` — Login endpoint (protected by rate limiting).
+* `GET /api/auth/me` — Returns logged-in user profile, company, and permissions object.
+* `POST /api/companies` — Onboard new company (Platform Admin only).
 
----
+### **Departments & Hierarchy**
+* `GET /api/departments` — List departments (`Model.query_tenant()`).
+* `POST /api/departments` — Create department.
+* `PUT /api/departments/<id>` — Edit department.
+* `DELETE /api/departments/<id>` — Soft-delete department (Scenario 1: direct soft-delete; Scenario 2: active dependency force confirm).
 
-## 5. Ballots & Candidates Endpoints
+### **Roles & Permissions Management**
+* `GET /api/roles` — List company roles.
+* `POST /api/roles` — Create custom role.
+* `PUT /api/roles/<id>` — Update role permissions. *Note: Rejects with 403 if target role has `is_system = True` unless called by Platform Admin.*
+* `DELETE /api/roles/<id>` — Soft-delete role (*rejection logic applies for `is_system` roles*).
 
-### **5.1 Ballots**
-| Method | Endpoint | Required Permission | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/ballots/` | `Ballots.view` | List ballots for election |
-| `POST` | `/api/ballots/` | `Ballots.create` | Create a ballot race |
-| `PUT` | `/api/ballots/<id>` | `Ballots.update` | Publish/Activate/Update ballot |
-
-### **5.2 Candidates**
-| Method | Endpoint | Required Permission | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/candidates/` | `Candidates.view` | List candidates |
-| `POST` | `/api/candidates/` | `Candidates.create` | Add candidate to a ballot |
-| `GET` | `/api/candidates/<id>` | `Candidates.view` | Get candidate stats & votes received |
-
----
-
-## 6. Voters, Registrations & Vote Casting Endpoints
-
-### **6.1 Voters & Registrations**
-| Method | Endpoint | Required Permission | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/voters/` | `Voters.view` | List company voters |
-| `POST` | `/api/voters/` | `Voters.create` | Create a voter record |
-| `GET` | `/api/voter-registrations/` | `VoterRegistrations.view` | List registrations |
-| `POST` | `/api/voter-registrations/` | `VoterRegistrations.create` | Register voter for election |
-| `POST` | `/api/voter-registrations/<id>/approve` | `VoterRegistrations.approve` | Approve voter registration |
-
-### **6.2 Votes**
-| Method | Endpoint | Required Permission | Description |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/votes/` | `Votes.create` | Cast a vote on a ballot |
-| `GET` | `/api/votes/stats` | `Votes.view` | Get overall vote module statistics |
-
----
-
-## 7. Audit Log Endpoints
-
-| Method | Endpoint | Required Permission | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/audit/` | `AuditLogs.view` | View company audit logs |
-| `GET` | `/api/audit/user/<user_id>` | `AuditLogs.view` | View audit logs for a specific user |
+### **Elections & Voting Engine**
+* `GET /api/elections` — List elections for current tenant & cross-company scope mappings.
+* `POST /api/elections` — Create election draft.
+* `POST /api/elections/<id>/scopes` — Map participating companies for cross-tenant elections (Platform Admin / Host Admin).
+* `POST /api/votes/submit` — Submit encrypted vote receipt.
+* `GET /api/votes/receipt/<id>` — Fetch vote cryptographic receipt.

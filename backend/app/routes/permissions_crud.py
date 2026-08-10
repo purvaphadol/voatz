@@ -35,10 +35,26 @@ def assign_role_permission():
     if not role:
         return jsonify({'error': 'Role not found in this company'}), 404
         
+    if role.is_super_admin and not is_administrator():
+        return jsonify({
+            'error': "The Company Super Admin role's permissions can only be modified by a Platform Administrator."
+        }), 403
+
     module = SystemModule.query.filter_by(id=data['module_id']).filter(SystemModule.status != STATUS_DEACTIVATED).first()
     if not module:
         return jsonify({'error': 'System module not found'}), 404
-        
+
+    from app.models.module import CompanyModule
+    comp_mod = CompanyModule.query.filter_by(company_id=company_id, system_module_id=data['module_id']).filter(CompanyModule.status != STATUS_DEACTIVATED).first()
+    if not comp_mod:
+        if is_administrator():
+            comp_mod = CompanyModule(company_id=company_id, system_module_id=data['module_id'], status=1)
+            set_audit_fields(comp_mod, is_create=True)
+            db.session.add(comp_mod)
+        else:
+            return jsonify({'error': 'Module is not provisioned for this company'}), 400
+
+
     action = SystemModuleAction.query.filter_by(id=data['action_id'], system_module_id=data['module_id']).filter(SystemModuleAction.status != STATUS_DEACTIVATED).first()
     if not action:
         return jsonify({'error': 'System module action not found'}), 404
@@ -86,11 +102,21 @@ def assign_user_permission():
     role = Role.query.filter_by(id=data['role_id'], company_id=company_id).first()
     if not role:
         return jsonify({'error': 'Role not found in this company'}), 404
+
+    if role.is_super_admin and not is_administrator():
+        return jsonify({
+            'error': "The Company Super Admin user's permissions can only be modified by a Platform Administrator."
+        }), 403
         
     module = SystemModule.query.filter_by(id=data['module_id']).filter(SystemModule.status != STATUS_DEACTIVATED).first()
     if not module:
         return jsonify({'error': 'System module not found'}), 404
-        
+
+    from app.models.module import CompanyModule
+    comp_mod = CompanyModule.query.filter_by(company_id=company_id, system_module_id=data['module_id']).filter(CompanyModule.status != STATUS_DEACTIVATED).first()
+    if not comp_mod:
+        return jsonify({'error': 'Module is not provisioned for this company'}), 400
+
     action = SystemModuleAction.query.filter_by(id=data['action_id'], system_module_id=data['module_id']).filter(SystemModuleAction.status != STATUS_DEACTIVATED).first()
     if not action:
         return jsonify({'error': 'System module action not found'}), 404

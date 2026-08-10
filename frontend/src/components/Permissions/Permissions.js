@@ -401,6 +401,7 @@ const Permissions = () => {
                             From role
                           </Typography>
                         )}
+
                       </Box>
                     </TableCell>
                   );

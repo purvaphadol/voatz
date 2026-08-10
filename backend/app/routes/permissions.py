@@ -44,12 +44,6 @@ def _build_user_permissions(user_id, company_id):
         SystemModule.status != STATUS_DEACTIVATED
     ).all()
 
-    if not sys_modules:
-        has_any_provisioned = CompanyModule.query.filter_by(company_id=company_id).filter(CompanyModule.status != STATUS_DEACTIVATED).count() > 0
-        if not has_any_provisioned:
-            # Fallback to all non-deactivated system modules only if company has no provisioned module records at all
-            sys_modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
-
     modules_map = {m.id: m for m in sys_modules}
     actions_map = {a.id: a for a in SystemModuleAction.query.filter(SystemModuleAction.status != STATUS_DEACTIVATED).all()}
 
@@ -179,10 +173,6 @@ def get_modules_with_actions():
             CompanyModule.status != STATUS_DEACTIVATED,
             SystemModule.status != STATUS_DEACTIVATED
         ).all()
-        if not modules:
-            has_any_provisioned = CompanyModule.query.filter_by(company_id=company_id).filter(CompanyModule.status != STATUS_DEACTIVATED).count() > 0
-            if not has_any_provisioned:
-                modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
         
     result = []
 
@@ -224,6 +214,10 @@ def get_role_permissions(role_id):
     else:
         company_id = get_current_company_id()
         role = Role.query.filter_by(id=role_id, company_id=company_id).first_or_404()
+        if role.is_super_admin:
+            return jsonify({
+                'error': "The Company Super Admin role's permissions can only be modified by a Platform Administrator."
+            }), 403
 
     role_permissions = RolePermissionMapping.query.filter(
         RolePermissionMapping.role_id == role_id,
@@ -262,6 +256,11 @@ def update_role_permissions(role_id):
     else:
         company_id = get_current_company_id()
         role = Role.query.filter_by(id=role_id, company_id=company_id).first_or_404()
+
+    if role.is_super_admin and not is_administrator():
+        return jsonify({
+            'error': "The Company Super Admin role's permissions can only be modified by a Platform Administrator."
+        }), 403
         
     data = request.get_json()
 
@@ -293,24 +292,57 @@ def update_role_permissions(role_id):
                 if action_id not in valid_action_ids:
                     return jsonify({'error': f'Module action {action_id} not found'}), 404
 
-        # Delete existing permissions for this role
-        RolePermissionMapping.query.filter_by(
-            role_id=role_id,
-            company_id=company_id
-        ).delete()
+        # Fetch all existing mappings for this role & company (active or inactive)
+        existing_rp_map = {
+            (rp.module_id, rp.action_id): rp
+            for rp in RolePermissionMapping.query.filter_by(
+                role_id=role_id,
+                company_id=company_id
+            ).all()
+        }
 
-        # Add new permissions
-        for module_id, actions in permissions_data.items():
-            for action_id, granted in actions.items():
+        # First, set status to INACTIVE for all existing mappings
+        for rp in existing_rp_map.values():
+            if rp.status != STATUS_INACTIVE:
+                rp.status = STATUS_INACTIVE
+                set_audit_fields(rp, is_create=False)
+
+        # Add or reactivate permissions and ensure CompanyModule is provisioned
+        for module_id_str, actions in permissions_data.items():
+            mod_id = int(module_id_str)
+            any_granted = any(bool(g) for g in actions.values())
+            if any_granted:
+                cm = CompanyModule.query.filter_by(
+                    company_id=company_id,
+                    system_module_id=mod_id
+                ).first()
+
+                if cm:
+                    if cm.status != STATUS_ACTIVE:
+                        cm.status = STATUS_ACTIVE
+                        set_audit_fields(cm, is_create=False)
+                else:
+                    cm = CompanyModule(company_id=company_id, system_module_id=mod_id, status=STATUS_ACTIVE)
+                    set_audit_fields(cm, is_create=True)
+                    db.session.add(cm)
+
+            for action_id_str, granted in actions.items():
                 if granted:
-                    permission = RolePermissionMapping()
-                    permission.role_id = role_id
-                    permission.module_id = int(module_id)
-                    permission.action_id = int(action_id)
-                    permission.company_id = company_id
-                    permission.status = STATUS_ACTIVE
-                    set_audit_fields(permission, is_create=True)
-                    db.session.add(permission)
+                    act_id = int(action_id_str)
+                    existing_rp = existing_rp_map.get((mod_id, act_id))
+                    if existing_rp:
+                        existing_rp.status = STATUS_ACTIVE
+                        set_audit_fields(existing_rp, is_create=False)
+                    else:
+                        permission = RolePermissionMapping(
+                            role_id=role_id,
+                            module_id=mod_id,
+                            action_id=act_id,
+                            company_id=company_id,
+                            status=STATUS_ACTIVE
+                        )
+                        set_audit_fields(permission, is_create=True)
+                        db.session.add(permission)
 
         return safe_commit(
             (jsonify({'message': 'Role permissions updated successfully'}), 200),
@@ -319,7 +351,9 @@ def update_role_permissions(role_id):
 
     except Exception as e:
         db.session.rollback()
+        current_app.logger.error(f"Error in update_role_permissions: {e}")
         return jsonify({'error': str(e)}), 500
+
 
 
 @permissions_bp.route('/user/<int:user_id>', methods=['POST'])
@@ -335,6 +369,18 @@ def update_user_permissions(user_id):
         company_id = get_current_company_id()
         from app.models.user import User
         user = User.query.filter_by(id=user_id, company_id=company_id).first_or_404()
+        has_super_admin_role = db.session.query(Role).join(
+            UserRoleMapping, UserRoleMapping.role_id == Role.id
+        ).filter(
+            UserRoleMapping.user_id == user_id,
+            UserRoleMapping.company_id == company_id,
+            UserRoleMapping.status != STATUS_INACTIVE,
+            Role.is_super_admin == True
+        ).first()
+        if has_super_admin_role:
+            return jsonify({
+                'error': "The Company Super Admin user's permissions can only be modified by a Platform Administrator."
+            }), 403
         
     data = request.get_json()
 
@@ -476,10 +522,6 @@ def get_user_permissions_for_management(user_id):
         CompanyModule.status != STATUS_DEACTIVATED,
         SystemModule.status != STATUS_DEACTIVATED
     ).all()
-    if not modules:
-        has_any_provisioned = CompanyModule.query.filter_by(company_id=company_id).filter(CompanyModule.status != STATUS_DEACTIVATED).count() > 0
-        if not has_any_provisioned:
-            modules = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED).all()
 
     active_mappings = get_active_user_role_mappings(user_id, company_id)
     role_ids = [ur.role_id for ur in active_mappings]

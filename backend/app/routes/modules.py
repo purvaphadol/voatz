@@ -8,7 +8,12 @@ from app.models.user_permission import UserPermissionMapping
 from app.utils import get_current_company_id, require_permission
 from app.utils.db_utils import safe_commit
 from app.utils.audit import audit_action, set_audit_fields
-from app.utils.constants import STATUS_ACTIVE, STATUS_INACTIVE, STATUS_DEACTIVATED
+from app.utils.constants import (
+    STATUS_ACTIVE, STATUS_INACTIVE, STATUS_DEACTIVATED,
+    MSG_PLATFORM_ADMIN_ONLY_MODULE_CREATE,
+    MSG_PLATFORM_ADMIN_ONLY_MODULE_UPDATE,
+    MSG_PLATFORM_ADMIN_ONLY_MODULE_DELETE
+)
 from app.utils.validators import validate_module_input
 
 modules_bp = Blueprint('modules', __name__)
@@ -44,8 +49,6 @@ def list_modules():
             CompanyModule.status != STATUS_DEACTIVATED,
             SystemModule.status != STATUS_DEACTIVATED
         )
-        if query.count() == 0:
-            query = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED)
         
     if search:
         query = query.filter(SystemModule.module_name.ilike(f"%{search}%"))
@@ -78,6 +81,9 @@ def list_modules():
 @audit_action('create_module', module='Modules', description='Created a module')
 def create_module():
     from app.utils import is_administrator
+    if not is_administrator():
+        return jsonify({'error': MSG_PLATFORM_ADMIN_ONLY_MODULE_CREATE}), 403
+
     data = request.get_json()
     
     cleaned_data, error = validate_module_input(data, is_create=True)
@@ -91,19 +97,28 @@ def create_module():
     ).first():
         return jsonify({'error': 'Module name already exists'}), 400
         
-    # Duplicate check on route_name
-    if cleaned_data.get('route_name'):
-        if SystemModule.query.filter(
-            SystemModule.route_name.ilike(cleaned_data['route_name']),
-            SystemModule.status != STATUS_DEACTIVATED
-        ).first():
-            return jsonify({'error': 'Route name already exists'}), 400
+    # Auto-generate route_name if missing, or auto-suffix if route_name collides with active module
+    req_route = cleaned_data.get('route_name')
+    if not req_route or not req_route.strip():
+        req_route = cleaned_data['module_name'].lower().replace(' ', '')
+
+    base_slug = req_route.strip()
+    final_slug = base_slug
+    suffix = 2
+    while SystemModule.query.filter(
+        SystemModule.route_name.ilike(final_slug),
+        SystemModule.status != STATUS_DEACTIVATED
+    ).first():
+        final_slug = f"{base_slug}{suffix}"
+        suffix += 1
+
+    cleaned_data['route_name'] = final_slug
 
     # Auto-suffix legacy soft-deleted modules matching the new module_name or route_name
     legacy_deleted = SystemModule.query.filter(
         or_(
             SystemModule.module_name.ilike(cleaned_data['module_name']),
-            SystemModule.route_name.ilike(cleaned_data['route_name']) if cleaned_data.get('route_name') else False
+            SystemModule.route_name.ilike(cleaned_data['route_name'])
         ),
         SystemModule.status == STATUS_DEACTIVATED
     ).all()
@@ -182,6 +197,10 @@ def get_module(module_id):
 @require_permission('Modules', 'update')
 @audit_action('update_module', module='Modules', description='Updated a module', get_target_id=lambda *a, **kw: kw.get('module_id'))
 def update_module(module_id):
+    from app.utils import is_administrator
+    if not is_administrator():
+        return jsonify({'error': MSG_PLATFORM_ADMIN_ONLY_MODULE_UPDATE}), 403
+
     module = SystemModule.query.filter(
         SystemModule.id == module_id,
         SystemModule.status != STATUS_DEACTIVATED
@@ -253,6 +272,10 @@ def update_module(module_id):
 @modules_bp.route('/<int:module_id>/status', methods=['PATCH'])
 @require_permission('Modules', 'update')
 def update_module_status(module_id):
+    from app.utils import is_administrator
+    if not is_administrator():
+        return jsonify({'error': MSG_PLATFORM_ADMIN_ONLY_MODULE_UPDATE}), 403
+
     data = request.get_json()
     
     if not data or 'status' not in data:
@@ -278,9 +301,8 @@ def update_module_status(module_id):
 def delete_module(module_id):
     from app.utils import is_administrator
     if not is_administrator():
-        return jsonify({
-            'error': 'Adding / deleting a new module requires software route configuration. To add a custom module to your company subscription plan, please contact your Platform Administrator at admin@voatz.com.'
-        }), 403
+        return jsonify({'error': MSG_PLATFORM_ADMIN_ONLY_MODULE_DELETE}), 403
+
 
     module = SystemModule.query.filter(
         SystemModule.id == module_id,

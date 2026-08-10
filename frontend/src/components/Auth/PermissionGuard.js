@@ -4,18 +4,21 @@ import AccessDenied from '../Error/AccessDenied';
 
 const PermissionGuard = ({ 
   children, 
-  module, 
+  module,
+  route,
+  routeName,
   action = 'view',
   fallbackMessage = null,
   showInLayout = false 
 }) => {
-  const { hasPermission } = usePermissions();
+  const { hasPermission, hasPermissionByRoute } = usePermissions();
   
-  const canAccess = hasPermission(module, action);
-  const requiredPermission = `${module}.${action}`;
+  const targetRoute = route || routeName || module;
+  const canAccess = hasPermissionByRoute(targetRoute, action) || (module ? hasPermission(module, action) : false);
+  const requiredPermission = `${targetRoute}.${action}`;
   
   if (!canAccess) {
-    const message = fallbackMessage || `You don't have permission to ${action} ${module.toLowerCase()}.`;
+    const message = fallbackMessage || `You don't have permission to ${action} ${String(targetRoute).toLowerCase()}.`;
     
     if (showInLayout) {
       // Show access denied within the layout (for components that should stay in layout)

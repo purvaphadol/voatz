@@ -5,7 +5,7 @@ from app.models.voter_registration import VoterRegistration
 from app.models.voter import Voter
 from app.models.election import Election
 from app.models.user import User
-from app.utils import get_current_company_id, require_permission, get_current_user
+from app.utils import get_current_company_id, require_permission, get_current_user, is_administrator
 from app.utils.query_helpers import STATUS_INACTIVE
 from app.utils.validators import parse_pagination
 from app.utils.db_utils import safe_commit
@@ -19,7 +19,46 @@ voter_registrations_bp = Blueprint('voter_registrations', __name__)
 @require_permission('VoterRegistrations', 'view')
 def list_voter_registrations():
     """List all voter registrations with filtering and pagination"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        req_company_id = request.args.get('company_id', type=int)
+        if req_company_id:
+            query = VoterRegistration.query.join(Voter).outerjoin(User).join(Election).filter(
+                VoterRegistration.company_id == req_company_id,
+                VoterRegistration.status != 'deleted',
+                Voter.status != STATUS_INACTIVE,
+                Election.status != 'cancelled'
+            )
+            base = VoterRegistration.query.join(Voter).join(Election).filter(
+                VoterRegistration.company_id == req_company_id,
+                VoterRegistration.status != 'deleted',
+                Voter.status != STATUS_INACTIVE,
+                Election.status != 'cancelled'
+            )
+        else:
+            query = VoterRegistration.query.join(Voter).outerjoin(User).join(Election).filter(
+                VoterRegistration.status != 'deleted',
+                Voter.status != STATUS_INACTIVE,
+                Election.status != 'cancelled'
+            )
+            base = VoterRegistration.query.join(Voter).join(Election).filter(
+                VoterRegistration.status != 'deleted',
+                Voter.status != STATUS_INACTIVE,
+                Election.status != 'cancelled'
+            )
+    else:
+        company_id = get_current_company_id()
+        query = VoterRegistration.query.join(Voter).outerjoin(User).join(Election).filter(
+            VoterRegistration.company_id == company_id,
+            VoterRegistration.status != 'deleted',
+            Voter.status != STATUS_INACTIVE,
+            Election.status != 'cancelled'
+        )
+        base = VoterRegistration.query.join(Voter).join(Election).filter(
+            VoterRegistration.company_id == company_id,
+            VoterRegistration.status != 'deleted',
+            Voter.status != STATUS_INACTIVE,
+            Election.status != 'cancelled'
+        )
     search = request.args.get('search')
     election_id = request.args.get('election_id')
     voter_id = request.args.get('voter_id')
@@ -30,13 +69,6 @@ def list_voter_registrations():
     if error:
         return error
 
-    query = VoterRegistration.query.join(Voter).outerjoin(User).join(Election).filter(
-        VoterRegistration.company_id == company_id,
-        VoterRegistration.status != 'deleted',
-        Voter.status != STATUS_INACTIVE,
-        Election.status != 'cancelled'
-    )
-    
     if search:
         query = query.filter(or_(
             VoterRegistration.registration_id.ilike(f'%{search}%'),
@@ -63,13 +95,6 @@ def list_voter_registrations():
 
     pagination = query.order_by(VoterRegistration.registered_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
     registrations = pagination.items
-    
-    base = VoterRegistration.query.join(Voter).join(Election).filter(
-        VoterRegistration.company_id == company_id,
-        VoterRegistration.status != 'deleted',
-        Voter.status != STATUS_INACTIVE,
-        Election.status != 'cancelled'
-    )
     
     return jsonify({
         'data': [{
@@ -119,7 +144,6 @@ def list_voter_registrations():
 @audit_action('create_voter_registration', module='VoterRegistrations', description='Created voter registration')
 def create_voter_registration():
     """Create a new voter registration"""
-    company_id = get_current_company_id()
     current_user = get_current_user()
     data = request.get_json()
     
@@ -133,14 +157,21 @@ def create_voter_registration():
         return jsonify({'error': 'voter_id and election_id must be valid integers'}), 400
     
     # Validate voter exists and belongs to company
-    voter = Voter.query.filter_by(id=voter_id, company_id=company_id).first()
+    if is_administrator():
+        voter = Voter.query.filter_by(id=voter_id).first()
+        election = Election.query.filter_by(id=election_id).first()
+    else:
+        company_id = get_current_company_id()
+        voter = Voter.query.filter_by(id=voter_id, company_id=company_id).first()
+        election = Election.query.filter_by(id=election_id, company_id=company_id).first()
+
     if not voter:
         return jsonify({'error': 'Voter not found'}), 404
     
-    # Validate election exists and belongs to company
-    election = Election.query.filter_by(id=election_id, company_id=company_id).first()
     if not election:
         return jsonify({'error': 'Election not found'}), 404
+    
+    company_id = election.company_id
     
     # Check if voter is already registered for this election
     existing_registration = VoterRegistration.query.filter_by(

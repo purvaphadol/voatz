@@ -65,7 +65,7 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
 );
 
 const Modules = () => {
-  const { hasPermission } = usePermissions();
+  const { hasPermission, hasPermissionByRoute } = usePermissions();
   const { user } = useAuth();
   const isPlatformAdmin = user?.is_administrator === true;
 
@@ -104,10 +104,10 @@ const Modules = () => {
     }
   }, [formError]);
 
-  const canView = hasPermission('Modules', 'view');
-  const canCreate = hasPermission('Modules', 'create');
-  const canUpdate = hasPermission('Modules', 'update');
-  const canDelete = hasPermission('Modules', 'delete');
+  const canView = hasPermissionByRoute('modules', 'view') || hasPermission('Modules', 'view');
+  const canCreate = hasPermissionByRoute('modules', 'create') || hasPermission('Modules', 'create');
+  const canUpdate = hasPermissionByRoute('modules', 'update') || hasPermission('Modules', 'update');
+  const canDelete = hasPermissionByRoute('modules', 'delete') || hasPermission('Modules', 'delete');
 
   useEffect(() => {
     if (canView) {
@@ -158,6 +158,10 @@ const Modules = () => {
   };
 
   const handleEdit = (module) => {
+    if (!isPlatformAdmin) {
+      setRequestModalOpen(true);
+      return;
+    }
     setEditingModule(module);
     setViewMode(false);
     setFormError('');
@@ -188,6 +192,10 @@ const Modules = () => {
   };
 
   const handleManageActions = (module) => {
+    if (!isPlatformAdmin) {
+      setRequestModalOpen(true);
+      return;
+    }
     setSelectedModule(module);
     setFormError('');
     loadModuleActions(module.id);
@@ -195,6 +203,10 @@ const Modules = () => {
   };
 
   const handleDelete = async (moduleId, force = false) => {
+    if (!isPlatformAdmin) {
+      setRequestModalOpen(true);
+      return;
+    }
     if (force) {
       const finalConfirmed = await showDeleteConfirm('this system module');
       if (!finalConfirmed) return;
@@ -471,28 +483,26 @@ const Modules = () => {
             />
           );
           
-          if (isPlatformAdmin) {
+          actions.push(
+            <GridActionsCellItem
+              icon={<SettingsIcon />}
+              label="Manage Actions"
+              onClick={() => handleManageActions(params.row)}
+            />
+          );
+
+          if (params.row.status === 9) {
             actions.push(
               <GridActionsCellItem
-                icon={<SettingsIcon />}
-                label="Manage Actions"
-                onClick={() => handleManageActions(params.row)}
+                icon={<RestoreIcon />}
+                label="Reactivate"
+                onClick={() => handleReactivate(params.row.id)}
               />
             );
-
-            if (params.row.status === 9) {
-              actions.push(
-                <GridActionsCellItem
-                  icon={<RestoreIcon />}
-                  label="Reactivate"
-                  onClick={() => handleReactivate(params.row.id)}
-                />
-              );
-            }
           }
         }
         
-        if (canDelete && isPlatformAdmin) {
+        if (canDelete) {
           actions.push(
             <GridActionsCellItem
               icon={<DeleteIcon />}

@@ -5,7 +5,7 @@ from app.models.ballot import Ballot
 from app.models.election import Election
 from app.models.candidate import Candidate
 from app.models.vote import Vote
-from app.utils import get_current_company_id, require_permission, get_current_user
+from app.utils import get_current_company_id, require_permission, get_current_user, is_administrator
 from app.utils.validators import parse_pagination, validate_ballot_input
 from app.utils.query_helpers import get_active_ballots_query
 from app.utils.db_utils import safe_commit
@@ -23,7 +23,18 @@ ballots_bp = Blueprint('ballots', __name__)
 @require_permission('Ballots', 'view')
 def list_ballots():
     """List all ballots with filtering and pagination"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        req_company_id = request.args.get('company_id', type=int)
+        if req_company_id:
+            query = get_active_ballots_query(req_company_id).join(Election)
+            base = get_active_ballots_query(req_company_id)
+        else:
+            query = Ballot.query.filter(Ballot.is_active == True).join(Election)
+            base = Ballot.query.filter(Ballot.is_active == True)
+    else:
+        company_id = get_current_company_id()
+        query = get_active_ballots_query(company_id).join(Election)
+        base = get_active_ballots_query(company_id)
     search = request.args.get('search')
     election_id = request.args.get('election_id')
     ballot_type = request.args.get('ballot_type')
@@ -32,8 +43,6 @@ def list_ballots():
     page, per_page, error = parse_pagination(request)
     if error:
         return error
-
-    query = get_active_ballots_query(company_id).join(Election)
     
     if search:
         query = query.filter(or_(
@@ -58,7 +67,6 @@ def list_ballots():
     pagination = query.order_by(Ballot.election_id, Ballot.order_index).paginate(page=page, per_page=per_page, error_out=False)
     ballots = pagination.items
     
-    base = get_active_ballots_query(company_id)
     return jsonify({
         'data': [{
             'id': b.id,
@@ -106,7 +114,6 @@ def list_ballots():
 @audit_action('create_ballot', module='Ballots')
 def create_ballot():
     """Create a new ballot"""
-    company_id = get_current_company_id()
     current_user = get_current_user()
     data = request.get_json() or {}
     cleaned_data, err = validate_ballot_input(data, is_create=True)
@@ -115,13 +122,20 @@ def create_ballot():
     
     try:
         election_id = int(data['election_id'])
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, KeyError):
         return jsonify({'error': 'election_id must be a valid integer'}), 400
     
     # Validate election exists and belongs to company
-    election = Election.query.filter_by(id=election_id, company_id=company_id).first()
+    if is_administrator():
+        election = Election.query.filter_by(id=election_id).first()
+    else:
+        company_id = get_current_company_id()
+        election = Election.query.filter_by(id=election_id, company_id=company_id).first()
+
     if not election:
         return jsonify({'error': 'Election not found'}), 404
+
+    company_id = election.company_id
     
     # Don't allow ballot creation for active, completed, or cancelled elections
     if election.status in ['active', 'cancelled', 'completed']:
@@ -181,12 +195,18 @@ def create_ballot():
 @require_permission('Ballots', 'view')
 def get_ballot(ballot_id):
     """Get detailed ballot information"""
-    company_id = get_current_company_id()
-    ballot = Ballot.query.join(Election).filter(
-        Ballot.id == ballot_id,
-        Ballot.company_id == company_id,
-        Ballot.is_active == True
-    ).first_or_404()
+    if is_administrator():
+        ballot = Ballot.query.join(Election).filter(
+            Ballot.id == ballot_id,
+            Ballot.is_active == True
+        ).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        ballot = Ballot.query.join(Election).filter(
+            Ballot.id == ballot_id,
+            Ballot.company_id == company_id,
+            Ballot.is_active == True
+        ).first_or_404()
     
     # Get candidates
     candidates = Candidate.query.filter_by(ballot_id=ballot_id, is_active=True).order_by(Candidate.order_index).all()
@@ -228,7 +248,7 @@ def get_ballot(ballot_id):
             'party': c.party,
             'party_abbreviation': c.party_abbreviation,
             'title': c.title,
-            'image_url': c.image_url,  # Added candidate image support
+            'image_url': c.image_url,
             'order_index': c.order_index,
             'is_write_in': c.is_write_in,
             'is_incumbent': c.is_incumbent,
@@ -250,9 +270,12 @@ def get_ballot(ballot_id):
 @audit_action('update_ballot', module='Ballots')
 def update_ballot(ballot_id):
     """Update ballot information"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        ballot = Ballot.query.filter_by(id=ballot_id, is_active=True).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     current_user = get_current_user()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     data = request.get_json()
     
     # Check if election is active
@@ -315,8 +338,11 @@ def update_ballot(ballot_id):
 @audit_action('delete_ballot', module='Ballots')
 def delete_ballot(ballot_id):
     """Delete ballot (soft delete)"""
-    company_id = get_current_company_id()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
+    if is_administrator():
+        ballot = Ballot.query.filter_by(id=ballot_id, is_active=True).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     
     # Check if election is active
     if ballot.election.status == 'active':
@@ -364,9 +390,12 @@ def delete_ballot(ballot_id):
 @audit_action('publish_ballot', module='Ballots')
 def publish_ballot(ballot_id):
     """Publish a ballot"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        ballot = Ballot.query.filter_by(id=ballot_id, is_active=True).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     current_user = get_current_user()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     
     # Validate ballot can be published
     if ballot.election.status == 'active':
@@ -390,9 +419,12 @@ def publish_ballot(ballot_id):
 @audit_action('unpublish_ballot', module='Ballots')
 def unpublish_ballot(ballot_id):
     """Unpublish a ballot"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        ballot = Ballot.query.filter_by(id=ballot_id, is_active=True).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     current_user = get_current_user()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     
     # Check if election is active
     if ballot.election.status == 'active':
@@ -410,8 +442,11 @@ def unpublish_ballot(ballot_id):
 @require_permission('Ballots', 'view')
 def get_ballot_candidates(ballot_id):
     """Get all candidates for a ballot"""
-    company_id = get_current_company_id()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
+    if is_administrator():
+        ballot = Ballot.query.filter_by(id=ballot_id, is_active=True).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     
     candidates = Candidate.query.filter_by(ballot_id=ballot_id, is_active=True).order_by(Candidate.order_index).all()
     
@@ -426,7 +461,7 @@ def get_ballot_candidates(ballot_id):
             'party_abbreviation': c.party_abbreviation,
             'title': c.title,
             'description': c.description,
-            'image_url': c.image_url,  # Added candidate image support
+            'image_url': c.image_url,
             'order_index': c.order_index,
             'is_write_in': c.is_write_in,
             'is_incumbent': c.is_incumbent,
@@ -442,9 +477,12 @@ def get_ballot_candidates(ballot_id):
 @require_permission('Ballots', 'update')
 def reorder_ballot_candidates(ballot_id):
     """Reorder candidates in a ballot"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        ballot = Ballot.query.filter_by(id=ballot_id, is_active=True).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     current_user = get_current_user()
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     data = request.get_json()
     
     # Check if election is active
@@ -471,9 +509,13 @@ def reorder_ballot_candidates(ballot_id):
 @audit_action('duplicate_ballot', module='Ballots')
 def duplicate_ballot(ballot_id):
     """Duplicate a ballot"""
-    company_id = get_current_company_id()
+    if is_administrator():
+        original_ballot = Ballot.query.filter_by(id=ballot_id, is_active=True).first_or_404()
+        company_id = original_ballot.company_id
+    else:
+        company_id = get_current_company_id()
+        original_ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     current_user = get_current_user()
-    original_ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
     data = request.get_json()
     
     # Create new ballot
@@ -539,17 +581,23 @@ def duplicate_ballot(ballot_id):
 @require_permission('Ballots', 'view')
 def get_ballot_stats():
     """Get ballot statistics for the company"""
-    company_id = get_current_company_id()
-    
-    total_ballots = Ballot.query.filter_by(company_id=company_id).count()
-    active_ballots = Ballot.query.filter_by(company_id=company_id, is_active=True).count()
-    published_ballots = Ballot.query.filter_by(company_id=company_id, is_published=True).count()
-    
-    # Ballot types
-    ballot_types = db.session.query(
-        Ballot.ballot_type,
-        db.func.count(Ballot.id).label('count')
-    ).filter_by(company_id=company_id).group_by(Ballot.ballot_type).all()
+    if is_administrator():
+        total_ballots = Ballot.query.count()
+        active_ballots = Ballot.query.filter_by(is_active=True).count()
+        published_ballots = Ballot.query.filter_by(is_published=True).count()
+        ballot_types = db.session.query(
+            Ballot.ballot_type,
+            db.func.count(Ballot.id).label('count')
+        ).group_by(Ballot.ballot_type).all()
+    else:
+        company_id = get_current_company_id()
+        total_ballots = Ballot.query.filter_by(company_id=company_id).count()
+        active_ballots = Ballot.query.filter_by(company_id=company_id, is_active=True).count()
+        published_ballots = Ballot.query.filter_by(company_id=company_id, is_published=True).count()
+        ballot_types = db.session.query(
+            Ballot.ballot_type,
+            db.func.count(Ballot.id).label('count')
+        ).filter_by(company_id=company_id).group_by(Ballot.ballot_type).all()
     
     return jsonify({
         'total_ballots': total_ballots,

@@ -4,10 +4,10 @@ from sqlalchemy import exc
 from app.models.module import SystemModule, SystemModuleAction
 from app.models.role_permission import RolePermissionMapping
 from app.models.user_permission import UserPermissionMapping
-from app.utils import require_permission
+from app.utils import require_permission, is_administrator
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields
-from app.utils.constants import STATUS_ACTIVE, STATUS_INACTIVE, STATUS_DEACTIVATED
+from app.utils.constants import STATUS_ACTIVE, STATUS_INACTIVE, STATUS_DEACTIVATED, MSG_PLATFORM_ADMIN_ONLY_MODULE_ACTIONS
 from app.utils.validators import validate_module_action_input
 
 module_actions_bp = Blueprint('module_actions', __name__)
@@ -36,6 +36,9 @@ def get_module_actions(module_id):
 @module_actions_bp.route('/module/<int:module_id>/actions', methods=['POST'])
 @require_permission('Modules', 'create')
 def create_module_action(module_id):
+    if not is_administrator():
+        return jsonify({'error': MSG_PLATFORM_ADMIN_ONLY_MODULE_ACTIONS}), 403
+
     SystemModule.query.filter_by(id=module_id).filter(SystemModule.status != STATUS_DEACTIVATED).first_or_404()
     
     data = request.get_json()
@@ -73,6 +76,9 @@ def create_module_action(module_id):
 @module_actions_bp.route('/actions/bulk', methods=['POST'])
 @require_permission('Modules', 'create')
 def create_bulk_module_actions():
+    if not is_administrator():
+        return jsonify({'error': MSG_PLATFORM_ADMIN_ONLY_MODULE_ACTIONS}), 403
+
     data = request.get_json()
     
     if not data or not data.get('module_id') or not data.get('actions'):
@@ -125,6 +131,9 @@ def create_bulk_module_actions():
 @module_actions_bp.route('/action/<int:action_id>', methods=['PUT'])
 @require_permission('Modules', 'update')
 def update_module_action(action_id):
+    if not is_administrator():
+        return jsonify({'error': MSG_PLATFORM_ADMIN_ONLY_MODULE_ACTIONS}), 403
+
     action = SystemModuleAction.query.filter(
         SystemModuleAction.id == action_id,
         SystemModuleAction.status != STATUS_DEACTIVATED
@@ -160,10 +169,16 @@ def update_module_action(action_id):
 @module_actions_bp.route('/action/<int:action_id>', methods=['DELETE'])
 @require_permission('Modules', 'delete')
 def delete_module_action(action_id):
+    if not is_administrator():
+        return jsonify({'error': MSG_PLATFORM_ADMIN_ONLY_MODULE_ACTIONS}), 403
+
     action = SystemModuleAction.query.filter(
         SystemModuleAction.id == action_id,
         SystemModuleAction.status != STATUS_DEACTIVATED
     ).first_or_404()
+    
+    if action.action_name.lower().strip() in ('view', 'create', 'update', 'delete'):
+        return jsonify({'error': 'System default actions (view, create, update, delete) cannot be deleted'}), 403
     
     role_perms = RolePermissionMapping.query.filter(
         RolePermissionMapping.action_id == action_id,

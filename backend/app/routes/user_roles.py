@@ -236,6 +236,21 @@ def remove_role_from_user(mapping_id):
             company_id=company_id
         ).first_or_404()
 
+    # Protect Company Super Admin role assignment
+    role = Role.query.get(user_role.role_id)
+    if role and role.is_super_admin:
+        if not is_administrator():
+            return jsonify({'error': 'Only Platform Administrators can remove the Company Super Admin role'}), 403
+
+        remaining = UserRoleMapping.query.filter(
+            UserRoleMapping.role_id == role.id,
+            UserRoleMapping.company_id == user_role.company_id,
+            UserRoleMapping.status == STATUS_ACTIVE,
+            UserRoleMapping.id != mapping_id
+        ).count()
+        if remaining == 0:
+            return jsonify({'error': 'Cannot remove the last Company Super Admin'}), 400
+
     user_role.status = STATUS_INACTIVE
     set_audit_fields(user_role, is_create=False)
     return safe_commit(
@@ -263,6 +278,11 @@ def update_user_role(mapping_id):
             id=mapping_id,
             company_id=company_id
         ).first_or_404()
+
+    role = Role.query.get(user_role.role_id)
+    if role and role.is_super_admin and not is_administrator():
+        if data.get('status') == STATUS_ACTIVE and user_role.status != STATUS_ACTIVE:
+            return jsonify({'error': 'Only Platform Administrators can activate Company Super Admin role assignments'}), 403
 
     if data.get('status') is not None:
         user_role.status = data['status']

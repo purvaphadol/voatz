@@ -137,17 +137,20 @@ def create_company():
         current_app.logger.error(f"Error during company create/reactivate flush: {str(e)}")
         return jsonify({'error': f'Failed to create company: {str(e)}'}), 400
 
-    # Automatically provision SystemModules for the company
+    # Provision specified SystemModules for the company (or empty if none specified)
     from app.models.module import SystemModule, CompanyModule
     system_module_ids = data.get('system_module_ids') if data else None
     
-    if system_module_ids and isinstance(system_module_ids, list):
+    if system_module_ids and isinstance(system_module_ids, list) and len(system_module_ids) > 0:
         target_sys_mods = SystemModule.query.filter(SystemModule.id.in_(system_module_ids), SystemModule.status == STATUS_ACTIVE).all()
     else:
-        target_sys_mods = SystemModule.query.filter(SystemModule.status == STATUS_ACTIVE).all()
+        target_sys_mods = []
 
     for sys_mod in target_sys_mods:
-        existing_cm = CompanyModule.query.with_deactivated().filter_by(company_id=company.id, system_module_id=sys_mod.id).first()
+        existing_cm = CompanyModule.query.filter_by(company_id=company.id, system_module_id=sys_mod.id).first()
+
+
+
         if existing_cm:
             existing_cm.status = STATUS_ACTIVE
             set_audit_fields(existing_cm, is_create=False)
@@ -391,3 +394,122 @@ def permanent_delete_company(company_id):
         (jsonify({'message': 'Company permanently deleted'}), 200),
         'Internal server error during permanent company deletion'
     )
+
+
+# ---------------------------------------------------------------------------
+# Company Module Provisioning Endpoints (Issue A5 / ISSUE-3.7)
+# ---------------------------------------------------------------------------
+
+@companies_bp.route('/<int:company_id>/modules', methods=['GET'])
+@require_permission('Companies', 'view')
+def get_company_modules(company_id):
+    """List provisioned system modules for a company."""
+    denied = require_same_company_or_administrator(company_id)
+    if denied:
+        return denied
+
+    from app.models.module import CompanyModule, SystemModule
+    company = Company.query.filter_by(id=company_id).filter(Company.status == STATUS_ACTIVE).first_or_404()
+
+    provisioned = db.session.query(
+        CompanyModule,
+        SystemModule.module_name,
+        SystemModule.route_name,
+        SystemModule.description,
+        SystemModule.icon
+    ).join(
+        SystemModule, CompanyModule.system_module_id == SystemModule.id
+    ).filter(
+        CompanyModule.company_id == company_id,
+        CompanyModule.status == STATUS_ACTIVE,
+        SystemModule.status == STATUS_ACTIVE
+    ).all()
+
+    return jsonify({
+        'data': [{
+            'id': p.CompanyModule.id,
+            'company_id': p.CompanyModule.company_id,
+            'system_module_id': p.CompanyModule.system_module_id,
+            'module_name': p.module_name,
+            'route_name': p.route_name,
+            'description': p.description or '',
+            'icon': p.icon,
+            'created_at': p.CompanyModule.created_at.isoformat() if p.CompanyModule.created_at else None
+        } for p in provisioned]
+    })
+
+
+@companies_bp.route('/<int:company_id>/modules', methods=['POST'])
+@require_permission('Companies', 'update')
+@audit_action('provision_company_module', module='Companies', description='Provisioned modules to company',
+              get_target_id=lambda *a, **kw: kw.get('company_id'))
+def provision_company_modules(company_id):
+    """Provision module(s) to a company. Platform Administrators only."""
+    if not is_administrator():
+        return jsonify({'error': 'Forbidden: Only platform Administrators can provision modules'}), 403
+
+    company = Company.query.filter_by(id=company_id).filter(Company.status == STATUS_ACTIVE).first_or_404()
+    data = request.get_json()
+
+    if not data or not data.get('module_ids') or not isinstance(data.get('module_ids'), list):
+        return jsonify({'error': 'module_ids array is required'}), 400
+
+    from app.models.module import SystemModule, CompanyModule
+    module_ids = [int(m) for m in data['module_ids'] if isinstance(m, (int, str)) and str(m).isdigit()]
+
+    system_modules = SystemModule.query.filter(
+        SystemModule.id.in_(module_ids),
+        SystemModule.status == STATUS_ACTIVE
+    ).all()
+
+    provisioned_count = 0
+    for sys_mod in system_modules:
+        cm = CompanyModule.query.filter_by(
+            company_id=company_id,
+            system_module_id=sys_mod.id
+        ).first()
+
+
+        if cm:
+            if cm.status != STATUS_ACTIVE:
+                cm.status = STATUS_ACTIVE
+                set_audit_fields(cm, is_create=False)
+                provisioned_count += 1
+        else:
+            comp_mod = CompanyModule()
+            comp_mod.company_id = company_id
+            comp_mod.system_module_id = sys_mod.id
+            comp_mod.status = STATUS_ACTIVE
+            set_audit_fields(comp_mod, is_create=True)
+            db.session.add(comp_mod)
+            provisioned_count += 1
+
+    return safe_commit(
+        (jsonify({'message': f'Successfully provisioned {provisioned_count} module(s)', 'company_id': company_id}), 200),
+        'Failed to provision modules'
+    )
+
+
+@companies_bp.route('/<int:company_id>/modules/<int:module_id>', methods=['DELETE'])
+@require_permission('Companies', 'update')
+@audit_action('deprovision_company_module', module='Companies', description='Deprovisioned module from company',
+              get_target_id=lambda *a, **kw: kw.get('company_id'))
+def deprovision_company_module(company_id, module_id):
+    """Deprovision a single module from a company. Platform Administrators only."""
+    if not is_administrator():
+        return jsonify({'error': 'Forbidden: Only platform Administrators can deprovision modules'}), 403
+
+    from app.models.module import CompanyModule
+    cm = CompanyModule.query.filter_by(
+        company_id=company_id,
+        system_module_id=module_id
+    ).filter(CompanyModule.status == STATUS_ACTIVE).first_or_404()
+
+    cm.status = STATUS_DEACTIVATED
+    set_audit_fields(cm, is_create=False)
+
+    return safe_commit(
+        (jsonify({'message': 'Module deprovisioned successfully'}), 200),
+        'Failed to deprovision module'
+    )
+

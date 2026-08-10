@@ -33,8 +33,6 @@ def get_user_sidebar():
             CompanyModule.status == STATUS_ACTIVE,
             SystemModule.status == STATUS_ACTIVE
         ).order_by(SystemModule.order_index.asc(), SystemModule.module_name.asc()).all()
-        if not modules:
-            modules = SystemModule.query.filter(SystemModule.status == STATUS_ACTIVE).order_by(SystemModule.order_index.asc(), SystemModule.module_name.asc()).all()
         
     menu_items = []
 

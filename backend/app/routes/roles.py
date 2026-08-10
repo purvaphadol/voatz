@@ -61,12 +61,13 @@ def list_roles():
             except (ValueError, TypeError):
                 return jsonify({'error': 'Invalid company_id parameter'}), 400
     else:
-        # Regular user: scoped to own company only
+        # Regular user: scoped to own company only, excluding protected Company Super Admin role
         company_id = get_current_company_id()
         query = Role.query.filter(
             Role.company_id == company_id,
             Role.status.in_(allowed),
             Role.status != STATUS_DEACTIVATED,
+            Role.is_super_admin == False,
         ).outerjoin(Department)
 
     query = query.order_by(Role.updated_at.desc(), Role.created_at.desc())
@@ -134,6 +135,15 @@ def create_role():
     role_name = cleaned_data['role_name']
     dept_id = data.get('department_id') if data and data.get('department_id') else None
     is_super_admin = bool(data.get('is_super_admin', False))
+
+    if is_super_admin:
+        if not is_administrator():
+            return jsonify({'error': 'Only Platform Administrators can create super admin roles'}), 403
+        existing_sa = Role.query.filter_by(company_id=company_id, is_super_admin=True).filter(
+            Role.status == STATUS_ACTIVE
+        ).first()
+        if existing_sa:
+            return jsonify({'error': 'Company already has an active Super Admin role'}), 400
 
     if dept_id:
         department = Department.query.filter_by(id=dept_id, company_id=company_id).first()

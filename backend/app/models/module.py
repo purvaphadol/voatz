@@ -1,5 +1,5 @@
 from app import db
-from app.models.base import TimestampAuditMixin
+from app.models.base import TimestampAuditMixin, TenantScopedMixin
 
 class SystemModule(db.Model, TimestampAuditMixin):
     """Global Master Module Catalog managed exclusively by Platform Administrator."""
@@ -7,10 +7,18 @@ class SystemModule(db.Model, TimestampAuditMixin):
 
     id = db.Column(db.Integer, primary_key=True)
     module_name = db.Column(db.String(100), unique=True, nullable=False)
+    code = db.Column(db.String(50), unique=True, nullable=True)
     route_name = db.Column(db.String(100), nullable=True)
     description = db.Column(db.Text, nullable=True)
     icon = db.Column(db.String(100), default='folder', nullable=True)
     order_index = db.Column(db.Integer, default=0, nullable=False)
+
+    @property
+    def canonical_code(self):
+        """Return canonical module code (e.g. 'users', 'elections', 'modules')."""
+        if self.code:
+            return self.code.lower().strip()
+        return self.module_name.lower().replace(' ', '_').strip()
 
     @property
     def display_route(self):
@@ -38,7 +46,7 @@ class SystemModuleAction(db.Model, TimestampAuditMixin):
     )
 
 
-class CompanyModule(db.Model, TimestampAuditMixin):
+class CompanyModule(db.Model, TimestampAuditMixin, TenantScopedMixin):
     """Mapping table for provisioning SystemModules to specific Companies (Tenants)."""
     __tablename__ = 'company_modules'
 
