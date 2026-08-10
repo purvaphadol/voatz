@@ -179,6 +179,9 @@ def delete_module_action(action_id):
     
     if action.action_name.lower().strip() in ('view', 'create', 'update', 'delete'):
         return jsonify({'error': 'System default actions (view, create, update, delete) cannot be deleted'}), 403
+
+    force = request.args.get('force', 'false').lower() == 'true'
+    dry_run = request.args.get('dry_run', 'false').lower() == 'true'
     
     role_perms = RolePermissionMapping.query.filter(
         RolePermissionMapping.action_id == action_id,
@@ -190,12 +193,35 @@ def delete_module_action(action_id):
         UserPermissionMapping.status != STATUS_DEACTIVATED
     ).count()
     
-    if role_perms > 0 or user_perms > 0:
+    total_deps = role_perms + user_perms
+
+    if total_deps > 0 and not force:
+        user_friendly_error = f"Cannot delete action: It currently has {role_perms} role permission(s) and {user_perms} user permission(s)."
         return jsonify({
-            'error': 'Cannot delete action as it is being used in permissions',
-            'details': f'Found {role_perms} active role permissions and {user_perms} active user permissions'
+            'error': user_friendly_error,
+            'can_force': True,
+            'active_dependencies': {
+                'role_permissions': role_perms,
+                'user_permissions': user_perms
+            },
+            'message': 'Are you sure you want to delete this action (and deactivate related role/user permissions)?'
         }), 400
         
+    if dry_run:
+        return jsonify({'message': 'Pre-flight check passed', 'can_delete': True}), 200
+
+    if role_perms > 0:
+        rps = RolePermissionMapping.query.filter(RolePermissionMapping.action_id == action_id, RolePermissionMapping.status != STATUS_DEACTIVATED).all()
+        for rp in rps:
+            rp.status = STATUS_DEACTIVATED
+            set_audit_fields(rp, is_create=False)
+
+    if user_perms > 0:
+        ups = UserPermissionMapping.query.filter(UserPermissionMapping.action_id == action_id, UserPermissionMapping.status != STATUS_DEACTIVATED).all()
+        for up in ups:
+            up.status = STATUS_DEACTIVATED
+            set_audit_fields(up, is_create=False)
+
     action.status = STATUS_DEACTIVATED
     set_audit_fields(action, is_create=False)
     

@@ -60,3 +60,8 @@ body {
 .animate-fade-in {
   animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* Ensure SweetAlert popups appear above MUI modals/dialogs (z-index 1300) */
+.swal2-container {
+  z-index: 9999 !important;
+}

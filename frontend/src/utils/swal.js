@@ -25,6 +25,7 @@ export const showConfirmDialog = async ({
     confirmButtonColor,
     cancelButtonColor,
     reverseButtons: true,
+    target: 'body',
     customClass: {
       confirmButton: 'MuiButton-root MuiButton-contained',
       cancelButton: 'MuiButton-root MuiButton-outlined',
@@ -72,6 +73,7 @@ export const showForceDeleteConfirm = async ({
     confirmButtonColor: '#d32f2f',
     cancelButtonColor: '#757575',
     reverseButtons: true,
+    target: 'body',
   });
 
   return result.isConfirmed;
@@ -89,6 +91,7 @@ export const showSuccessToast = (title = 'Success!') => {
     showConfirmButton: false,
     timer: 3000,
     timerProgressBar: true,
+    target: 'body',
   });
 };
 
@@ -101,6 +104,7 @@ export const showSuccessAlert = (message = 'Operation completed successfully.', 
     title,
     text: message,
     confirmButtonColor: '#1976d2',
+    target: 'body',
   });
 };
 
@@ -108,11 +112,12 @@ export const showSuccessAlert = (message = 'Operation completed successfully.', 
  * Quick helper for error alert
  */
 export const showErrorAlert = (message = 'An unexpected error occurred.') => {
-  MySwal.fire({
+  return MySwal.fire({
     icon: 'error',
     title: 'Error',
     text: message,
     confirmButtonColor: '#1976d2',
+    target: 'body',
   });
 };
 

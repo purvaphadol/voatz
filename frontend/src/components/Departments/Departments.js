@@ -193,11 +193,16 @@ const Departments = () => {
     try {
       setIsSubmitting(true);
       if (editingDepartment) {
-        await departmentsAPI.update(editingDepartment.id, {
+        const updatePayload = {
           department_name: formData.department_name,
           description: formData.description,
-        });
-        setSuccess('Department updated successfully');
+        };
+        if (isPlatformAdmin && formData.company_id) {
+          updatePayload.company_id = formData.company_id;
+        }
+        await departmentsAPI.update(editingDepartment.id, updatePayload);
+        setDialogOpen(false);
+        await showSuccessAlert('Department updated successfully');
       } else {
         const createPayload = {
           department_name: formData.department_name,
@@ -207,9 +212,9 @@ const Departments = () => {
           createPayload.company_id = formData.company_id;
         }
         await departmentsAPI.create(createPayload);
-        setSuccess('Department created successfully');
+        setDialogOpen(false);
+        await showSuccessAlert('Department created successfully');
       }
-      setDialogOpen(false);
       loadDepartments();
     } catch (error) {
       setFormError(capitalizeError((error.response && error.response.data && error.response.data.error) || 'Operation failed'));

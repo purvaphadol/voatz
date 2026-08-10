@@ -172,7 +172,7 @@ export const moduleActionsAPI = {
   getModuleActions: (moduleId) => api.get(`/module-actions/module/${moduleId}/actions`),
   createAction: (moduleId, actionData) => api.post(`/module-actions/module/${moduleId}/actions`, actionData),
   updateAction: (actionId, actionData) => api.put(`/module-actions/action/${actionId}`, actionData),
-  deleteAction: (actionId) => api.delete(`/module-actions/action/${actionId}`),
+  deleteAction: (actionId, params = {}) => api.delete(`/module-actions/action/${actionId}`, { params }),
   createBulkActions: (moduleId, actionsData) => api.post('/module-actions/actions/bulk', {
     module_id: moduleId,
     actions: actionsData,

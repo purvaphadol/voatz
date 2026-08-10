@@ -177,6 +177,10 @@ const Users = () => {
   };
 
   const handleEdit = (user) => {
+    if (!user || !user.id) {
+      showErrorAlert('Invalid user record. Please refresh the page and try again.');
+      return;
+    }
     setEditingUser(user);
     setFormError('');
     const compId = user.company_id || '';
@@ -266,12 +270,13 @@ const Users = () => {
       
       if (editingUser) {
         await usersAPI.update(editingUser.id, payload);
-        setSuccess('User updated successfully');
+        setDialogOpen(false);
+        await showSuccessAlert('User updated successfully');
       } else {
         await usersAPI.create(payload);
-        setSuccess('User created successfully');
+        setDialogOpen(false);
+        await showSuccessAlert('User created successfully');
       }
-      setDialogOpen(false);
       loadUsers();
     } catch (error) {
       setFormError(capitalizeError(handleApiError(error)));

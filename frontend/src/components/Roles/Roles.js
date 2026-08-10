@@ -205,12 +205,13 @@ const Roles = () => {
 
       if (editingRole) {
         await rolesAPI.update(editingRole.id, payload);
-        setSuccess('Role updated successfully');
+        setDialogOpen(false);
+        await showSuccessAlert('Role updated successfully');
       } else {
         await rolesAPI.create(payload);
-        setSuccess('Role created successfully');
+        setDialogOpen(false);
+        await showSuccessAlert('Role created successfully');
       }
-      setDialogOpen(false);
       loadRoles();
     } catch (error) {
       setFormError(capitalizeError((error.response && error.response.data && error.response.data.error) || 'Operation failed'));

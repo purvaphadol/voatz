@@ -48,7 +48,14 @@ export function useDeleteWithDependencies({
   forceConfirmMessage,
   onSuccess,
 }) {
-  const handleDelete = async (id) => {
+  const handleDelete = async (idOrObject) => {
+    const id = (typeof idOrObject === 'object' && idOrObject !== null) ? idOrObject.id : idOrObject;
+
+    if (!id) {
+      showErrorAlert('Invalid item ID. Please refresh the page and try again.');
+      return;
+    }
+
     try {
       // Step 1: Pre-flight dry-run check to test for dependencies before displaying popups
       let hasDependencies = false;
