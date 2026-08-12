@@ -2,8 +2,21 @@ from app.models.user import User
 from app.models.role import Role
 from app.models.department import Department
 from app.models.company import Company
-from app.utils.constants import STATUS_ACTIVE, STATUS_INACTIVE
+from app.utils.constants import STATUS_ACTIVE, STATUS_INACTIVE, STATUS_DEACTIVATED
 from sqlalchemy.orm import joinedload
+
+def active_only(model_class, **filters):
+    """Query records with status == STATUS_ACTIVE (1)."""
+    return model_class.query.filter_by(status=STATUS_ACTIVE, **filters)
+
+def inactive_only(model_class, **filters):
+    """Query records with status == STATUS_INACTIVE (0)."""
+    return model_class.query.filter_by(status=STATUS_INACTIVE, **filters)
+
+def excluding_deactivated(model_class, **filters):
+    """Query Active + Inactive records (status != STATUS_DEACTIVATED (9))."""
+    return model_class.query.filter(model_class.status != STATUS_DEACTIVATED).filter_by(**filters)
+
 
 def get_active_users_query(company_id):
     """

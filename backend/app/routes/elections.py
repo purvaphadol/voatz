@@ -415,27 +415,38 @@ def delete_election(election_id):
             'message': 'Are you sure you want to delete this election (and all related voter registration, ballot, and candidate data)?'
         }), 400
 
+    import time
+    ts = int(time.time())
+
     # Deactivate associated entities
     if active_regs > 0:
         regs = VoterRegistration.query.filter_by(election_id=election_id).filter(VoterRegistration.status.notin_(['inactive', 'cancelled', 'deleted'])).all()
         for r in regs:
-            r.status = 'inactive'
+            r.status = 'cancelled'
             set_audit_fields(r, is_create=False)
 
     if active_ballots > 0:
-        ballots = Ballot.query.filter_by(election_id=election_id, is_active=True).all()
+        ballots = Ballot.query.filter_by(election_id=election_id).filter(Ballot.status != STATUS_DEACTIVATED).all()
         for b in ballots:
-            b.is_active = False
+            b.status = STATUS_DEACTIVATED
+            if "_deleted_" not in b.title:
+                b.title = f"{b.title}_deleted_{b.id}_{ts}"
             set_audit_fields(b, is_create=False)
 
     if active_candidates > 0:
-        candidates = Candidate.query.join(Ballot).filter(Ballot.election_id == election_id).filter(Candidate.status != STATUS_INACTIVE).all()
+        candidates = Candidate.query.join(Ballot).filter(Ballot.election_id == election_id).filter(Candidate.status != STATUS_DEACTIVATED).all()
         for c in candidates:
-            c.status = STATUS_INACTIVE
+            c.status = STATUS_DEACTIVATED
+            if "_deleted_" not in c.name:
+                c.name = f"{c.name}_deleted_{c.id}_{ts}" 
             set_audit_fields(c, is_create=False)
 
     # Soft delete by updating status
     election.status = 'cancelled'
+    if "_deleted_" not in election.title:
+        election.title = f"{election.title}_deleted_{election.id}_{ts}"
+    if election.election_code and "_deleted_" not in election.election_code:
+        election.election_code = f"{election.election_code}_deleted_{election.id}_{ts}"
     set_audit_fields(election, is_create=False)
 
     return safe_commit(

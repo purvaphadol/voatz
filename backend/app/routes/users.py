@@ -55,10 +55,18 @@ def list_users():
         return error[0], error[1]
 
     # --- status filter ---
-    status_param = request.args.get('status', 'active').lower()
-    if status_param not in _STATUS_FILTER_MAP:
-        return jsonify({'error': 'Invalid status filter'}), 400
-    allowed = _STATUS_FILTER_MAP[status_param]
+    show_inactive_raw = request.args.get('show_inactive')
+    status_param = request.args.get('status', '').lower()
+    if status_param == 'all':
+        allowed = [STATUS_ACTIVE, STATUS_INACTIVE]
+    elif show_inactive_raw is not None and show_inactive_raw.lower() == 'true':
+        allowed = [STATUS_INACTIVE]
+    elif status_param == 'inactive':
+        allowed = [STATUS_INACTIVE]
+    elif status_param in _STATUS_FILTER_MAP:
+        allowed = _STATUS_FILTER_MAP[status_param]
+    else:
+        allowed = [STATUS_ACTIVE]
 
     if is_administrator():
         # Administrator: query across all companies
@@ -155,6 +163,15 @@ def create_user():
     email = cleaned_data['email']
     name = cleaned_data['name']
     
+    # Check if email already exists within inactive users in the company for 409 Conflict
+    inactive_user = User.query.filter_by(email=email, company_id=company_id).filter(User.status == STATUS_INACTIVE).first()
+    if inactive_user:
+        return jsonify({
+            'error': 'An inactive user with this email address already exists in this company.',
+            'existing_id': inactive_user.id,
+            'can_reactivate': True
+        }), 409
+
     # Check if email already exists within active users in the company
     if User.query.filter_by(email=email, company_id=company_id).filter(User.status == STATUS_ACTIVE).first():
         return jsonify({'error': 'Email already exists in this company'}), 400
@@ -175,6 +192,34 @@ def create_user():
         'Internal server error during user creation'
     )
 
+
+@users_bp.route('/<int:user_id>/status_dependents', methods=['GET'])
+@require_permission('Users', 'view')
+def get_user_status_dependents(user_id):
+    """Retrieve dependent counts for status transitions (Inactive or Reactivate)."""
+    if is_administrator():
+        user = User.query.filter(
+            User.id == user_id,
+            User.status != STATUS_DEACTIVATED
+        ).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        user = User.query.filter_by(
+            id=user_id, company_id=company_id
+        ).filter(User.status != STATUS_DEACTIVATED).first_or_404()
+
+    from app.utils.cascade import count_dependents, count_reactivatable_dependents
+    dep_data = count_dependents('User', user_id)
+    react_data = count_reactivatable_dependents('User', user_id)
+
+    return jsonify({
+        'user_id': user_id,
+        'current_status': user.status,
+        'deactivate_dependents': dep_data,
+        'reactivate_dependents': react_data
+    })
+
+
 @users_bp.route('/<int:user_id>', methods=['GET'])
 @require_permission('Users', 'view')
 def get_user(user_id):
@@ -182,18 +227,14 @@ def get_user(user_id):
     if is_administrator():
         user = User.query.join(Company).filter(
             User.id == user_id, 
-            User.status != STATUS_INACTIVE,
             User.status != STATUS_DEACTIVATED,
-            Company.status != STATUS_INACTIVE
         ).first_or_404()
     else:
         company_id = get_current_company_id()
         user = User.query.join(Company).filter(
             User.id == user_id, 
             User.company_id == company_id,
-            User.status != STATUS_INACTIVE,
             User.status != STATUS_DEACTIVATED,
-            Company.status != STATUS_INACTIVE
         ).first_or_404()
     
     return jsonify({
@@ -214,12 +255,12 @@ def get_user(user_id):
 @audit_action('update_user', module='Users', description='Updated a user', get_target_id=lambda *args, **kwargs: kwargs.get('user_id'))
 def update_user(user_id):
     if is_administrator():
-        user = User.query.filter_by(id=user_id).filter(User.status != STATUS_INACTIVE).first_or_404()
+        user = User.query.filter_by(id=user_id).filter(User.status != STATUS_DEACTIVATED).first_or_404()
         company_id = user.company_id
     else:
         company_id = get_current_company_id()
-        user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
-    data = request.get_json()
+        user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_DEACTIVATED).first_or_404()
+    data = request.get_json() or {}
     
     cleaned_data, error = validate_user_input(data, is_create=False)
     if error:
@@ -240,7 +281,6 @@ def update_user(user_id):
         
     if 'email' in cleaned_data:
         email = cleaned_data['email']
-        # Check if email already exists within active users in the same company (excluding current user)
         existing_user = User.query.filter(
             User.email.ilike(email),
             User.company_id == company_id,
@@ -256,15 +296,26 @@ def update_user(user_id):
         
     if 'department_id' in data:
         user.department_id = dept_id
-        
-    if data.get('status') is not None:
+
+    # Status transition logic
+    old_status = user.status
+    new_status = data.get('status', old_status)
+
+    from app.utils.cascade import cascade_set_inactive, cascade_reactivate
+    reactivate_summary = None
+
+    if old_status != new_status:
         try:
-            status_val = int(data['status'])
-            if status_val in (0, 1):
-                user.status = status_val
+            new_status_val = int(new_status)
+            if new_status_val == STATUS_INACTIVE:
+                user.status = STATUS_INACTIVE
+                cascade_set_inactive('User', user_id)
+            elif new_status_val == STATUS_ACTIVE:
+                user.status = STATUS_ACTIVE
+                reactivate_summary = cascade_reactivate('User', user_id)
         except (ValueError, TypeError):
             pass
-        
+
     set_audit_fields(user, is_create=False)
     
     try:
@@ -274,7 +325,11 @@ def update_user(user_id):
         current_app.logger.error(f"Error during user update flush: {str(e)}")
         return jsonify({'error': f'Failed to update user: {str(e)}'}), 400
 
-    return safe_commit((jsonify({'message': 'User updated'}), 200), 'Internal server error during user update')
+    response_data = {'message': 'User updated'}
+    if reactivate_summary:
+        response_data['reactivate_summary'] = reactivate_summary
+
+    return safe_commit((jsonify(response_data), 200), 'Internal server error during user update')
 
 @users_bp.route('/<int:user_id>', methods=['DELETE'])
 @require_permission('Users', 'delete')
@@ -294,12 +349,12 @@ def delete_user(user_id):
             return jsonify({"error": "You cannot delete your own account"}), 403
 
     if is_administrator():
-        user = User.query.filter_by(id=user_id).filter(User.status != STATUS_INACTIVE).first_or_404()
+        user = User.query.filter_by(id=user_id).filter(User.status != STATUS_DEACTIVATED).first_or_404()
         company_id = user.company_id
     else:
         company_id = get_current_company_id()
-        user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_INACTIVE).first_or_404()
-    
+        user = User.query.filter_by(id=user_id, company_id=company_id).filter(User.status != STATUS_DEACTIVATED).first_or_404()
+
     # Check if target user holds protected is_super_admin role
     from app.models.role import Role
     from app.models.voter import Voter
@@ -310,7 +365,7 @@ def delete_user(user_id):
     ).filter(
         UserRoleMapping.user_id == user_id,
         UserRoleMapping.company_id == company_id,
-        UserRoleMapping.status != STATUS_INACTIVE,
+        UserRoleMapping.status != STATUS_DEACTIVATED,
         Role.is_super_admin == True
     ).first()
 
@@ -320,9 +375,9 @@ def delete_user(user_id):
     force = request.args.get('force', 'false').lower() == 'true'
     dry_run = request.args.get('dry_run', 'false').lower() == 'true'
 
-    active_voters = Voter.query.filter_by(user_id=user_id, company_id=company_id).filter(Voter.status != STATUS_INACTIVE).count()
-    active_roles = UserRoleMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserRoleMapping.status != STATUS_INACTIVE).count()
-    active_perms = UserPermissionMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserPermissionMapping.status != STATUS_INACTIVE).count()
+    active_voters = Voter.query.filter_by(user_id=user_id, company_id=company_id).filter(Voter.status != STATUS_DEACTIVATED).count()
+    active_roles = UserRoleMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserRoleMapping.status != STATUS_DEACTIVATED).count()
+    active_perms = UserPermissionMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserPermissionMapping.status != STATUS_DEACTIVATED).count()
 
     total_active_deps = active_voters + active_roles + active_perms
 
@@ -352,63 +407,40 @@ def delete_user(user_id):
     if dry_run:
         return jsonify({'message': 'Pre-flight check passed', 'can_delete': True}), 200
 
+    import time
+    ts = int(time.time())
+
     # Deactivate linked voter profile
     if active_voters > 0:
-        voters = Voter.query.filter_by(user_id=user_id, company_id=company_id).filter(Voter.status != STATUS_INACTIVE).all()
+        voters = Voter.query.filter_by(user_id=user_id, company_id=company_id).filter(Voter.status != STATUS_DEACTIVATED).all()
         for v in voters:
-            v.status = STATUS_INACTIVE
+            v.status = STATUS_DEACTIVATED
+            if v.voter_id and "_deleted_" not in v.voter_id:
+                v.voter_id = f"{v.voter_id}_deleted_{v.id}_{ts}"
+            if v.phone_number and "_deleted_" not in v.phone_number:
+                v.phone_number = f"{v.phone_number}_deleted_{v.id}_{ts}"
             set_audit_fields(v, is_create=False)
 
     # Deactivate user roles & permissions
     if active_roles > 0:
-        user_roles = UserRoleMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserRoleMapping.status != STATUS_INACTIVE).all()
+        user_roles = UserRoleMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserRoleMapping.status != STATUS_DEACTIVATED).all()
         for ur in user_roles:
-            ur.status = STATUS_INACTIVE
+            ur.status = STATUS_DEACTIVATED
             set_audit_fields(ur, is_create=False)
 
     if active_perms > 0:
-        user_perms = UserPermissionMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserPermissionMapping.status != STATUS_INACTIVE).all()
+        user_perms = UserPermissionMapping.query.filter_by(user_id=user_id, company_id=company_id).filter(UserPermissionMapping.status != STATUS_DEACTIVATED).all()
         for up in user_perms:
-            up.status = STATUS_INACTIVE
+            up.status = STATUS_DEACTIVATED
             set_audit_fields(up, is_create=False)
 
     # Soft delete user
-    user.status = STATUS_INACTIVE
-    if not user.email.endswith(f"__del_{user.id}"):
-        user.email = f"{user.email}__del_{user.id}"
-    set_audit_fields(user, is_create=False)
-    
-    return safe_commit((jsonify({'message': 'User deleted successfully'}), 200), 'Internal server error during user deletion')
-
-
-@users_bp.route('/<int:user_id>/permanent', methods=['DELETE'])
-@require_permission('Users', 'delete')
-@audit_action('permanent_delete_user', module='Users',
-              description='Permanently deleted a user',
-              get_target_id=lambda *a, **kw: kw.get('user_id'))
-def permanent_delete_user(user_id):
-    """Permanently delete a user (set status to STATUS_DEACTIVATED).
-
-    Platform Administrators only.  The user must already be soft-deleted
-    (STATUS_INACTIVE) before they can be permanently deleted.
-    """
-    if not is_administrator():
-        return jsonify({'error': 'Forbidden: Only platform Administrators can permanently delete users'}), 403
-
-    user = User.query.filter_by(id=user_id).first()
-    if not user or user.status == STATUS_DEACTIVATED:
-        return jsonify({'error': 'User not found'}), 404
-
-    if user.status != STATUS_INACTIVE:
-        return jsonify({'error': 'Deactivate this record before permanently deleting it'}), 400
-
     user.status = STATUS_DEACTIVATED
+    if "_deleted_" not in user.email:
+        user.email = f"{user.email}_deleted_{user.id}_{ts}"
     set_audit_fields(user, is_create=False)
 
-    return safe_commit(
-        (jsonify({'message': 'User permanently deleted'}), 200),
-        'Internal server error during permanent user deletion'
-    )
+    return safe_commit((jsonify({'message': 'User deleted successfully'}), 200), 'Internal server error during user deletion')
 
 
 @users_bp.route('/profile', methods=['GET'])

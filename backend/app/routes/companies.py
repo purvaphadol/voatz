@@ -53,10 +53,18 @@ def list_companies():
     """
     if is_administrator():
         # --- status filter ---
-        status_param = request.args.get('status', 'active').lower()
-        if status_param not in _STATUS_FILTER_MAP:
-            return jsonify({'error': 'Invalid status filter'}), 400
-        allowed = _STATUS_FILTER_MAP[status_param]
+        show_inactive_raw = request.args.get('show_inactive')
+        status_param = request.args.get('status', '').lower()
+        if status_param == 'all':
+            allowed = [STATUS_ACTIVE, STATUS_INACTIVE]
+        elif show_inactive_raw is not None and show_inactive_raw.lower() == 'true':
+            allowed = [STATUS_INACTIVE]
+        elif status_param == 'inactive':
+            allowed = [STATUS_INACTIVE]
+        elif status_param in _STATUS_FILTER_MAP:
+            allowed = _STATUS_FILTER_MAP[status_param]
+        else:
+            allowed = [STATUS_ACTIVE]
 
         query = Company.query.filter(
             Company.status.in_(allowed),
@@ -108,33 +116,38 @@ def create_company():
     if error:
         return error[0], error[1]
         
-    # Case-insensitive duplicate check across all statuses (including deactivated status=9)
-    existing = Company.query.with_deactivated().filter(
-        Company.company_name.ilike(cleaned_data['company_name'])
+    # Case-insensitive check for active vs inactive collisions
+    inactive_existing = Company.query.filter(
+        Company.company_name.ilike(cleaned_data['company_name']),
+        Company.status == STATUS_INACTIVE
     ).first()
-    
-    if existing:
-        if existing.status == STATUS_ACTIVE:
-            return jsonify({'error': 'Company name already exists'}), 400
-        else:
-            # Reactivate soft-deleted/deactivated record and update fields
-            company = existing
-            for key, value in cleaned_data.items():
-                setattr(company, key, value)
-            company.status = STATUS_ACTIVE
-            set_audit_fields(company, is_create=False)
-    else:
-        company = Company()
-        for key, value in cleaned_data.items():
-            setattr(company, key, value)
-        set_audit_fields(company, is_create=True)
-        db.session.add(company)
+
+    if inactive_existing:
+        return jsonify({
+            'error': 'An inactive company with this name already exists.',
+            'existing_id': inactive_existing.id,
+            'can_reactivate': True
+        }), 409
+
+    active_existing = Company.query.filter(
+        Company.company_name.ilike(cleaned_data['company_name']),
+        Company.status == STATUS_ACTIVE
+    ).first()
+
+    if active_existing:
+        return jsonify({'error': 'Company name already exists'}), 400
+
+    company = Company()
+    for key, value in cleaned_data.items():
+        setattr(company, key, value)
+    set_audit_fields(company, is_create=True)
+    db.session.add(company)
     
     try:
         db.session.flush()
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error during company create/reactivate flush: {str(e)}")
+        current_app.logger.error(f"Error during company create flush: {str(e)}")
         return jsonify({'error': f'Failed to create company: {str(e)}'}), 400
 
     # Provision specified SystemModules for the company (or empty if none specified)
@@ -194,7 +207,6 @@ def get_company(company_id):
         return denied
         
     company = Company.query.filter_by(id=company_id).filter(
-        Company.status != STATUS_INACTIVE,
         Company.status != STATUS_DEACTIVATED,
     ).first()
     if not company:
@@ -202,27 +214,47 @@ def get_company(company_id):
         
     return jsonify(_serialize_company(company))
 
+@companies_bp.route('/<int:company_id>/status_dependents', methods=['GET'])
+@require_permission('Companies', 'view')
+def get_company_status_dependents(company_id):
+    """Retrieve dependent counts for status transitions (Inactive or Reactivate)."""
+    denied = require_same_company_or_administrator(company_id)
+    if denied:
+        return denied
+
+    company = Company.query.filter_by(id=company_id).filter(
+        Company.status != STATUS_DEACTIVATED
+    ).first()
+    if not company:
+        return jsonify({'error': 'Company not found'}), 404
+
+    from app.utils.cascade import count_dependents, count_reactivatable_dependents
+    dep_data = count_dependents('Company', company_id)
+    react_data = count_reactivatable_dependents('Company', company_id)
+
+    return jsonify({
+        'company_id': company_id,
+        'current_status': company.status,
+        'deactivate_dependents': dep_data,
+        'reactivate_dependents': react_data
+    })
+
 @companies_bp.route('/<int:company_id>', methods=['PUT'])
 @require_permission('Companies', 'update')
 @audit_action('update_company', module='Companies', description='Updated a company', get_target_id=lambda *a, **kw: kw.get('company_id'))
 def update_company(company_id):
-    """Update company details.
-
-    Users may only update their own company unless they are a platform
-    Administrator.
-    """
+    """Update company details and handle status transitions."""
     denied = require_same_company_or_administrator(company_id)
     if denied:
         return denied
         
     company = Company.query.filter_by(id=company_id).filter(
-        Company.status != STATUS_INACTIVE,
         Company.status != STATUS_DEACTIVATED,
     ).first()
     if not company:
         return jsonify({'error': 'Company not found'}), 404
         
-    data = request.get_json()
+    data = request.get_json() or {}
     cleaned_data, error = validate_company_input(data, is_create=False)
     if error:
         return error[0], error[1]
@@ -235,7 +267,22 @@ def update_company(company_id):
         ).first()
         if existing:
             return jsonify({'error': 'Company name already exists'}), 400
-            
+
+    # Status transition logic
+    old_status = company.status
+    new_status = data.get('status', old_status)
+
+    from app.utils.cascade import cascade_set_inactive, cascade_reactivate
+    reactivate_summary = None
+
+    if old_status != new_status:
+        if new_status == STATUS_INACTIVE:
+            company.status = STATUS_INACTIVE
+            cascade_set_inactive('Company', company_id)
+        elif new_status == STATUS_ACTIVE:
+            company.status = STATUS_ACTIVE
+            reactivate_summary = cascade_reactivate('Company', company_id)
+
     for key, value in cleaned_data.items():
         setattr(company, key, value)
         
@@ -247,8 +294,12 @@ def update_company(company_id):
         current_app.logger.error(f"Error during company update flush: {str(e)}")
         return jsonify({'error': f'Failed to update company: {str(e)}'}), 400
         
+    response_data = {'message': 'Company updated'}
+    if reactivate_summary:
+        response_data['reactivate_summary'] = reactivate_summary
+
     return safe_commit(
-        (jsonify({'message': 'Company updated'}), 200),
+        (jsonify(response_data), 200),
         'Internal server error during company update'
     )
 
@@ -273,13 +324,13 @@ def delete_company(company_id):
         return denied
         
     company = Company.query.filter_by(id=company_id).filter(
-        Company.status != STATUS_INACTIVE,
         Company.status != STATUS_DEACTIVATED,
     ).first()
     if not company:
         return jsonify({'error': 'Company not found'}), 404
         
     force = request.args.get('force', 'false').lower() == 'true'
+    dry_run = request.args.get('dry_run', 'false').lower() == 'true'
 
     from app.models.department import Department
     from app.models.role import Role
@@ -324,20 +375,32 @@ def delete_company(company_id):
             'message': 'Are you sure you want to delete this company (and all related user, department, role, election, and voter data)?'
         }), 400
 
-    # Cascade soft-delete across all associated entities
-    associated_users = User.query.filter(User.company_id == company_id, User.status != STATUS_INACTIVE).all()
+    if dry_run:
+        return jsonify({'message': 'Pre-flight check passed', 'can_delete': True}), 200
+
+    # Cascade deletion across all associated entities
+    import time
+    ts = int(time.time())
+
+    associated_users = User.query.filter(User.company_id == company_id, User.status != STATUS_DEACTIVATED).all()
     for u in associated_users:
-        u.status = STATUS_INACTIVE
+        u.status = STATUS_DEACTIVATED
+        if "_deleted_" not in u.email:
+            u.email = f"{u.email}_deleted_{u.id}_{ts}"
         set_audit_fields(u, is_create=False)
 
-    associated_depts = Department.query.filter(Department.company_id == company_id, Department.status != STATUS_INACTIVE).all()
+    associated_depts = Department.query.filter(Department.company_id == company_id, Department.status != STATUS_DEACTIVATED).all()
     for d in associated_depts:
-        d.status = STATUS_INACTIVE
+        d.status = STATUS_DEACTIVATED
+        if "_deleted_" not in d.department_name:
+            d.department_name = f"{d.department_name}_deleted_{d.id}_{ts}"
         set_audit_fields(d, is_create=False)
 
-    associated_roles = Role.query.filter(Role.company_id == company_id, Role.status != STATUS_INACTIVE).all()
+    associated_roles = Role.query.filter(Role.company_id == company_id, Role.status != STATUS_DEACTIVATED).all()
     for r in associated_roles:
-        r.status = STATUS_INACTIVE
+        r.status = STATUS_DEACTIVATED
+        if "_deleted_" not in r.role_name:
+            r.role_name = f"{r.role_name}_deleted_{r.id}_{ts}"
         set_audit_fields(r, is_create=False)
 
     associated_cms = CompanyModule.query.filter(CompanyModule.company_id == company_id, CompanyModule.status != STATUS_DEACTIVATED).all()
@@ -348,51 +411,29 @@ def delete_company(company_id):
     associated_elections = Election.query.filter(Election.company_id == company_id, Election.status != 'cancelled').all()
     for el in associated_elections:
         el.status = 'cancelled'
+        if "_deleted_" not in el.title:
+            el.title = f"{el.title}_deleted_{el.id}_{ts}"
+        if el.election_code and "_deleted_" not in el.election_code:
+            el.election_code = f"{el.election_code}_deleted_{el.id}_{ts}"
         set_audit_fields(el, is_create=False)
 
-    associated_voters = Voter.query.filter(Voter.company_id == company_id, Voter.status != STATUS_INACTIVE).all()
+    associated_voters = Voter.query.filter(Voter.company_id == company_id, Voter.status != STATUS_DEACTIVATED).all()
     for v in associated_voters:
-        v.status = STATUS_INACTIVE
+        v.status = STATUS_DEACTIVATED
+        if v.voter_id and "_deleted_" not in v.voter_id:
+            v.voter_id = f"{v.voter_id}_deleted_{v.id}_{ts}"
+        if v.phone_number and "_deleted_" not in v.phone_number:
+            v.phone_number = f"{v.phone_number}_deleted_{v.id}_{ts}"
         set_audit_fields(v, is_create=False)
 
-    company.status = STATUS_INACTIVE
-    if not company.company_name.endswith(f"__del_{company.id}"):
-        company.company_name = f"{company.company_name}__del_{company.id}"
+    company.status = STATUS_DEACTIVATED
+    if "_deleted_" not in company.company_name:
+        company.company_name = f"{company.company_name}_deleted_{company.id}_{ts}"
     set_audit_fields(company, is_create=False)
 
     return safe_commit(
         (jsonify({'message': 'Company deleted successfully'}), 200),
         'Internal server error during company deletion'
-    )
-
-
-@companies_bp.route('/<int:company_id>/permanent', methods=['DELETE'])
-@require_permission('Companies', 'delete')
-@audit_action('permanent_delete_company', module='Companies',
-              description='Permanently deleted a company',
-              get_target_id=lambda *a, **kw: kw.get('company_id'))
-def permanent_delete_company(company_id):
-    """Permanently delete a company (set status to STATUS_DEACTIVATED).
-
-    Platform Administrators only.  The company must already be soft-deleted
-    (STATUS_INACTIVE) before it can be permanently deleted.
-    """
-    if not is_administrator():
-        return jsonify({'error': 'Forbidden: Only platform Administrators can permanently delete companies'}), 403
-
-    company = Company.query.filter_by(id=company_id).first()
-    if not company or company.status == STATUS_DEACTIVATED:
-        return jsonify({'error': 'Company not found'}), 404
-
-    if company.status != STATUS_INACTIVE:
-        return jsonify({'error': 'Deactivate this record before permanently deleting it'}), 400
-
-    company.status = STATUS_DEACTIVATED
-    set_audit_fields(company, is_create=False)
-
-    return safe_commit(
-        (jsonify({'message': 'Company permanently deleted'}), 200),
-        'Internal server error during permanent company deletion'
     )
 
 

@@ -84,6 +84,7 @@ import {
 } from '@mui/icons-material';
 import { voterRegistrationsAPI, electionsAPI, votersAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
+import SearchableSelect from '../../Common/SearchableSelect';
 import { useDeleteWithDependencies } from '../../../hooks/useDeleteWithDependencies';
 import { showErrorAlert } from '../../../utils/swal';
 import { capitalizeError } from '../../../utils/validators';
@@ -787,16 +788,20 @@ const VoterRegistrations = () => {
         <DataGrid
           rows={registrations}
           columns={columns}
-          pageSize={25}
-          rowsPerPageOptions={[25, 50, 100]}
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 25 },
+            },
+          }}
+          pageSizeOptions={[10, 25, 50, 100]}
           checkboxSelection
-          disableSelectionOnClick
+          disableRowSelectionOnClick
           loading={loading}
-          onSelectionModelChange={(newSelection) => {
+          onRowSelectionModelChange={(newSelection) => {
             setSelectedRows(newSelection);
           }}
-          components={{
-            Toolbar: () => (
+          slots={{
+            toolbar: () => (
               <CustomToolbar
                 onAdd={handleAdd}
                 onBulkApprove={handleBulkApprove}
@@ -827,66 +832,64 @@ const VoterRegistrations = () => {
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth required>
-                  <InputLabel>Voter</InputLabel>
-                  <Select
-                    value={formData.voter_id}
-                    onChange={(e) => setFormData({...formData, voter_id: e.target.value})}
-                  >
-                    {voters.map((voter) => (
-                      <MenuItem key={voter.id} value={voter.id}>
-                        {voter.name}{voter.email ? ` (${voter.email})` : ''}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <SearchableSelect
+                  options={voters}
+                  getOptionLabel={(v) => `${v.name}${v.email ? ` (${v.email})` : ''}`}
+                  getOptionValue={(v) => v.id}
+                  value={formData.voter_id}
+                  onChange={(e) => setFormData({...formData, voter_id: e.target.value})}
+                  label="Voter *"
+                  placeholder="Select Voter"
+                  margin="dense"
+                />
               </Grid>
               
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth required>
-                  <InputLabel>Election</InputLabel>
-                  <Select
-                    value={formData.election_id}
-                    onChange={(e) => setFormData({...formData, election_id: e.target.value})}
-                  >
-                    {elections.map((election) => (
-                      <MenuItem key={election.id} value={election.id}>
-                        {election.title}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <SearchableSelect
+                  options={elections}
+                  getOptionLabel={(e) => e.title}
+                  getOptionValue={(e) => e.id}
+                  value={formData.election_id}
+                  onChange={(e) => setFormData({...formData, election_id: e.target.value})}
+                  label="Election *"
+                  placeholder="Select Election"
+                  margin="dense"
+                />
               </Grid>
               
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Registration Status</InputLabel>
-                  <Select
-                    value={formData.status}
-                    onChange={(e) => setFormData({...formData, status: e.target.value})}
-                  >
-                    <MenuItem value="pending">Pending</MenuItem>
-                    <MenuItem value="under_review">Under Review</MenuItem>
-                    <MenuItem value="approved">Approved</MenuItem>
-                    <MenuItem value="rejected">Rejected</MenuItem>
-                  </Select>
-                </FormControl>
+                <SearchableSelect
+                  options={[
+                    { id: 'pending', name: 'Pending' },
+                    { id: 'under_review', name: 'Under Review' },
+                    { id: 'approved', name: 'Approved' },
+                    { id: 'rejected', name: 'Rejected' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.status}
+                  onChange={(e) => setFormData({...formData, status: e.target.value})}
+                  label="Registration Status"
+                  margin="dense"
+                />
               </Grid>
               
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Preferred Language</InputLabel>
-                  <Select
-                    value={formData.preferred_language}
-                    onChange={(e) => setFormData({...formData, preferred_language: e.target.value})}
-                  >
-                    <MenuItem value="en">English</MenuItem>
-                    <MenuItem value="es">Spanish</MenuItem>
-                    <MenuItem value="fr">French</MenuItem>
-                    <MenuItem value="de">German</MenuItem>
-                    <MenuItem value="zh">Chinese</MenuItem>
-                  </Select>
-                </FormControl>
+                <SearchableSelect
+                  options={[
+                    { id: 'en', name: 'English' },
+                    { id: 'es', name: 'Spanish' },
+                    { id: 'fr', name: 'French' },
+                    { id: 'de', name: 'German' },
+                    { id: 'zh', name: 'Chinese' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.preferred_language}
+                  onChange={(e) => setFormData({...formData, preferred_language: e.target.value})}
+                  label="Preferred Language"
+                  margin="dense"
+                />
               </Grid>
               
               <Grid item xs={12}>
@@ -1088,19 +1091,21 @@ const VoterRegistrations = () => {
           </Typography>
           <Grid container spacing={2} sx={{ mt: 1 }}>
             <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Rejection Reason</InputLabel>
-                <Select
-                  value={rejectionData.rejection_reason}
-                  onChange={(e) => setRejectionData({...rejectionData, rejection_reason: e.target.value})}
-                >
-                  <MenuItem value="incomplete_information">Incomplete Information</MenuItem>
-                  <MenuItem value="invalid_documentation">Invalid Documentation</MenuItem>
-                  <MenuItem value="eligibility_requirements">Eligibility Requirements Not Met</MenuItem>
-                  <MenuItem value="duplicate_registration">Duplicate Registration</MenuItem>
-                  <MenuItem value="other">Other</MenuItem>
-                </Select>
-              </FormControl>
+              <SearchableSelect
+                options={[
+                  { id: 'incomplete_information', name: 'Incomplete Information' },
+                  { id: 'invalid_documentation', name: 'Invalid Documentation' },
+                  { id: 'eligibility_requirements', name: 'Eligibility Requirements Not Met' },
+                  { id: 'duplicate_registration', name: 'Duplicate Registration' },
+                  { id: 'other', name: 'Other' }
+                ]}
+                getOptionLabel={(opt) => opt.name}
+                getOptionValue={(opt) => opt.id}
+                value={rejectionData.rejection_reason}
+                onChange={(e) => setRejectionData({...rejectionData, rejection_reason: e.target.value})}
+                label="Rejection Reason"
+                margin="dense"
+              />
             </Grid>
             <Grid item xs={12}>
               <TextField

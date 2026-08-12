@@ -69,6 +69,7 @@ import {
 } from '@mui/icons-material';
 import { votesAPI, electionsAPI, ballotsAPI, votersAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
+import SearchableSelect from '../../Common/SearchableSelect';
 
 const CustomToolbar = ({ onTrack, onRealTimeMonitor, onAuditReport, hasViewPermission }) => (
   <GridToolbarContainer>
@@ -644,13 +645,17 @@ const Votes = () => {
         <DataGrid
           rows={votes}
           columns={columns}
-          pageSize={25}
-          rowsPerPageOptions={[25, 50, 100]}
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 25 },
+            },
+          }}
+          pageSizeOptions={[10, 25, 50, 100]}
           checkboxSelection
-          disableSelectionOnClick
+          disableRowSelectionOnClick
           loading={loading}
-          components={{
-            Toolbar: () => (
+          slots={{
+            toolbar: () => (
               <CustomToolbar 
                 onTrack={handleTrack} 
                 onRealTimeMonitor={handleRealTimeMonitor}
@@ -836,18 +841,22 @@ const Votes = () => {
           <Typography variant="body1" gutterBottom>
             Verify vote with tracking code: <strong>{selectedVote?.tracking_code}</strong>
           </Typography>
-          <FormControl fullWidth sx={{ mt: 2 }}>
-            <InputLabel>Verification Method</InputLabel>
-            <Select
+          <Box sx={{ mt: 2 }}>
+            <SearchableSelect
+              options={[
+                { id: 'blockchain', name: 'Blockchain Verification' },
+                { id: 'hash', name: 'Hash Verification' },
+                { id: 'signature', name: 'Digital Signature' },
+                { id: 'manual', name: 'Manual Verification' }
+              ]}
+              getOptionLabel={(opt) => opt.name}
+              getOptionValue={(opt) => opt.id}
               value={verificationData.verification_method}
               onChange={(e) => setVerificationData({...verificationData, verification_method: e.target.value})}
-            >
-              <MenuItem value="blockchain">Blockchain Verification</MenuItem>
-              <MenuItem value="hash">Hash Verification</MenuItem>
-              <MenuItem value="signature">Digital Signature</MenuItem>
-              <MenuItem value="manual">Manual Verification</MenuItem>
-            </Select>
-          </FormControl>
+              label="Verification Method"
+              margin="dense"
+            />
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setVerificationDialogOpen(false)}>Cancel</Button>

@@ -18,7 +18,8 @@ from app.utils.validators import parse_pagination, validate_candidate_input
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
 from app.utils.query_helpers import get_active_candidates_query
-from app.utils.constants import STATUS_INACTIVE
+from app.utils.cascade import count_dependents, count_reactivatable_dependents, cascade_set_inactive, cascade_reactivate
+from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE, STATUS_DEACTIVATED
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
 UPLOAD_SUBFOLDER = 'uploads/candidates'
@@ -31,6 +32,25 @@ logger = logging.getLogger(__name__)
 
 candidates_bp = Blueprint('candidates', __name__)
 
+@candidates_bp.route('/<int:candidate_id>/status_dependents', methods=['GET'])
+@require_permission('Candidates', 'view')
+def get_candidate_status_dependents(candidate_id):
+    """Retrieve dependent counts for status transitions (Inactive or Reactivate)."""
+    company_id = get_current_company_id()
+    candidate = Candidate.query.filter(
+        Candidate.id == candidate_id,
+        Candidate.company_id == company_id,
+        Candidate.status != STATUS_DEACTIVATED
+    ).first_or_404()
+
+    if candidate.status == STATUS_ACTIVE:
+        result = count_dependents('Candidate', candidate_id)
+        return jsonify({'current_status': STATUS_ACTIVE, 'target_status': STATUS_INACTIVE, 'dependents': result})
+    else:
+        result = count_reactivatable_dependents('Candidate', candidate_id)
+        return jsonify({'current_status': STATUS_INACTIVE, 'target_status': STATUS_ACTIVE, 'dependents': result})
+
+
 @candidates_bp.route('/', methods=['GET'])
 @require_permission('Candidates', 'view')
 def list_candidates():
@@ -40,14 +60,24 @@ def list_candidates():
     ballot_id = request.args.get('ballot_id')
     election_id = request.args.get('election_id')
     party = request.args.get('party')
-    is_active = request.args.get('is_active')
+    show_inactive_raw = request.args.get('show_inactive')
+    status_param = request.args.get('status', '').lower()
+    if status_param == 'all':
+        allowed = [STATUS_ACTIVE, STATUS_INACTIVE]
+    elif show_inactive_raw is not None and show_inactive_raw.lower() == 'true':
+        allowed = [STATUS_INACTIVE]
+    elif status_param == 'inactive':
+        allowed = [STATUS_INACTIVE]
+    else:
+        allowed = [STATUS_ACTIVE]
     is_incumbent = request.args.get('is_incumbent')
     page, per_page, error = parse_pagination(request)
     if error:
         return error
 
-    query = get_active_candidates_query(company_id).join(Ballot).join(Election)
-    
+    query = Candidate.query.filter(Candidate.company_id == company_id).join(Ballot).join(Election)
+    query = query.filter(Candidate.status.in_(allowed), Candidate.status != STATUS_DEACTIVATED)
+
     if search:
         query = query.filter(or_(
             Candidate.name.ilike(f'%{search}%'),
@@ -65,21 +95,17 @@ def list_candidates():
     if party:
         query = query.filter(Candidate.party.ilike(f'%{party}%'))
     
-    if is_active is not None:
-        query = query.filter(Candidate.is_active == (is_active.lower() == 'true'))
-    
     if is_incumbent is not None:
         query = query.filter(Candidate.is_incumbent == (is_incumbent.lower() == 'true'))
 
     pagination = query.order_by(Candidate.ballot_id, Candidate.order_index).paginate(page=page, per_page=per_page, error_out=False)
     candidates = pagination.items
     
-    base = get_active_candidates_query(company_id)
     summary = {
         'total_candidates': pagination.total,
-        'active_candidates': base.filter_by(is_active=True).count(),
-        'incumbent_candidates': base.filter_by(is_incumbent=True).count(),
-        'withdrawn_candidates': Candidate.query.filter_by(company_id=company_id, is_withdrawn=True).count()
+        'active_candidates': sum(1 for c in candidates if c.status == STATUS_ACTIVE),
+        'incumbent_candidates': sum(1 for c in candidates if c.is_incumbent),
+        'withdrawn_candidates': sum(1 for c in candidates if c.is_withdrawn)
     }
     
     return jsonify({
@@ -90,7 +116,7 @@ def list_candidates():
             'party': c.party,
             'party_abbreviation': c.party_abbreviation,
             'title': c.title,
-            'image_url': c.image_url,  # ADDED: Include image URL in list response
+            'image_url': c.image_url,
             'ballot_id': c.ballot_id,
             'ballot_title': c.ballot.title,
             'election_id': c.ballot.election_id,
@@ -98,7 +124,8 @@ def list_candidates():
             'order_index': c.order_index,
             'is_write_in': c.is_write_in,
             'is_incumbent': c.is_incumbent,
-            'is_active': c.is_active,
+            'is_active': c.status == STATUS_ACTIVE,
+            'status': c.status,
             'is_qualified': c.is_qualified,
             'is_withdrawn': c.is_withdrawn,
             'total_votes_received': c.total_votes_received,
@@ -120,8 +147,7 @@ def list_candidates():
 @audit_action('create_candidate', module='Candidates')
 def create_candidate():
     """Create a new candidate"""
-    company_id = get_current_company_id()
-    current_user = get_current_user()
+    from app.utils import is_administrator
     data = request.get_json() or {}
     cleaned_data, err = validate_candidate_input(data, is_create=True)
     if err:
@@ -132,8 +158,13 @@ def create_candidate():
     except (ValueError, TypeError, KeyError):
         return jsonify({'error': 'ballot_id must be a valid integer'}), 400
     
-    # Validate ballot exists and belongs to company
-    ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first()
+    # Validate ballot exists
+    if is_administrator():
+        ballot = Ballot.query.filter_by(id=ballot_id).first()
+        company_id = ballot.company_id if ballot else None
+    else:
+        company_id = get_current_company_id()
+        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first()
     if not ballot:
         return jsonify({'error': 'Ballot not found'}), 404
     
@@ -141,6 +172,19 @@ def create_candidate():
     if ballot.election.status in ['active', 'cancelled', 'completed']:
         return jsonify({'error': 'Cannot create candidates for active, completed, or cancelled elections'}), 400
     
+    # Check for inactive collision (409 Conflict)
+    existing_inactive = Candidate.query.filter(
+        Candidate.ballot_id == ballot_id,
+        Candidate.name == data['name'],
+        Candidate.status == STATUS_INACTIVE
+    ).first()
+    if existing_inactive:
+        return jsonify({
+            'error': 'A candidate with this name already exists on this ballot but is currently Inactive.',
+            'existing_id': existing_inactive.id,
+            'can_reactivate': True
+        }), 409
+
     # Generate unique candidate code
     candidate_code = generate_candidate_code()
     while Candidate.query.filter_by(candidate_code=candidate_code, ballot_id=ballot_id).first():
@@ -171,7 +215,8 @@ def create_candidate():
     candidate.is_write_in = data.get('is_write_in', False)
     candidate.is_incumbent = data.get('is_incumbent', False)
     candidate.is_endorsed = data.get('is_endorsed', False)
-    candidate.is_active = data.get('is_active', True)
+    candidate.status = data.get('status', STATUS_ACTIVE)
+    candidate.is_active = (candidate.status == STATUS_ACTIVE)
     candidate.is_qualified = data.get('is_qualified', True)
     
     # Contact information
@@ -212,7 +257,7 @@ def get_candidate(candidate_id):
     candidate = Candidate.query.join(Ballot).join(Election).filter(
         Candidate.id == candidate_id,
         Candidate.company_id == company_id,
-        or_(Candidate.is_active == True, Candidate.is_withdrawn == True)
+        Candidate.status != STATUS_DEACTIVATED
     ).first_or_404()
     
     return jsonify({
@@ -249,7 +294,8 @@ def get_candidate(candidate_id):
         'campaign_finance_id': candidate.campaign_finance_id,
         'endorsements': candidate.endorsements,
         'key_issues': candidate.key_issues,
-        'is_active': candidate.is_active,
+        'is_active': candidate.status == STATUS_ACTIVE,
+        'status': candidate.status,
         'is_qualified': candidate.is_qualified,
         'is_withdrawn': candidate.is_withdrawn,
         'withdrawal_date': candidate.withdrawal_date.isoformat() if candidate.withdrawal_date else None,
@@ -270,9 +316,12 @@ def get_candidate(candidate_id):
 @audit_action('update_candidate', module='Candidates')
 def update_candidate(candidate_id):
     """Update candidate information"""
-    company_id = get_current_company_id()
-    
-    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id, is_active=True).first_or_404()
+    from app.utils import is_administrator
+    if is_administrator():
+        candidate = Candidate.query.filter(Candidate.id == candidate_id, Candidate.status != STATUS_DEACTIVATED).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        candidate = Candidate.query.filter(Candidate.id == candidate_id, Candidate.company_id == company_id, Candidate.status != STATUS_DEACTIVATED).first_or_404()
     
     data = request.get_json()
     cleaned_data, err = validate_candidate_input(data, is_create=False)
@@ -316,8 +365,21 @@ def update_candidate(candidate_id):
         candidate.is_incumbent = data['is_incumbent']
     if 'is_endorsed' in data:
         candidate.is_endorsed = data['is_endorsed']
-    if 'is_active' in data:
-        candidate.is_active = data['is_active']
+
+    # Handle status transition and cascade
+    new_status = data.get('status')
+    if new_status is None and 'is_active' in data:
+        new_status = STATUS_ACTIVE if data['is_active'] else STATUS_INACTIVE
+
+    if new_status is not None and new_status != candidate.status:
+        old_status = candidate.status
+        candidate.status = new_status
+        candidate.is_active = (new_status == STATUS_ACTIVE)
+        if old_status == STATUS_ACTIVE and new_status == STATUS_INACTIVE:
+            cascade_set_inactive('Candidate', candidate.id)
+        elif old_status == STATUS_INACTIVE and new_status == STATUS_ACTIVE:
+            cascade_reactivate('Candidate', candidate.id)
+
     if 'is_qualified' in data:
         candidate.is_qualified = data['is_qualified']
     
@@ -359,8 +421,12 @@ def update_candidate(candidate_id):
 @audit_action('delete_candidate', module='Candidates')
 def delete_candidate(candidate_id):
     """Delete candidate (soft delete)"""
-    company_id = get_current_company_id()
-    candidate = Candidate.query.filter_by(id=candidate_id, company_id=company_id, is_active=True).first_or_404()
+    from app.utils import is_administrator
+    if is_administrator():
+        candidate = Candidate.query.filter(Candidate.id == candidate_id, Candidate.status != STATUS_DEACTIVATED).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        candidate = Candidate.query.filter(Candidate.id == candidate_id, Candidate.company_id == company_id, Candidate.status != STATUS_DEACTIVATED).first_or_404()
     
     # Check if election is active
     if candidate.ballot.election.status == 'active':
@@ -375,8 +441,16 @@ def delete_candidate(candidate_id):
     if vote_count > 0:
         return jsonify({'error': 'Cannot delete candidates with votes already cast'}), 400
     
+    import time
+    ts = int(time.time())
+
     # Soft delete by updating status
+    candidate.status = STATUS_DEACTIVATED
     candidate.is_active = False
+    if candidate.name and "_deleted_" not in candidate.name:
+        candidate.name = f"{candidate.name}_deleted_{candidate.id}_{ts}"
+    if candidate.candidate_code and "_deleted_" not in candidate.candidate_code:
+        candidate.candidate_code = f"{candidate.candidate_code}_deleted_{candidate.id}_{ts}"
     set_audit_fields(candidate, is_create=False)
     
     return safe_commit(

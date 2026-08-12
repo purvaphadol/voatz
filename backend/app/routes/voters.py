@@ -7,8 +7,10 @@ from app.utils import get_current_company_id, require_permission, get_current_us
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
 from app.utils.validators import parse_pagination, validate_voter_input, validate_email
+from app.utils.validators import parse_pagination, validate_voter_input, validate_email
 from app.utils.query_helpers import get_active_voters_query
-from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE
+from app.utils.cascade import count_dependents, count_reactivatable_dependents, cascade_set_inactive, cascade_reactivate
+from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE, STATUS_DEACTIVATED
 from sqlalchemy import or_
 from datetime import datetime, timezone
 import secrets
@@ -17,6 +19,24 @@ import string
 
 voters_bp = Blueprint('voters', __name__)
 
+@voters_bp.route('/<int:voter_id>/status_dependents', methods=['GET'])
+@require_permission('Voters', 'view')
+def get_voter_status_dependents(voter_id):
+    """Retrieve dependent counts for status transitions (Inactive or Reactivate)."""
+    if is_administrator():
+        voter = Voter.query.filter(Voter.id == voter_id, Voter.status != STATUS_DEACTIVATED).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        voter = Voter.query.filter(Voter.id == voter_id, Voter.company_id == company_id, Voter.status != STATUS_DEACTIVATED).first_or_404()
+
+    if voter.status == STATUS_ACTIVE:
+        result = count_dependents('Voter', voter_id)
+        return jsonify({'current_status': STATUS_ACTIVE, 'target_status': STATUS_INACTIVE, 'dependents': result})
+    else:
+        result = count_reactivatable_dependents('Voter', voter_id)
+        return jsonify({'current_status': STATUS_INACTIVE, 'target_status': STATUS_ACTIVE, 'dependents': result})
+
+
 @voters_bp.route('/', methods=['GET'])
 @require_permission('Voters', 'view')
 def list_voters():
@@ -24,6 +44,16 @@ def list_voters():
     search = request.args.get('search')
     verification_level = request.args.get('verification_level')
     is_verified = request.args.get('is_verified')
+    show_inactive_raw = request.args.get('show_inactive')
+    status_param = request.args.get('status', '').lower()
+    if status_param == 'all':
+        allowed = [STATUS_ACTIVE, STATUS_INACTIVE]
+    elif show_inactive_raw is not None and show_inactive_raw.lower() == 'true':
+        allowed = [STATUS_INACTIVE]
+    elif status_param == 'inactive':
+        allowed = [STATUS_INACTIVE]
+    else:
+        allowed = [STATUS_ACTIVE]
     
     page, per_page, error = parse_pagination(request)
     if error:
@@ -31,16 +61,14 @@ def list_voters():
 
     if is_administrator():
         req_company_id = request.args.get('company_id', type=int)
+        query = Voter.query.outerjoin(User)
         if req_company_id:
-            query = get_active_voters_query(req_company_id).outerjoin(User)
-            base = get_active_voters_query(req_company_id)
-        else:
-            query = Voter.query.filter(Voter.status != STATUS_INACTIVE).outerjoin(User)
-            base = Voter.query.filter(Voter.status != STATUS_INACTIVE)
+            query = query.filter(Voter.company_id == req_company_id)
     else:
         company_id = get_current_company_id()
-        query = get_active_voters_query(company_id).outerjoin(User)
-        base = get_active_voters_query(company_id)
+        query = Voter.query.filter(Voter.company_id == company_id).outerjoin(User)
+
+    query = query.filter(Voter.status.in_(allowed), Voter.status != STATUS_DEACTIVATED)
     
     if search:
         query = query.filter(or_(
@@ -63,8 +91,8 @@ def list_voters():
     
     summary = {
         'total_voters': pagination.total,
-        'verified_voters': base.filter_by(is_verified=True).count(),
-        'unverified_voters': base.filter_by(is_verified=False).count()
+        'verified_voters': sum(1 for v in voters if v.is_verified),
+        'unverified_voters': sum(1 for v in voters if not v.is_verified)
     }
     
     return jsonify({
@@ -113,6 +141,19 @@ def create_voter():
     if error:
         return error
         
+    # Check for inactive collision (409 Conflict)
+    existing_inactive = Voter.query.filter(
+        Voter.company_id == company_id,
+        Voter.phone_number == cleaned_data['phone_number'],
+        Voter.status == STATUS_INACTIVE
+    ).first()
+    if existing_inactive:
+        return jsonify({
+            'error': 'A voter profile with this phone number already exists in this company but is currently Inactive.',
+            'existing_id': existing_inactive.id,
+            'can_reactivate': True
+        }), 409
+
     user_id = data.get('user_id')
     user = None
     
@@ -125,7 +166,7 @@ def create_voter():
         existing_voter = Voter.query.filter(
             Voter.user_id == user_id,
             Voter.company_id == company_id,
-            Voter.status != STATUS_INACTIVE
+            Voter.status != STATUS_DEACTIVATED
         ).first()
         if existing_voter:
             return jsonify({'error': 'User already has a voter profile'}), 400
@@ -176,7 +217,7 @@ def create_voter():
     voter.jurisdiction = cleaned_data.get('jurisdiction')
     voter.voter_type = cleaned_data.get('voter_type', 'standard')
     voter.two_factor_enabled = data.get('two_factor_enabled', False)
-    voter.status = STATUS_ACTIVE
+    voter.status = data.get('status', STATUS_ACTIVE)
     
     # If standalone, save the name and email directly on the voter
     if not user:
@@ -202,12 +243,10 @@ def create_voter():
 def get_voter(voter_id):
     """Get detailed voter information"""
     if is_administrator():
-        voter = Voter.query.filter(Voter.id == voter_id, Voter.status != STATUS_INACTIVE).outerjoin(User).first_or_404()
+        voter = Voter.query.filter(Voter.id == voter_id, Voter.status != STATUS_DEACTIVATED).outerjoin(User).first_or_404()
     else:
         company_id = get_current_company_id()
-        voter = get_active_voters_query(company_id).outerjoin(User).filter(
-            Voter.id == voter_id
-        ).first_or_404()
+        voter = Voter.query.filter(Voter.id == voter_id, Voter.company_id == company_id, Voter.status != STATUS_DEACTIVATED).outerjoin(User).first_or_404()
     
     return jsonify({
         'id': voter.id,
@@ -239,10 +278,10 @@ def get_voter(voter_id):
 def update_voter(voter_id):
     """Update voter information"""
     if is_administrator():
-        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_INACTIVE).first_or_404()
+        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_DEACTIVATED).first_or_404()
     else:
         company_id = get_current_company_id()
-        voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
+        voter = Voter.query.filter(Voter.id == voter_id, Voter.company_id == company_id).filter(Voter.status != STATUS_DEACTIVATED).first_or_404()
     data = request.get_json()
     
     cleaned_data, error = validate_voter_input(data, is_create=False)
@@ -264,6 +303,16 @@ def update_voter(voter_id):
         voter.two_factor_enabled = data['two_factor_enabled']
     if 'registered_device_id' in data:
         voter.registered_device_id = data['registered_device_id']
+
+    # Handle status transition and cascade
+    new_status = data.get('status')
+    if new_status is not None and new_status != voter.status:
+        old_status = voter.status
+        voter.status = new_status
+        if old_status == STATUS_ACTIVE and new_status == STATUS_INACTIVE:
+            cascade_set_inactive('Voter', voter.id)
+        elif old_status == STATUS_INACTIVE and new_status == STATUS_ACTIVE:
+            cascade_reactivate('Voter', voter.id)
         
     # If voter is standalone (no user_id) and data contains name or email, update voter.name and voter.email directly.
     if voter.user_id is None:
@@ -285,10 +334,10 @@ def update_voter(voter_id):
 def delete_voter(voter_id):
     """Delete voter profile (soft delete)"""
     if is_administrator():
-        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_INACTIVE).first_or_404()
+        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_DEACTIVATED).first_or_404()
     else:
         company_id = get_current_company_id()
-        voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
+        voter = Voter.query.filter_by(id=voter_id, company_id=company_id).filter(Voter.status != STATUS_DEACTIVATED).first_or_404()
     
     # Check if voter has cast votes (cannot delete under any circumstances)
     from app.models.vote import Vote
@@ -312,15 +361,22 @@ def delete_voter(voter_id):
             'message': 'Are you sure you want to delete this voter profile (and cancel all related election registrations)?'
         }), 400
 
+    import time
+    ts = int(time.time())
+
     # Deactivate active registrations
     if active_regs > 0:
         regs = VoterRegistration.query.filter_by(voter_id=voter_id).filter(VoterRegistration.status.notin_(['inactive', 'cancelled', 'deleted'])).all()
         for r in regs:
-            r.status = 'inactive'
+            r.status = 'cancelled'
             set_audit_fields(r, is_create=False)
 
     # Soft delete by updating status
-    voter.status = STATUS_INACTIVE
+    voter.status = STATUS_DEACTIVATED
+    if voter.voter_id and "_deleted_" not in voter.voter_id:
+        voter.voter_id = f"{voter.voter_id[:70]}_deleted_{voter.id}_{ts}"[:100]
+    if voter.phone_number and "_deleted_" not in voter.phone_number:
+        voter.phone_number = f"{voter.phone_number[:5]}_deleted_{voter.id}_{ts}"[:20]
     set_audit_fields(voter, is_create=False)
 
     return safe_commit(
@@ -334,7 +390,7 @@ def delete_voter(voter_id):
 def verify_voter(voter_id):
     """Manually verify a voter (admin function)"""
     if is_administrator():
-        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_INACTIVE).first_or_404()
+        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_DEACTIVATED).first_or_404()
     else:
         company_id = get_current_company_id()
         voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()
@@ -381,7 +437,7 @@ def get_voter_registrations(voter_id):
     """Get voter's election registrations"""
     from app.models.voter_registration import VoterRegistration
     if is_administrator():
-        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_INACTIVE).first_or_404()
+        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_DEACTIVATED).first_or_404()
         registrations = VoterRegistration.query.filter_by(
             voter_id=voter_id
         ).filter(VoterRegistration.status != 'deleted'
@@ -416,7 +472,7 @@ def get_voter_registrations(voter_id):
 def get_voter_votes(voter_id):
     """Get voter's voting history"""
     if is_administrator():
-        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_INACTIVE).first_or_404()
+        voter = Voter.query.filter_by(id=voter_id).filter(Voter.status != STATUS_DEACTIVATED).first_or_404()
     else:
         company_id = get_current_company_id()
         voter = get_active_voters_query(company_id).filter_by(id=voter_id).first_or_404()

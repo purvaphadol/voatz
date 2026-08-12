@@ -43,10 +43,18 @@ def list_roles():
         return error
 
     # --- status filter ---
-    status_param = request.args.get('status', 'active').lower()
-    if status_param not in _STATUS_FILTER_MAP:
-        return jsonify({'error': 'Invalid status filter'}), 400
-    allowed = _STATUS_FILTER_MAP[status_param]
+    show_inactive_raw = request.args.get('show_inactive')
+    status_param = request.args.get('status', '').lower()
+    if status_param == 'all':
+        allowed = [STATUS_ACTIVE, STATUS_INACTIVE]
+    elif show_inactive_raw is not None and show_inactive_raw.lower() == 'true':
+        allowed = [STATUS_INACTIVE]
+    elif status_param == 'inactive':
+        allowed = [STATUS_INACTIVE]
+    elif status_param in _STATUS_FILTER_MAP:
+        allowed = _STATUS_FILTER_MAP[status_param]
+    else:
+        allowed = [STATUS_ACTIVE]
 
     if is_administrator():
         # Administrator: query across all companies
@@ -151,6 +159,24 @@ def create_role():
         if dept_error:
             return dept_error[0], dept_error[1]
 
+    inactive_query = Role.query.filter(
+        Role.role_name.ilike(role_name),
+        Role.company_id == company_id,
+        Role.status == STATUS_INACTIVE
+    )
+    if dept_id:
+        inactive_query = inactive_query.filter(Role.department_id == dept_id)
+    else:
+        inactive_query = inactive_query.filter(Role.department_id.is_(None))
+
+    inactive_existing = inactive_query.first()
+    if inactive_existing:
+        return jsonify({
+            'error': 'An inactive role with this name already exists in this company.',
+            'existing_id': inactive_existing.id,
+            'can_reactivate': True
+        }), 409
+
     existing_query = Role.query.filter(
         Role.role_name.ilike(role_name),
         Role.company_id == company_id,
@@ -178,23 +204,46 @@ def create_role():
         'Internal server error during role creation'
     )
 
+
+@roles_bp.route('/<int:role_id>/status_dependents', methods=['GET'])
+@require_permission('Roles', 'view')
+def get_role_status_dependents(role_id):
+    """Retrieve dependent counts for status transitions (Inactive or Reactivate)."""
+    if is_administrator():
+        role = Role.query.filter(
+            Role.id == role_id,
+            Role.status != STATUS_DEACTIVATED
+        ).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        role = Role.query.filter_by(
+            id=role_id, company_id=company_id
+        ).filter(Role.status != STATUS_DEACTIVATED).first_or_404()
+
+    from app.utils.cascade import count_dependents, count_reactivatable_dependents
+    dep_data = count_dependents('Role', role_id)
+    react_data = count_reactivatable_dependents('Role', role_id)
+
+    return jsonify({
+        'role_id': role_id,
+        'current_status': role.status,
+        'deactivate_dependents': dep_data,
+        'reactivate_dependents': react_data
+    })
+
+
 @roles_bp.route('/<int:role_id>', methods=['GET'])
 @require_permission('Roles', 'view')
 def get_role(role_id):
-    """Retrieve a single role by ID.
-
-    Regular users may only view roles in their company. Platform
-    Administrators may view any role. STATUS_DEACTIVATED records are
-    never returned.
-    """
+    """Retrieve a single role by ID.  STATUS_DEACTIVATED records are never returned."""
     if is_administrator():
         role = Role.query.filter_by(id=role_id).filter(
-            Role.status != STATUS_INACTIVE
+            Role.status != STATUS_DEACTIVATED
         ).first_or_404()
     else:
         company_id = get_current_company_id()
         role = Role.query.filter_by(id=role_id, company_id=company_id).filter(
-            Role.status != STATUS_INACTIVE
+            Role.status != STATUS_DEACTIVATED
         ).first_or_404()
 
     return jsonify({
@@ -215,21 +264,16 @@ def get_role(role_id):
 @audit_action('update_role', module='Roles', description='Updated a role',
               get_target_id=lambda *a, **kw: kw.get('role_id'))
 def update_role(role_id):
-    """Update a role's attributes.
-
-    If the role is the protected Company Super Admin (``is_super_admin=True``),
-    only ``description`` may be changed — renaming it or moving it to a
-    different department is rejected with a 403.
-    """
+    """Update a role's attributes and status."""
     if is_administrator():
         role = Role.query.filter_by(id=role_id).filter(
-            Role.status != STATUS_INACTIVE
+            Role.status != STATUS_DEACTIVATED
         ).first_or_404()
         company_id = role.company_id
     else:
         company_id = get_current_company_id()
         role = Role.query.filter_by(id=role_id, company_id=company_id).filter(
-            Role.status != STATUS_INACTIVE
+            Role.status != STATUS_DEACTIVATED
         ).first_or_404()
     data = request.get_json()
 
@@ -295,13 +339,27 @@ def update_role(role_id):
     if existing_query.first():
         return jsonify({'error': 'Role name already exists'}), 400
 
-    # Apply modifications
-    if 'department_id' in data:
-        role.department_id = target_dept_id
     if 'role_name' in cleaned_data:
         role.role_name = cleaned_data['role_name']
     if 'description' in cleaned_data:
         role.description = cleaned_data['description']
+    if 'department_id' in data:
+        role.department_id = target_dept_id
+
+    # Status transition logic
+    old_status = role.status
+    new_status = data.get('status', old_status)
+
+    from app.utils.cascade import cascade_set_inactive, cascade_reactivate
+    reactivate_summary = None
+
+    if old_status != new_status:
+        if new_status == STATUS_INACTIVE:
+            role.status = STATUS_INACTIVE
+            cascade_set_inactive('Role', role_id)
+        elif new_status == STATUS_ACTIVE:
+            role.status = STATUS_ACTIVE
+            reactivate_summary = cascade_reactivate('Role', role_id)
 
     set_audit_fields(role, is_create=False)
     try:
@@ -310,8 +368,12 @@ def update_role(role_id):
         db.session.rollback()
         return jsonify({'error': 'Role name already exists in this department'}), 400
 
+    response_data = {'message': 'Role updated'}
+    if reactivate_summary:
+        response_data['reactivate_summary'] = reactivate_summary
+
     return safe_commit(
-        (jsonify({'message': 'Role updated'}), 200),
+        (jsonify(response_data), 200),
         'Internal server error during role update'
     )
 
@@ -321,10 +383,10 @@ def update_role(role_id):
               get_target_id=lambda *a, **kw: kw.get('role_id'))
 def delete_role(role_id):
     if is_administrator():
-        role = Role.query.filter_by(id=role_id).filter(Role.status != STATUS_INACTIVE).first_or_404()
+        role = Role.query.filter_by(id=role_id).filter(Role.status != STATUS_DEACTIVATED).first_or_404()
     else:
         company_id = get_current_company_id()
-        role = Role.query.filter_by(id=role_id, company_id=company_id).filter(Role.status != STATUS_INACTIVE).first_or_404()
+        role = Role.query.filter_by(id=role_id, company_id=company_id).filter(Role.status != STATUS_DEACTIVATED).first_or_404()
 
     if role.is_super_admin:
         return jsonify({'error': 'The Company Super Admin role cannot be deleted'}), 403
@@ -338,7 +400,7 @@ def delete_role(role_id):
     assigned_users = UserRoleMapping.query.filter_by(
         role_id=role_id,
         company_id=role.company_id
-    ).filter(UserRoleMapping.status != STATUS_INACTIVE).count()
+    ).filter(UserRoleMapping.status != STATUS_DEACTIVATED).count()
 
     if assigned_users > 0 and not force:
         user_friendly_error = f"Cannot delete role: It currently has {assigned_users} active user assignment(s). Please reassign these users first."
@@ -354,62 +416,34 @@ def delete_role(role_id):
     if dry_run:
         return jsonify({'message': 'Pre-flight check passed', 'can_delete': True}), 200
 
+    import time
+    ts = int(time.time())
+
     # Deactivate active user role mappings for this role
     active_mappings = UserRoleMapping.query.filter_by(
         role_id=role_id,
         company_id=role.company_id
-    ).filter(UserRoleMapping.status != STATUS_INACTIVE).all()
+    ).filter(UserRoleMapping.status != STATUS_DEACTIVATED).all()
 
     for m in active_mappings:
-        m.status = STATUS_INACTIVE
+        m.status = STATUS_DEACTIVATED
         set_audit_fields(m, is_create=False)
 
     # Deactivate active role permission mappings for this role
     active_perms = RolePermissionMapping.query.filter_by(
         role_id=role_id,
         company_id=role.company_id
-    ).filter(RolePermissionMapping.status != STATUS_INACTIVE).all()
+    ).filter(RolePermissionMapping.status != STATUS_DEACTIVATED).all()
 
     for p in active_perms:
-        p.status = STATUS_INACTIVE
+        p.status = STATUS_DEACTIVATED
         set_audit_fields(p, is_create=False)
 
-    role.status = STATUS_INACTIVE
+    role.status = STATUS_DEACTIVATED
+    if "_deleted_" not in role.role_name:
+        role.role_name = f"{role.role_name}_deleted_{role.id}_{ts}"
     set_audit_fields(role, is_create=False)
     return safe_commit(
         (jsonify({'message': 'Role deleted successfully'}), 200),
         'Internal server error during role deletion'
-    )
-
-
-@roles_bp.route('/<int:role_id>/permanent', methods=['DELETE'])
-@require_permission('Roles', 'delete')
-@audit_action('permanent_delete_role', module='Roles',
-              description='Permanently deleted a role',
-              get_target_id=lambda *a, **kw: kw.get('role_id'))
-def permanent_delete_role(role_id):
-    """Permanently delete a role (set status to STATUS_DEACTIVATED).
-
-    Platform Administrators only.  The role must already be soft-deleted
-    (STATUS_INACTIVE) before it can be permanently deleted.  The protected
-    Company Super Admin role can never be permanently deleted.
-    """
-    if not is_administrator():
-        return jsonify({'error': 'Forbidden: Only platform Administrators can permanently delete roles'}), 403
-
-    role = Role.query.filter_by(id=role_id).first()
-    if not role or role.status == STATUS_DEACTIVATED:
-        return jsonify({'error': 'Role not found'}), 404
-
-    if role.is_super_admin:
-        return jsonify({'error': 'The Company Super Admin role cannot be permanently deleted'}), 403
-
-    if role.status != STATUS_INACTIVE:
-        return jsonify({'error': 'Deactivate this record before permanently deleting it'}), 400
-
-    role.status = STATUS_DEACTIVATED
-    set_audit_fields(role, is_create=False)
-    return safe_commit(
-        (jsonify({'message': 'Role permanently deleted'}), 200),
-        'Internal server error during permanent role deletion'
     )

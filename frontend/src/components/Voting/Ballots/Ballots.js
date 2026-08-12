@@ -78,11 +78,12 @@ import {
 } from '@mui/icons-material';
 import { ballotsAPI, electionsAPI, candidatesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
-import { showSuccessAlert, showErrorAlert } from '../../../utils/swal';
+import SearchableSelect from '../../Common/SearchableSelect';
+import { showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../../utils/swal';
 import { validateNonNumericText, capitalizeError } from '../../../utils/validators';
 import { useDeleteWithDependencies } from '../../../hooks/useDeleteWithDependencies';
 
-const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
+const CustomToolbar = ({ onAdd, hasCreatePermission, showInactive, setShowInactive }) => (
   <GridToolbarContainer>
     <GridToolbarColumnsButton />
     <GridToolbarFilterButton />
@@ -94,6 +95,18 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
       </Button>
       </Tooltip>
     )}
+    <FormControlLabel
+      control={
+        <Switch
+          checked={showInactive}
+          onChange={(e) => setShowInactive(e.target.checked)}
+          color="warning"
+          size="small"
+        />
+      }
+      label={<Typography variant="body2">Show Inactive</Typography>}
+      sx={{ ml: 'auto' }}
+    />
   </GridToolbarContainer>
 );
 
@@ -113,6 +126,7 @@ const Ballots = () => {
   const [selectedBallot, setSelectedBallot] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
   const [stats, setStats] = useState({});
+  const [showInactive, setShowInactive] = useState(false);
   const [formData, setFormData] = useState({
     election_id: '',
     title: '',
@@ -127,6 +141,7 @@ const Ballots = () => {
     allow_write_in: false,
     require_selection: true,
     is_active: true,
+    status: 1,
     is_published: false,
     is_test_ballot: false,
     // Enhanced fields for missing backend functionality
@@ -184,12 +199,12 @@ const Ballots = () => {
       loadElections();
       loadStats();
     }
-  }, [canView]);
+  }, [canView, showInactive]);
 
   const loadBallots = async () => {
     try {
       setLoading(true);
-      const response = await ballotsAPI.getAll();
+      const response = await ballotsAPI.getAll({ show_inactive: showInactive });
       setBallots(response.data.data || []);
     } catch (error) {
       console.error('Error loading ballots:', error);
@@ -249,6 +264,7 @@ const Ballots = () => {
       allow_write_in: false,
       require_selection: true,
       is_active: true,
+      status: 1,
       is_published: false,
       is_test_ballot: false,
       // Enhanced fields for missing backend functionality
@@ -277,7 +293,8 @@ const Ballots = () => {
       max_selections: ballot.max_selections || 1,
       allow_write_in: ballot.allow_write_in || false,
       require_selection: ballot.require_selection || true,
-      is_active: ballot.is_active ?? true,
+      is_active: ballot.status === 1,
+      status: ballot.status ?? 1,
       is_published: ballot.is_published || false,
       is_test_ballot: ballot.is_test_ballot || false,
       // Enhanced fields for missing backend functionality
@@ -480,9 +497,21 @@ const Ballots = () => {
       width: 60,
     },
     {
-      field: 'is_published',
+      field: 'status',
       headerName: 'Status',
-      width: 100,
+      width: 120,
+      renderCell: (params) => {
+        const val = params.value;
+        if (val === 1) return <Chip label="Active" color="success" size="small" />;
+        if (val === 0) return <Chip label="Inactive" color="warning" size="small" />;
+        if (val === 9) return <Chip label="Deactivated" color="error" size="small" />;
+        return <Chip label="Active" color="success" size="small" />;
+      },
+    },
+    {
+      field: 'is_published',
+      headerName: 'Publication',
+      width: 110,
       renderCell: (params) => (
         <Chip
           label={params.value ? 'Published' : 'Draft'}
@@ -636,6 +665,41 @@ const Ballots = () => {
 
     try {
       if (editingBallot) {
+        if (editingBallot.status !== formData.status) {
+          if (formData.status === 0) {
+            try {
+              const depRes = await ballotsAPI.getStatusDependents(editingBallot.id);
+              const depCount = depRes.data?.dependents?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Set Ballot Inactive?',
+                  text: `Setting this ballot inactive will cascade-pause ${depCount} related candidates to Inactive. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, set inactive',
+                  confirmButtonColor: '#ed6c02',
+                });
+                if (!confirmed) return;
+              }
+            } catch (err) {
+              console.warn('Could not check status dependents:', err);
+            }
+          } else if (formData.status === 1) {
+            try {
+              const depRes = await ballotsAPI.getStatusDependents(editingBallot.id);
+              const depCount = depRes.data?.dependents?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Reactivate Ballot?',
+                  text: `Reactivating this ballot will reactivate candidates that were paused with it. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, reactivate',
+                  confirmButtonColor: '#2e7d32',
+                });
+                if (!confirmed) return;
+              }
+            } catch (err) {
+              console.warn('Could not check status dependents:', err);
+            }
+          }
+        }
         await ballotsAPI.update(editingBallot.id, formData);
         setSuccess('Ballot updated successfully');
       } else {
@@ -646,6 +710,27 @@ const Ballots = () => {
       loadBallots();
       loadStats();
     } catch (error) {
+      if (error.response?.status === 409 && error.response?.data?.can_reactivate) {
+        const reactivate = await showConfirmDialog({
+          title: 'Ballot Already Exists (Inactive)',
+          text: error.response.data.error + ' Would you like to reactivate this ballot instead?',
+          confirmButtonText: 'Yes, Reactivate',
+          confirmButtonColor: '#2e7d32',
+        });
+        if (reactivate && error.response.data.existing_id) {
+          try {
+            await ballotsAPI.update(error.response.data.existing_id, { status: 1 });
+            setDialogOpen(false);
+            loadBallots();
+            loadStats();
+            showSuccessAlert('Ballot reactivated successfully');
+            return;
+          } catch (reactivateErr) {
+            setFormError(capitalizeError(reactivateErr.response?.data?.error || 'Failed to reactivate ballot'));
+            return;
+          }
+        }
+      }
       setFormError(capitalizeError((error.response?.data?.error) || 'Operation failed'));
     }
   };
@@ -732,13 +817,17 @@ const Ballots = () => {
         <DataGrid
           rows={ballots}
           columns={columns}
-          pageSize={25}
-          rowsPerPageOptions={[25, 50, 100]}
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 25 },
+            },
+          }}
+          pageSizeOptions={[10, 25, 50, 100]}
           checkboxSelection
-          disableSelectionOnClick
+          disableRowSelectionOnClick
           loading={loading}
-          components={{
-            Toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />,
+          slots={{
+            toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} showInactive={showInactive} setShowInactive={setShowInactive} />,
           }}
         />
       </Paper>
@@ -767,34 +856,51 @@ const Ballots = () => {
             {activeTab === 0 && (
               <Grid container spacing={2} sx={{ mt: 1 }}>
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth required>
-                  <InputLabel>Election</InputLabel>
-                  <Select
-                    value={formData.election_id}
-                    onChange={(e) => setFormData({...formData, election_id: e.target.value})}
-                  >
-                    {elections.map((election) => (
-                      <MenuItem key={election.id} value={election.id}>
-                        {election.title}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <SearchableSelect
+                  options={elections}
+                  getOptionLabel={(e) => e.title}
+                  getOptionValue={(e) => e.id}
+                  value={formData.election_id}
+                  onChange={(e) => setFormData({...formData, election_id: e.target.value})}
+                  label="Election *"
+                  placeholder="Select Election"
+                />
               </Grid>
               
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Ballot Type</InputLabel>
-                  <Select
-                    value={formData.ballot_type}
-                    onChange={(e) => setFormData({...formData, ballot_type: e.target.value})}
-                  >
-                      <MenuItem value="single_choice">Single Choice</MenuItem>
-                      <MenuItem value="multiple_choice">Multiple Choice</MenuItem>
-                      <MenuItem value="ranked_choice">Ranked Choice</MenuItem>
-                      <MenuItem value="approval">Approval</MenuItem>
-                  </Select>
-                </FormControl>
+                <SearchableSelect
+                  options={[
+                    { id: 1, name: 'Active' },
+                    { id: 0, name: 'Inactive' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.status}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    status: e.target.value,
+                    is_active: e.target.value === 1,
+                  })}
+                  label="Status"
+                  margin="dense"
+                />
+              </Grid>
+
+              <Grid item xs={12} sm={6}>
+                <SearchableSelect
+                  options={[
+                    { id: 'single_choice', name: 'Single Choice' },
+                    { id: 'multiple_choice', name: 'Multiple Choice' },
+                    { id: 'ranked_choice', name: 'Ranked Choice' },
+                    { id: 'approval', name: 'Approval' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.ballot_type}
+                  onChange={(e) => setFormData({...formData, ballot_type: e.target.value})}
+                  label="Ballot Type"
+                  margin="dense"
+                />
               </Grid>
               
               <Grid item xs={12}>

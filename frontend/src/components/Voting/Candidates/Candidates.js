@@ -65,11 +65,12 @@ import {
 } from '@mui/icons-material';
 import { candidatesAPI, ballotsAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
+import SearchableSelect from '../../Common/SearchableSelect';
 import { useDeleteWithDependencies } from '../../../hooks/useDeleteWithDependencies';
-import { showConfirmDialog } from '../../../utils/swal';
+import { showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../../utils/swal';
 import { validateNonNumericText, validateEmail, validatePhone, validateUrl, capitalizeError } from '../../../utils/validators';
 
-const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
+const CustomToolbar = ({ onAdd, hasCreatePermission, showInactive, setShowInactive }) => (
   <GridToolbarContainer>
     <GridToolbarColumnsButton />
     <GridToolbarFilterButton />
@@ -81,6 +82,18 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
         </Button>
       </Tooltip>
     )}
+    <FormControlLabel
+      control={
+        <Switch
+          checked={showInactive}
+          onChange={(e) => setShowInactive(e.target.checked)}
+          color="warning"
+          size="small"
+        />
+      }
+      label={<Typography variant="body2">Show Inactive</Typography>}
+      sx={{ ml: 'auto' }}
+    />
   </GridToolbarContainer>
 );
 
@@ -96,6 +109,7 @@ const Candidates = () => {
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [withdrawCandidate, setWithdrawCandidate] = useState(null);
   const [stats, setStats] = useState({});
+  const [showInactive, setShowInactive] = useState(false);
   const [formData, setFormData] = useState({
     ballot_id: '',
     name: '',
@@ -113,6 +127,7 @@ const Candidates = () => {
     order_index: 1,
     is_incumbent: false,
     is_endorsed: false,
+    status: 1,
     age: '',
     education: '',
     occupation: '',
@@ -150,12 +165,12 @@ const Candidates = () => {
       loadBallots();
       loadStats();
     }
-  }, [canView]);
+  }, [canView, showInactive]);
 
   const loadCandidates = async () => {
     try {
       setLoading(true);
-      const response = await candidatesAPI.getAll();
+      const response = await candidatesAPI.getAll({ show_inactive: showInactive });
       setCandidates(response.data.data || []);
     } catch (error) {
       console.error('Error loading candidates:', error);
@@ -269,6 +284,7 @@ const Candidates = () => {
       order_index: 1,
       is_incumbent: false,
       is_endorsed: false,
+      status: 1,
       age: '',
       education: '',
       occupation: '',
@@ -302,6 +318,7 @@ const Candidates = () => {
       order_index: candidate.order_index || 1,
       is_incumbent: candidate.is_incumbent || false,
       is_endorsed: candidate.is_endorsed || false,
+      status: candidate.status ?? 1,
       age: candidate.age || '',
       education: candidate.education || '',
       occupation: candidate.occupation || '',
@@ -412,6 +429,25 @@ const Candidates = () => {
 
     try {
       if (editingCandidate) {
+        if (editingCandidate.status !== formData.status) {
+          if (formData.status === 0) {
+            try {
+              const depRes = await candidatesAPI.getStatusDependents(editingCandidate.id);
+              const depCount = depRes.data?.dependents?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Set Candidate Inactive?',
+                  text: `Setting this candidate inactive will pause ${depCount} dependent items. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, set inactive',
+                  confirmButtonColor: '#ed6c02',
+                });
+                if (!confirmed) return;
+              }
+            } catch (err) {
+              console.warn('Could not check status dependents:', err);
+            }
+          }
+        }
         await candidatesAPI.update(editingCandidate.id, formData);
         setSuccess('Candidate updated successfully');
       } else {
@@ -422,6 +458,27 @@ const Candidates = () => {
       loadCandidates();
       loadStats();
     } catch (error) {
+      if (error.response?.status === 409 && error.response?.data?.can_reactivate) {
+        const reactivate = await showConfirmDialog({
+          title: 'Candidate Already Exists (Inactive)',
+          text: error.response.data.error + ' Would you like to reactivate this candidate instead?',
+          confirmButtonText: 'Yes, Reactivate',
+          confirmButtonColor: '#2e7d32',
+        });
+        if (reactivate && error.response.data.existing_id) {
+          try {
+            await candidatesAPI.update(error.response.data.existing_id, { status: 1 });
+            setDialogOpen(false);
+            loadCandidates();
+            loadStats();
+            showSuccessAlert('Candidate reactivated successfully');
+            return;
+          } catch (reactivateErr) {
+            setFormError(capitalizeError(reactivateErr.response?.data?.error || 'Failed to reactivate candidate'));
+            return;
+          }
+        }
+      }
       console.error('Candidate operation failed:', error);
       setFormError(capitalizeError((error.response?.data?.error) || 'Operation failed'));
     }
@@ -510,19 +567,19 @@ const Candidates = () => {
       ),
     },
     {
-      field: 'is_withdrawn',
+      field: 'status',
       headerName: 'Status',
       width: 120,
-      renderCell: (params) => (
-        <Tooltip title={params.value ? 'Candidate has withdrawn from election' : 'Active candidate in election'}>
-          <Chip
-            label={params.value ? 'Withdrawn' : 'Active'}
-            color={params.value ? 'error' : 'success'}
-            size="small"
-            icon={params.value ? <InactiveIcon /> : <ActiveIcon />}
-          />
-        </Tooltip>
-      ),
+      renderCell: (params) => {
+        const val = params.row.status;
+        if (params.row.is_withdrawn) {
+          return <Chip label="Withdrawn" color="error" size="small" icon={<InactiveIcon />} />;
+        }
+        if (val === 1) return <Chip label="Active" color="success" size="small" icon={<ActiveIcon />} />;
+        if (val === 0) return <Chip label="Inactive" color="warning" size="small" icon={<InactiveIcon />} />;
+        if (val === 9) return <Chip label="Deactivated" color="error" size="small" />;
+        return <Chip label="Active" color="success" size="small" icon={<ActiveIcon />} />;
+      },
     },
     { field: 'order_index', headerName: 'Order', width: 80 },
     {
@@ -721,13 +778,17 @@ const Candidates = () => {
         <DataGrid
           rows={candidates}
           columns={columns}
-          pageSize={25}
-          rowsPerPageOptions={[25, 50, 100]}
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 25 },
+            },
+          }}
+          pageSizeOptions={[10, 25, 50, 100]}
           checkboxSelection
-          disableSelectionOnClick
+          disableRowSelectionOnClick
           loading={loading}
-          components={{
-            Toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />,
+          slots={{
+            toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} showInactive={showInactive} setShowInactive={setShowInactive} />,
           }}
         />
       </Paper>
@@ -746,25 +807,34 @@ const Candidates = () => {
           <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
             <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <Tooltip title="Select which ballot this candidate will appear on">
-                  <FormControl fullWidth required>
-                    <InputLabel>Ballot</InputLabel>
-                    <Select
-                      value={formData.ballot_id}
-                      onChange={(e) => setFormData({...formData, ballot_id: e.target.value})}
-                    >
-                      {ballots.map((ballot) => (
-                        <MenuItem key={ballot.id} value={ballot.id}>
-                          {ballot.title}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Tooltip>
+              <Grid item xs={12} sm={4}>
+                <SearchableSelect
+                  options={ballots}
+                  getOptionLabel={(b) => b.title}
+                  getOptionValue={(b) => b.id}
+                  value={formData.ballot_id}
+                  onChange={(e) => setFormData({...formData, ballot_id: e.target.value})}
+                  label="Ballot *"
+                  placeholder="Select Ballot"
+                />
+              </Grid>
+
+              <Grid item xs={12} sm={4}>
+                <SearchableSelect
+                  options={[
+                    { id: 1, name: 'Active' },
+                    { id: 0, name: 'Inactive' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                  label="Status"
+                  margin="dense"
+                />
               </Grid>
               
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={4}>
                 <Tooltip title="Unique identifier for this candidate (auto-generated if left empty)">
                   <TextField
                     fullWidth
@@ -1091,6 +1161,23 @@ const Candidates = () => {
                   label="Endorsed"
                 />
               </Grid>
+
+              {editingCandidate && (
+                <Grid item xs={12}>
+                  <FormControl fullWidth variant="outlined">
+                    <InputLabel id="candidate-status-select-label">Status</InputLabel>
+                    <Select
+                      labelId="candidate-status-select-label"
+                      value={formData.status ?? 1}
+                      label="Status"
+                      onChange={(e) => setFormData({ ...formData, status: Number(e.target.value) })}
+                    >
+                      <MenuItem value={1}>Active</MenuItem>
+                      <MenuItem value={0}>Inactive</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
             </Grid>
           </DialogContent>
           <DialogActions>

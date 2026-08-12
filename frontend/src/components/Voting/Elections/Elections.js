@@ -55,6 +55,7 @@ import {
 import { electionsAPI, companiesAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import { useAuth } from '../../../contexts/AuthContext';
+import SearchableSelect from '../../Common/SearchableSelect';
 import { showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../../utils/swal';
 import { validateNonNumericText, validateDateRange, capitalizeError } from '../../../utils/validators';
 import ElectionResults from './ElectionResults';
@@ -653,23 +654,17 @@ const Elections = () => {
       {/* Platform Admin Filter Bar */}
       {isPlatformAdmin && (
         <Box sx={{ mb: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
-          <TextField
-            label="Filter by Company"
-            select
-            size="small"
+          <SearchableSelect
+            options={companies}
+            getOptionLabel={(c) => c.company_name}
+            getOptionValue={(c) => c.id}
             value={selectedCompanyFilter}
             onChange={(e) => setSelectedCompanyFilter(e.target.value)}
-            SelectProps={{ native: true }}
-            InputLabelProps={{ shrink: true }}
-            sx={{ minWidth: 220 }}
-          >
-            <option value="">All Companies</option>
-            {companies.map((comp) => (
-              <option key={comp.id} value={comp.id}>
-                {comp.company_name}
-              </option>
-            ))}
-          </TextField>
+            label="Filter by Company"
+            allOptionLabel="All Companies"
+            allOptionValue=""
+            sx={{ minWidth: 220, maxWidth: 300 }}
+          />
         </Box>
       )}
 
@@ -677,13 +672,17 @@ const Elections = () => {
         <DataGrid
           rows={elections}
           columns={columns}
-          pageSize={25}
-          rowsPerPageOptions={[25, 50, 100]}
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 25 },
+            },
+          }}
+          pageSizeOptions={[10, 25, 50, 100]}
           checkboxSelection
-          disableSelectionOnClick
+          disableRowSelectionOnClick
           loading={loading}
-          components={{
-            Toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />,
+          slots={{
+            toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />,
           }}
         />
       </Paper>
@@ -714,24 +713,15 @@ const Elections = () => {
               <Grid item xs={12} sm={6}>
                 {!editingElection ? (
                   isPlatformAdmin ? (
-                    <TextField
-                      fullWidth
-                      label="Company *"
-                      select
-                      variant="outlined"
+                    <SearchableSelect
+                      options={companies}
+                      getOptionLabel={(c) => c.company_name}
+                      getOptionValue={(c) => c.id}
                       value={formData.company_id || ''}
                       onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}
-                      SelectProps={{ native: true }}
-                      InputLabelProps={{ shrink: true }}
-                      required
-                    >
-                      <option value="" disabled hidden>Select Company</option>
-                      {companies.map((comp) => (
-                        <option key={comp.id} value={comp.id}>
-                          {comp.company_name}
-                        </option>
-                      ))}
-                    </TextField>
+                      label="Company *"
+                      placeholder="Select Company"
+                    />
                   ) : (
                     <TextField
                       fullWidth
@@ -765,36 +755,41 @@ const Elections = () => {
               </Grid>
               
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Election Type</InputLabel>
-                  <Select
-                    value={formData.election_type}
-                    onChange={(e) => setFormData({...formData, election_type: e.target.value})}
-                  >
-                    <MenuItem value="general">General Election</MenuItem>
-                    <MenuItem value="primary">Primary Election</MenuItem>
-                    <MenuItem value="local">Local Election</MenuItem>
-                    <MenuItem value="special">Special Election</MenuItem>
-                    <MenuItem value="referendum">Referendum</MenuItem>
-                  </Select>
-                </FormControl>
+                <SearchableSelect
+                  options={[
+                    { id: 'general', name: 'General Election' },
+                    { id: 'primary', name: 'Primary Election' },
+                    { id: 'local', name: 'Local Election' },
+                    { id: 'special', name: 'Special Election' },
+                    { id: 'referendum', name: 'Referendum' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.election_type}
+                  onChange={(e) => setFormData({...formData, election_type: e.target.value})}
+                  label="Election Type"
+                  margin="dense"
+                />
               </Grid>
               
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Election Category</InputLabel>
-                  <Select
-                    value={formData.election_category}
-                    onChange={(e) => setFormData({...formData, election_category: e.target.value})}
-                  >
-                    <MenuItem value="">None</MenuItem>
-                    <MenuItem value="primary">Primary</MenuItem>
-                    <MenuItem value="general">General</MenuItem>
-                    <MenuItem value="special">Special</MenuItem>
-                    <MenuItem value="runoff">Runoff</MenuItem>
-                    <MenuItem value="referendum">Referendum</MenuItem>
-                  </Select>
-                </FormControl>
+                <SearchableSelect
+                  options={[
+                    { id: 'primary', name: 'Primary' },
+                    { id: 'general', name: 'General' },
+                    { id: 'special', name: 'Special' },
+                    { id: 'runoff', name: 'Runoff' },
+                    { id: 'referendum', name: 'Referendum' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.election_category}
+                  onChange={(e) => setFormData({...formData, election_category: e.target.value})}
+                  label="Election Category"
+                  allOptionLabel="None"
+                  allOptionValue=""
+                  margin="dense"
+                />
               </Grid>
               
               <Grid item xs={12}>
@@ -905,18 +900,20 @@ const Elections = () => {
               </Grid>
               
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Eligible Voter Types</InputLabel>
-                  <Select
-                    value={formData.eligible_voter_types}
-                    onChange={(e) => setFormData({...formData, eligible_voter_types: e.target.value})}
-                  >
-                    <MenuItem value="standard">Standard</MenuItem>
-                    <MenuItem value="overseas">Overseas</MenuItem>
-                    <MenuItem value="military">Military</MenuItem>
-                    <MenuItem value="all">All Types</MenuItem>
-                  </Select>
-                </FormControl>
+                <SearchableSelect
+                  options={[
+                    { id: 'standard', name: 'Standard' },
+                    { id: 'overseas', name: 'Overseas' },
+                    { id: 'military', name: 'Military' },
+                    { id: 'all', name: 'All Types' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.eligible_voter_types}
+                  onChange={(e) => setFormData({...formData, eligible_voter_types: e.target.value})}
+                  label="Eligible Voter Types"
+                  margin="dense"
+                />
               </Grid>
               
               <Grid item xs={12} sm={6}>

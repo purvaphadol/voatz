@@ -15,6 +15,8 @@ import {
   Select,
   MenuItem,
   Chip,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import {
   DataGrid,
@@ -29,15 +31,17 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Business as BusinessIcon,
+  Visibility as ViewIcon,
 } from '@mui/icons-material';
 import { rolesAPI, departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import { showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../utils/swal';
 import { validateNonNumericText, capitalizeError } from '../../utils/validators';
 import { useDeleteWithDependencies } from '../../hooks/useDeleteWithDependencies';
+import SearchableSelect from '../Common/SearchableSelect';
 
-const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
+const CustomToolbar = ({ onAdd, hasCreatePermission, showInactive, setShowInactive }) => (
   <GridToolbarContainer>
     <GridToolbarColumnsButton />
     <GridToolbarFilterButton />
@@ -47,6 +51,18 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
         Add Role
       </Button>
     )}
+    <FormControlLabel
+      control={
+        <Switch
+          checked={showInactive}
+          onChange={(e) => setShowInactive(e.target.checked)}
+          color="warning"
+          size="small"
+        />
+      }
+      label={<Typography variant="body2">Show Inactive</Typography>}
+      sx={{ ml: 'auto' }}
+    />
   </GridToolbarContainer>
 );
 
@@ -62,6 +78,8 @@ const Roles = () => {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRole, setEditingRole] = useState(null);
+  const [viewMode, setViewMode] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('');
   const [selectedDepartmentFilter, setSelectedDepartmentFilter] = useState('');
@@ -71,10 +89,12 @@ const Roles = () => {
     description: '',
     company_id: '',
     department_id: '',
+    status: 1,
   });
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const dialogContentRef = useRef(null);
 
@@ -102,7 +122,7 @@ const Roles = () => {
     if (canView) {
       loadRoles();
     }
-  }, [canView, selectedCompanyFilter, selectedDepartmentFilter]);
+  }, [canView, selectedCompanyFilter, selectedDepartmentFilter, showInactive]);
 
   const loadRoles = async () => {
     try {
@@ -110,6 +130,7 @@ const Roles = () => {
       const params = {};
       if (selectedDepartmentFilter) params.department_id = selectedDepartmentFilter;
       if (isPlatformAdmin && selectedCompanyFilter) params.company_id = selectedCompanyFilter;
+      if (showInactive) params.show_inactive = 'true';
       const response = await rolesAPI.getAll(params);
       setRoles(response.data.data || []);
     } catch (error) {
@@ -133,7 +154,7 @@ const Roles = () => {
     try {
       const params = companyId ? { company_id: companyId } : {};
       const response = await departmentsAPI.getAll(params);
-      setDepartments(response.data.data || []);
+      setDepartments((response.data.data || []).filter(d => d.status === 1));
     } catch (error) {
       console.error('Error loading departments:', error);
     }
@@ -143,22 +164,26 @@ const Roles = () => {
     setDialogOpen(false);
     setFormError('');
     setEditingRole(null);
+    setViewMode(false);
   };
 
   const handleAdd = () => {
     setEditingRole(null);
+    setViewMode(false);
     setFormError('');
     setFormData({
       role_name: '',
       description: '',
       company_id: '',
       department_id: '',
+      status: 1,
     });
     setDialogOpen(true);
   };
 
   const handleEdit = (role) => {
     setEditingRole(role);
+    setViewMode(false);
     setFormError('');
     const roleCompId = role.company_id || '';
     setFormData({
@@ -166,6 +191,26 @@ const Roles = () => {
       description: role.description || '',
       company_id: roleCompId,
       department_id: role.department_id || '',
+      status: role.status ?? 1,
+    });
+    if (isPlatformAdmin && roleCompId) {
+      loadDepartments(roleCompId);
+    }
+    setDialogOpen(true);
+  };
+
+  const handleView = (role) => {
+    if (!role || !role.id) return;
+    setEditingRole(role);
+    setViewMode(true);
+    setFormError('');
+    const roleCompId = role.company_id || '';
+    setFormData({
+      role_name: role.role_name,
+      description: role.description || '',
+      company_id: roleCompId,
+      department_id: role.department_id || '',
+      status: role.status ?? 1,
     });
     if (isPlatformAdmin && roleCompId) {
       loadDepartments(roleCompId);
@@ -194,10 +239,54 @@ const Roles = () => {
     }
 
     try {
+      setIsSubmitting(true);
+      if (editingRole && editingRole.status !== formData.status) {
+        if (formData.status === 0) {
+          try {
+            const depRes = await rolesAPI.getStatusDependents(editingRole.id);
+            const depCount = depRes.data?.data?.total_count || 0;
+            if (depCount > 0) {
+              const confirmed = await showConfirmDialog({
+                title: 'Set Role Inactive?',
+                text: `Setting this role inactive will pause ${depCount} user role mappings to Inactive. Do you wish to proceed?`,
+                confirmButtonText: 'Yes, set inactive',
+                confirmButtonColor: '#ed6c02',
+              });
+              if (!confirmed) {
+                setIsSubmitting(false);
+                return;
+              }
+            }
+          } catch (err) {
+            console.warn('Could not inspect status dependents:', err);
+          }
+        } else if (formData.status === 1) {
+          try {
+            const depRes = await rolesAPI.getStatusDependents(editingRole.id);
+            const depCount = depRes.data?.data?.total_count || 0;
+            if (depCount > 0) {
+              const confirmed = await showConfirmDialog({
+                title: 'Reactivate Role?',
+                text: `Reactivating this role will reactivate associated user role mappings paused with it. Do you wish to proceed?`,
+                confirmButtonText: 'Yes, reactivate',
+                confirmButtonColor: '#2e7d32',
+              });
+              if (!confirmed) {
+                setIsSubmitting(false);
+                return;
+              }
+            }
+          } catch (err) {
+            console.warn('Could not inspect status dependents:', err);
+          }
+        }
+      }
+
       const payload = {
         role_name: formData.role_name,
         description: formData.description,
         department_id: formData.department_id || null,
+        status: formData.status,
       };
       if (isPlatformAdmin && formData.company_id) {
         payload.company_id = formData.company_id;
@@ -214,7 +303,30 @@ const Roles = () => {
       }
       loadRoles();
     } catch (error) {
+      if (error.response && error.response.status === 409 && error.response.data?.can_reactivate) {
+        const existingId = error.response.data.existing_id;
+        const reactivateConfirmed = await showConfirmDialog({
+          title: 'Inactive Role Found',
+          text: error.response.data.error || 'An inactive role with this name already exists. Would you like to reactivate it?',
+          confirmButtonText: 'Reactivate Role',
+          confirmButtonColor: '#2e7d32',
+        });
+        if (reactivateConfirmed && existingId) {
+          try {
+            await rolesAPI.update(existingId, { status: 1 });
+            setDialogOpen(false);
+            await showSuccessAlert('Role reactivated successfully');
+            loadRoles();
+            return;
+          } catch (reactivateErr) {
+            setFormError(capitalizeError(reactivateErr.response?.data?.error || 'Failed to reactivate role'));
+            return;
+          }
+        }
+      }
       setFormError(capitalizeError((error.response && error.response.data && error.response.data.error) || 'Operation failed'));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -249,6 +361,18 @@ const Roles = () => {
     },
     { field: 'description', headerName: 'Description', width: 220 },
     {
+      field: 'status',
+      headerName: 'Status',
+      width: 120,
+      renderCell: (params) => (
+        <Chip
+          label={params.value === 1 ? 'Active' : params.value === 0 ? 'Inactive' : 'Deactivated'}
+          color={params.value === 1 ? 'success' : params.value === 0 ? 'warning' : 'default'}
+          size="small"
+        />
+      ),
+    },
+    {
       field: 'created_at',
       headerName: 'Created',
       width: 130,
@@ -262,9 +386,19 @@ const Roles = () => {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
-      width: 130,
+      width: 150,
       getActions: (params) => {
         const actions = [];
+
+        if (canView) {
+          actions.push(
+            <GridActionsCellItem
+              icon={<ViewIcon />}
+              label="View"
+              onClick={() => handleView(params.row)}
+            />
+          );
+        }
         
         if (canUpdate) {
           actions.push(
@@ -322,60 +456,58 @@ const Roles = () => {
       {/* Filters Bar: Company First, Department Second */}
       <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
         {isPlatformAdmin && (
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel>Filter by Company</InputLabel>
-            <Select
-              value={selectedCompanyFilter}
-              label="Filter by Company"
-              onChange={(e) => {
-                const compId = e.target.value;
-                setSelectedCompanyFilter(compId);
-                setSelectedDepartmentFilter('');
-                loadDepartments(compId);
-              }}
-            >
-              <MenuItem value="">All Companies</MenuItem>
-              {companies.map((comp) => (
-                <MenuItem key={comp.id} value={comp.id}>
-                  {comp.company_name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <SearchableSelect
+            options={companies}
+            getOptionLabel={(comp) => comp.company_name}
+            getOptionValue={(comp) => comp.id}
+            value={selectedCompanyFilter}
+            onChange={(e) => {
+              const compId = e.target.value;
+              setSelectedCompanyFilter(compId);
+              setSelectedDepartmentFilter('');
+              loadDepartments(compId);
+            }}
+            label="Filter by Company"
+            allOptionLabel="All Companies"
+            allOptionValue=""
+            sx={{ minWidth: 200, maxWidth: 300 }}
+          />
         )}
 
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel>Filter by Department</InputLabel>
-          <Select
-            value={selectedDepartmentFilter}
-            label="Filter by Department"
-            onChange={(e) => setSelectedDepartmentFilter(e.target.value)}
-          >
-            <MenuItem value="">All Departments</MenuItem>
-            {departments.map((dept) => (
-              <MenuItem key={dept.id} value={dept.id}>
-                {dept.department_name}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <SearchableSelect
+          options={departments}
+          getOptionLabel={(dept) => dept.department_name}
+          getOptionValue={(dept) => dept.id}
+          value={selectedDepartmentFilter}
+          onChange={(e) => setSelectedDepartmentFilter(e.target.value)}
+          label="Filter by Department"
+          allOptionLabel="All Departments"
+          allOptionValue=""
+          sx={{ minWidth: 200, maxWidth: 300 }}
+        />
       </Box>
 
       <Paper sx={{ height: 600, width: '100%' }}>
         <DataGrid
           rows={roles}
           columns={columns}
-          pageSize={10}
-          rowsPerPageOptions={[5, 10, 25]}
-          disableSelectionOnClick
-          loading={loading}
-          components={{
-            Toolbar: CustomToolbar,
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 10 },
+            },
           }}
-          componentsProps={{
+          pageSizeOptions={[5, 10, 25, 50]}
+          disableRowSelectionOnClick
+          loading={loading}
+          slots={{
+            toolbar: CustomToolbar,
+          }}
+          slotProps={{
             toolbar: {
               onAdd: handleAdd,
               hasCreatePermission: canCreate,
+              showInactive: showInactive,
+              setShowInactive: setShowInactive,
             },
           }}
         />
@@ -384,7 +516,7 @@ const Roles = () => {
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <form onSubmit={handleSubmit}>
           <DialogTitle>
-            {editingRole ? 'Edit Role' : 'Add New Role'}
+            {viewMode ? 'View Role' : editingRole ? 'Edit Role' : 'Add New Role'}
           </DialogTitle>
           <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
@@ -399,18 +531,19 @@ const Roles = () => {
               value={formData.role_name}
               onChange={(e) => setFormData({ ...formData, role_name: e.target.value })}
               required
+              disabled={viewMode}
               sx={{ mb: 2 }}
             />
             
             {/* 1. Company Field FIRST */}
             {!editingRole ? (
               isPlatformAdmin ? (
-                <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
-                  <InputLabel id="roles-company-label">Company *</InputLabel>
-                  <Select
-                    labelId="roles-company-label"
-                    value={formData.company_id}
-                    label="Company *"
+                <Box sx={{ mb: 2 }}>
+                  <SearchableSelect
+                    options={companies}
+                    getOptionLabel={(comp) => comp.company_name}
+                    getOptionValue={(comp) => comp.id}
+                    value={formData.company_id || ''}
                     onChange={(e) => {
                       const selectedCompId = e.target.value;
                       setFormData({ ...formData, company_id: selectedCompId, department_id: '' });
@@ -418,18 +551,12 @@ const Roles = () => {
                         loadDepartments(selectedCompId);
                       }
                     }}
-                    required
-                  >
-                    <MenuItem value="" disabled hidden>
-                      Select Company
-                    </MenuItem>
-                    {companies.map((comp) => (
-                      <MenuItem key={comp.id} value={comp.id}>
-                        {comp.company_name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                    label="Company *"
+                    placeholder="Select Company"
+                    margin="dense"
+                    disabled={viewMode}
+                  />
+                </Box>
               ) : (
                 <TextField
                   margin="dense"
@@ -442,7 +569,7 @@ const Roles = () => {
                     'Your Company'
                   }
                   disabled
-                  helperText="Roles are automatically assigned to your company."
+                  helperText={!viewMode ? "Roles are automatically assigned to your company." : ""}
                   sx={{ mb: 2 }}
                 />
               )
@@ -454,31 +581,26 @@ const Roles = () => {
                 variant="outlined"
                 value={editingRole.company_name || 'N/A'}
                 disabled
-                helperText="Company cannot be modified after creation."
+                helperText={!viewMode ? "Company cannot be modified after creation." : ""}
                 sx={{ mb: 2 }}
               />
             )}
 
             {/* 2. Department Field SECOND (Dynamic dependent dropdown - Optional) */}
-            <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
-              <InputLabel id="roles-department-label">Department (Optional)</InputLabel>
-              <Select
-                labelId="roles-department-label"
-                value={formData.department_id}
-                label="Department (Optional)"
+            <Box sx={{ mb: 2 }}>
+              <SearchableSelect
+                options={departments}
+                getOptionLabel={(dept) => dept.department_name}
+                getOptionValue={(dept) => dept.id}
+                value={formData.department_id || ''}
                 onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-                disabled={isPlatformAdmin && !formData.company_id && !editingRole}
-              >
-                <MenuItem value="">
-                  <em>None (Company-wide / No Department)</em>
-                </MenuItem>
-                {departments.map((dept) => (
-                  <MenuItem key={dept.id} value={dept.id}>
-                    {dept.department_name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                label="Department (Optional)"
+                margin="dense"
+                allOptionLabel="None (Company-wide / No Department)"
+                allOptionValue=""
+                disabled={viewMode || (isPlatformAdmin && !formData.company_id && !editingRole)}
+              />
+            </Box>
             
             <TextField
               margin="dense"
@@ -490,14 +612,38 @@ const Roles = () => {
               rows={3}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              disabled={viewMode}
               sx={{ mb: 2 }}
             />
+
+            {/* Status select for edit / view mode */}
+            {(editingRole || viewMode) && (
+              <Box sx={{ mb: 2 }}>
+                <SearchableSelect
+                  options={[
+                    { id: 1, name: 'Active' },
+                    { id: 0, name: 'Inactive' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: Number(e.target.value) })}
+                  label="Status"
+                  margin="dense"
+                  disabled={viewMode}
+                />
+              </Box>
+            )}
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button type="submit" variant="contained">
-              {editingRole ? 'Update' : 'Create'}
+            <Button onClick={handleCloseDialog} disabled={isSubmitting}>
+              {viewMode ? 'Close' : 'Cancel'}
             </Button>
+            {!viewMode && (
+              <Button type="submit" variant="contained" disabled={isSubmitting}>
+                {isSubmitting ? 'Saving...' : editingRole ? 'Update' : 'Create'}
+              </Button>
+            )}
           </DialogActions>
         </form>
       </Dialog>

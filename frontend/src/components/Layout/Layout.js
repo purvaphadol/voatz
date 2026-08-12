@@ -51,21 +51,66 @@ import PermissionRefreshNotification from '../Common/PermissionRefreshNotificati
 
 const drawerWidth = 280;
 
-const getModuleIcon = (module) => {
-  const icons = {
-    Dashboard: <DashboardIcon />,
-    Users: <PeopleIcon />,
-    Settings: <SettingsIcon />,
-    Roles: <SecurityIcon />,
-    Departments: <BusinessIcon />,
-    Companies: <BusinessIcon />,
-    Modules: <AccountTreeIcon />,
-    Permissions: <SecurityIcon />,
-    UserRoles: <AssignmentIcon />,
-    Audit: <HistoryIcon />,
-    TestModule: <SettingsIcon />,
+export const AVAILABLE_MODULE_ICONS = [
+  'dashboard',
+  'people',
+  'roles',
+  'departments',
+  'companies',
+  'modules',
+  'permissions',
+  'user_roles',
+  'audit',
+  'voters',
+  'elections',
+  'ballots',
+  'candidates',
+  'voter_registrations',
+  'votes',
+  'settings',
+  'security',
+  'business',
+];
+
+export const renderModuleIcon = (iconOrModule) => {
+  if (!iconOrModule) return <SettingsIcon />;
+  const key = iconOrModule.toString().toLowerCase().replace(/[\s\-_]/g, '');
+  const iconMap = {
+    dashboard: <DashboardIcon />,
+    people: <PeopleIcon />,
+    users: <PeopleIcon />,
+    roles: <RolesIcon />,
+    departments: <DepartmentsIcon />,
+    companies: <CompaniesIcon />,
+    modules: <AccountTreeIcon />,
+    accounttree: <AccountTreeIcon />,
+    permissions: <PermissionsIcon />,
+    vpnkey: <PermissionsIcon />,
+    userroles: <AssignmentIcon />,
+    assignment: <AssignmentIcon />,
+    audit: <HistoryIcon />,
+    history: <HistoryIcon />,
+    voters: <GroupsIcon />,
+    groups: <GroupsIcon />,
+    elections: <PollIcon />,
+    poll: <PollIcon />,
+    ballots: <BallotIcon />,
+    candidates: <PersonIcon />,
+    person: <PersonIcon />,
+    voterregistrations: <PersonAddIcon />,
+    personadd: <PersonAddIcon />,
+    votes: <HowToVoteIcon />,
+    howtovote: <HowToVoteIcon />,
+    settings: <SettingsIcon />,
+    security: <SecurityIcon />,
+    business: <BusinessIcon />,
+    domain: <CompaniesIcon />,
   };
-  return icons[module] || <SettingsIcon />;
+  return iconMap[key] || <SettingsIcon />;
+};
+
+const getModuleIcon = (moduleName, iconName) => {
+  return renderModuleIcon(iconName || moduleName);
 };
 
 const Layout = ({ children }) => {
@@ -192,7 +237,7 @@ const Layout = ({ children }) => {
                   type: 'dynamic',
                   path: `/${moduleItem.route || moduleItem.route_name}`,
                   label: moduleItem.module,
-                  icon: getModuleIcon(moduleItem.module),
+                  icon: getModuleIcon(moduleItem.module, moduleItem.icon),
                   module: moduleItem.module,
                   order_index: moduleItem.order_index
                 });

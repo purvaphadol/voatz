@@ -280,6 +280,17 @@ def check_user_permission(module_name, action_name):
             return False
 
         # 5. Check role permissions
+        if is_company_super_admin:
+            user_override = UserPermissionMapping.query.filter_by(
+                user_id=user.id,
+                module_id=sys_module.id,
+                action_id=sys_action.id,
+                company_id=company_id
+            ).filter(UserPermissionMapping.status != 9).first()
+            if user_override:
+                return user_override.permission_type == 1
+            return True
+
         role_ids = [ur.role_id for ur in active_mappings]
         active_role_perms = get_active_role_permissions(role_ids, company_id)
         role_permission = next(

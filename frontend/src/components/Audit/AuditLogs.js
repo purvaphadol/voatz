@@ -43,6 +43,7 @@ import {
 } from '@mui/icons-material';
 import { auditAPI, usersAPI, modulesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
+import SearchableSelect from '../Common/SearchableSelect';
 
 const CustomToolbar = ({ onFilter, onExport }) => (
   <GridToolbarContainer>
@@ -329,15 +330,22 @@ const AuditLogs = () => {
           columns={columns}
           loading={loading}
           paginationMode="server"
-          page={pagination.page - 1}
-          pageSize={pagination.per_page}
           rowCount={pagination.total}
-          rowsPerPageOptions={[10, 25, 50]}
-          onPageChange={(newPage) => setPagination(prev => ({ ...prev, page: newPage + 1 }))}
-          onPageSizeChange={(newPageSize) => setPagination(prev => ({ ...prev, per_page: newPageSize }))}
-          disableSelectionOnClick
-          components={{
-            Toolbar: () => (
+          paginationModel={{
+            page: pagination.page - 1,
+            pageSize: pagination.per_page,
+          }}
+          onPaginationModelChange={(model) =>
+            setPagination((prev) => ({
+              ...prev,
+              page: model.page + 1,
+              per_page: model.pageSize,
+            }))
+          }
+          pageSizeOptions={[10, 25, 50]}
+          disableRowSelectionOnClick
+          slots={{
+            toolbar: () => (
               <CustomToolbar
                 onFilter={() => setFilterDialogOpen(true)}
                 onExport={handleExport}
@@ -358,69 +366,68 @@ const AuditLogs = () => {
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
             <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>User</InputLabel>
-                <Select
-                  value={filters.user_id}
-                  onChange={(e) => setFilters({ ...filters, user_id: e.target.value })}
-                  label="User"
-                >
-                  <MenuItem value="">All Users</MenuItem>
-                  {users.map((user) => (
-                    <MenuItem key={user.id} value={user.id}>
-                      {user.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <SearchableSelect
+                options={users}
+                getOptionLabel={(u) => u.name}
+                getOptionValue={(u) => u.id}
+                value={filters.user_id}
+                onChange={(e) => setFilters({ ...filters, user_id: e.target.value })}
+                label="User"
+                allOptionLabel="All Users"
+                allOptionValue=""
+              />
             </Grid>
             
             <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Action</InputLabel>
-                <Select
-                  value={filters.action}
-                  onChange={(e) => setFilters({ ...filters, action: e.target.value })}
-                  label="Action"
-                >
-                  <MenuItem value="">All Actions</MenuItem>
-                  <MenuItem value="create">Create</MenuItem>
-                  <MenuItem value="update">Update</MenuItem>
-                  <MenuItem value="delete">Delete</MenuItem>
-                  <MenuItem value="view">View</MenuItem>
-                  <MenuItem value="login">Login</MenuItem>
-                  <MenuItem value="logout">Logout</MenuItem>
-                </Select>
-              </FormControl>
+              <SearchableSelect
+                options={[
+                  { id: 'create', name: 'Create' },
+                  { id: 'update', name: 'Update' },
+                  { id: 'delete', name: 'Delete' },
+                  { id: 'view', name: 'View' },
+                  { id: 'login', name: 'Login' },
+                  { id: 'logout', name: 'Logout' }
+                ]}
+                getOptionLabel={(opt) => opt.name}
+                getOptionValue={(opt) => opt.id}
+                value={filters.action}
+                onChange={(e) => setFilters({ ...filters, action: e.target.value })}
+                label="Action"
+                allOptionLabel="All Actions"
+                allOptionValue=""
+                margin="dense"
+              />
             </Grid>
             
             <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Module</InputLabel>
-                <Select
-                  value={filters.module}
-                  onChange={(e) => setFilters({ ...filters, module: e.target.value })}
-                  label="Module"
-                >
-                  <MenuItem value="">All Modules</MenuItem>
-                  {modules.map(m => <MenuItem key={m.id} value={m.module_name}>{m.module_name}</MenuItem>)}
-                </Select>
-              </FormControl>
+              <SearchableSelect
+                options={modules}
+                getOptionLabel={(m) => m.module_name}
+                getOptionValue={(m) => m.module_name}
+                value={filters.module}
+                onChange={(e) => setFilters({ ...filters, module: e.target.value })}
+                label="Module"
+                allOptionLabel="All Modules"
+                allOptionValue=""
+                margin="dense"
+              />
             </Grid>
             
             <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Status</InputLabel>
-                <Select
-                  value={filters.success}
-                  onChange={(e) => setFilters({ ...filters, success: e.target.value })}
-                  label="Status"
-                >
-                  <MenuItem value="">All</MenuItem>
-                  <MenuItem value="true">Success</MenuItem>
-                  <MenuItem value="false">Failed</MenuItem>
-                </Select>
-              </FormControl>
+              <SearchableSelect
+                options={[
+                  { id: 'true', name: 'Success' },
+                  { id: 'false', name: 'Failed' }
+                ]}
+                getOptionLabel={(opt) => opt.name}
+                getOptionValue={(opt) => opt.id}
+                value={filters.success}
+                onChange={(e) => setFilters({ ...filters, success: e.target.value })}
+                label="Status"
+                allOptionLabel="All Statuses"
+                allOptionValue=""
+                margin="dense"
+              />
             </Grid>
             
             <Grid item xs={12} md={6}>

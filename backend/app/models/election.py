@@ -42,6 +42,7 @@ class Election(db.Model, TimestampAuditMixin):
     eligible_voter_types = db.Column(db.String(200), default='standard')  # comma-separated: standard,overseas,military
     
     # Election status and lifecycle
+    # NOTE: Election.status is a business-workflow status ('draft', 'published', 'active', 'voting', 'completed', 'cancelled', 'auditing'), distinct from the integer governance status (1=Active, 0=Inactive, 9=Deactivated) used elsewhere in this codebase. 'cancelled' is treated as deactivated for governance filtering.
     status = db.Column(db.String(20), default='draft')  # draft, published, active, voting, completed, cancelled, auditing
     is_public = db.Column(db.Boolean, default=True)  # Is this election publicly visible
     is_test_election = db.Column(db.Boolean, default=False)  # Is this a test/demo election

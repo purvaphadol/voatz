@@ -25,7 +25,13 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  FormHelperText,
 } from '@mui/material';
+import { AVAILABLE_MODULE_ICONS, renderModuleIcon } from '../Layout/Layout';
 import {
   DataGrid,
   GridActionsCellItem,
@@ -48,11 +54,12 @@ import {
 import { modulesAPI, moduleActionsAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { showDeleteConfirm, showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import { showDeleteConfirm, showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../utils/swal';
 import { capitalizeError } from '../../utils/validators';
 import { useDeleteWithDependencies } from '../../hooks/useDeleteWithDependencies';
+import SearchableSelect from '../Common/SearchableSelect';
 
-const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
+const CustomToolbar = ({ onAdd, hasCreatePermission, showInactive, setShowInactive }) => (
   <GridToolbarContainer>
     <GridToolbarColumnsButton />
     <GridToolbarFilterButton />
@@ -62,6 +69,18 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
         Add Module
       </Button>
     )}
+    <FormControlLabel
+      control={
+        <Switch
+          checked={showInactive}
+          onChange={(e) => setShowInactive(e.target.checked)}
+          color="warning"
+          size="small"
+        />
+      }
+      label={<Typography variant="body2">Show Inactive</Typography>}
+      sx={{ ml: 'auto' }}
+    />
   </GridToolbarContainer>
 );
 
@@ -79,6 +98,7 @@ const Modules = () => {
   const [selectedModule, setSelectedModule] = useState(null);
   const [moduleActions, setModuleActions] = useState([]);
   const [viewMode, setViewMode] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
   const [formData, setFormData] = useState({
     module_name: '',
     route_name: '',
@@ -96,6 +116,7 @@ const Modules = () => {
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const dialogContentRef = useRef(null);
 
@@ -114,12 +135,14 @@ const Modules = () => {
     if (canView) {
       loadModules();
     }
-  }, [canView]);
+  }, [canView, showInactive]);
 
   const loadModules = async () => {
     try {
       setLoading(true);
-      const response = await modulesAPI.getAll({ per_page: 200 });
+      const params = { per_page: 200 };
+      if (showInactive) params.show_inactive = 'true';
+      const response = await modulesAPI.getAll(params);
       setModules(response.data.data || []);
     } catch (error) {
       console.error('Error loading modules:', error);
@@ -244,7 +267,50 @@ const Modules = () => {
     }
 
     try {
+      setIsSubmitting(true);
       if (editingModule) {
+        if (editingModule.status !== formData.status) {
+          if (formData.status === 0) {
+            try {
+              const depRes = await modulesAPI.getStatusDependents(editingModule.id);
+              const depCount = depRes.data?.data?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Set Module Inactive?',
+                  text: `Setting this module inactive will cascade-pause ${depCount} company module provisioning records and module actions to Inactive. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, set inactive',
+                  confirmButtonColor: '#ed6c02',
+                });
+                if (!confirmed) {
+                  setIsSubmitting(false);
+                  return;
+                }
+              }
+            } catch (err) {
+              console.warn('Could not inspect status dependents:', err);
+            }
+          } else if (formData.status === 1) {
+            try {
+              const depRes = await modulesAPI.getStatusDependents(editingModule.id);
+              const depCount = depRes.data?.data?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Reactivate Module?',
+                  text: `Reactivating this module will reactivate linked company module provisionings and module actions paused with it. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, reactivate',
+                  confirmButtonColor: '#2e7d32',
+                });
+                if (!confirmed) {
+                  setIsSubmitting(false);
+                  return;
+                }
+              }
+            } catch (err) {
+              console.warn('Could not inspect status dependents:', err);
+            }
+          }
+        }
+
         const updateData = {};
         if (formData.module_name !== editingModule.module_name) updateData.module_name = formData.module_name;
         if (formData.route_name !== (editingModule.route_name || '')) updateData.route_name = formData.route_name;
@@ -283,9 +349,34 @@ const Modules = () => {
         await showSuccessAlert('Module created successfully');
       }
     } catch (error) {
+      if (error.response && error.response.status === 409 && error.response.data?.can_reactivate) {
+        const existingId = error.response.data.existing_id;
+        const reactivateConfirmed = await showConfirmDialog({
+          title: 'Inactive Module Found',
+          text: error.response.data.error || 'An inactive module with this name or route already exists. Would you like to reactivate it?',
+          confirmButtonText: 'Reactivate Module',
+          confirmButtonColor: '#2e7d32',
+        });
+        if (reactivateConfirmed && existingId) {
+          try {
+            await modulesAPI.update(existingId, { status: 1 });
+            setDialogOpen(false);
+            await showSuccessAlert('Module reactivated successfully');
+            loadModules();
+            return;
+          } catch (reactivateErr) {
+            const errMsg = capitalizeError(reactivateErr.response?.data?.error || 'Failed to reactivate module');
+            setFormError(errMsg);
+            showErrorAlert(errMsg);
+            return;
+          }
+        }
+      }
       const errMsg = capitalizeError((error.response && error.response.data && error.response.data.error) || 'Operation failed');
       setFormError(errMsg);
       showErrorAlert(errMsg);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -414,8 +505,8 @@ const Modules = () => {
       renderCell: (params) => {
         const status = params.value;
         if (status === 1) return <Chip label="Active" color="success" size="small" />;
-        if (status === 9) return <Chip label="Inactive" color="warning" size="small" />;
-        return <Chip label="Deleted" color="error" size="small" />;
+        if (status === 0) return <Chip label="Inactive" color="warning" size="small" />;
+        return <Chip label="Deactivated" color="default" size="small" />;
       },
     },
 
@@ -523,11 +614,22 @@ const Modules = () => {
           rows={modules}
           columns={columns}
           loading={loading}
-          pageSize={10}
-          rowsPerPageOptions={[5, 10, 25]}
-          disableSelectionOnClick
-          components={{
-            Toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 10 },
+            },
+          }}
+          pageSizeOptions={[5, 10, 25, 50]}
+          disableRowSelectionOnClick
+          slots={{
+            toolbar: () => (
+              <CustomToolbar
+                onAdd={handleAdd}
+                hasCreatePermission={canCreate}
+                showInactive={showInactive}
+                setShowInactive={setShowInactive}
+              />
+            ),
           }}
         />
       </Paper>
@@ -567,17 +669,26 @@ const Modules = () => {
               helperText="Custom route name (e.g., 'testing' for /testing). Leave empty to use module name."
             />
 
-            <TextField
-              margin="dense"
-              label="Icon"
-              fullWidth
-              variant="outlined"
-              value={formData.icon}
-              onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
-              disabled={viewMode}
-              sx={{ mb: 2 }}
-              helperText="Icon name for UI display (e.g., users, settings, dashboard)"
-            />
+            <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
+              <InputLabel id="module-icon-select-label">Icon</InputLabel>
+              <Select
+                labelId="module-icon-select-label"
+                value={formData.icon || 'settings'}
+                label="Icon"
+                onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
+                disabled={viewMode}
+              >
+                {AVAILABLE_MODULE_ICONS.map((iconName) => (
+                  <MenuItem key={iconName} value={iconName} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box component="span" sx={{ display: 'inline-flex', mr: 1, verticalAlign: 'middle' }}>
+                      {renderModuleIcon(iconName)}
+                    </Box>
+                    <Typography variant="body2">{iconName}</Typography>
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>Select icon for UI display</FormHelperText>
+            </FormControl>
 
             <TextField
               margin="dense"
@@ -607,17 +718,36 @@ const Modules = () => {
               inputProps={{ min: 0, max: 999 }}
             />
 
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={formData.status === 1}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.checked ? 1 : 9 })}
+            {(editingModule || viewMode) && (
+              <Box sx={{ mb: 2 }}>
+                <SearchableSelect
+                  options={[
+                    { id: 1, name: 'Active' },
+                    { id: 0, name: 'Inactive' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: Number(e.target.value) })}
+                  label="Status"
+                  margin="dense"
                   disabled={viewMode}
                 />
-              }
-              label="Active Status"
-              sx={{ mt: 1 }}
-            />
+              </Box>
+            )}
+
+            {viewMode && (
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="caption" color="textSecondary">Status</Typography>
+                <Box>
+                  <Chip
+                    label={formData.status === 1 ? 'Active' : formData.status === 0 ? 'Inactive' : 'Deactivated'}
+                    color={formData.status === 1 ? 'success' : formData.status === 0 ? 'warning' : 'default'}
+                    size="small"
+                  />
+                </Box>
+              </Box>
+            )}
           </DialogContent>
           <DialogActions>
             <Button onClick={handleCloseDialog}>

@@ -25,6 +25,17 @@ def list_modules():
     filter_company_id = request.args.get('company_id')
     search = request.args.get('search', '').strip()
     
+    show_inactive_raw = request.args.get('show_inactive')
+    status_param = request.args.get('status', '').lower()
+    if status_param == 'all':
+        allowed = [STATUS_ACTIVE, STATUS_INACTIVE]
+    elif show_inactive_raw is not None and show_inactive_raw.lower() == 'true':
+        allowed = [STATUS_INACTIVE]
+    elif status_param == 'inactive':
+        allowed = [STATUS_INACTIVE]
+    else:
+        allowed = [STATUS_ACTIVE]
+    
     if is_administrator():
         if filter_company_id:
             try:
@@ -33,20 +44,27 @@ def list_modules():
                     CompanyModule, CompanyModule.system_module_id == SystemModule.id
                 ).filter(
                     CompanyModule.company_id == comp_id,
+                    CompanyModule.status.in_(allowed),
                     CompanyModule.status != STATUS_DEACTIVATED,
+                    SystemModule.status.in_(allowed),
                     SystemModule.status != STATUS_DEACTIVATED
                 )
             except (ValueError, TypeError):
                 return jsonify({'error': 'Invalid company_id parameter'}), 400
         else:
-            query = SystemModule.query.filter(SystemModule.status != STATUS_DEACTIVATED)
+            query = SystemModule.query.filter(
+                SystemModule.status.in_(allowed),
+                SystemModule.status != STATUS_DEACTIVATED
+            )
     else:
         company_id = get_current_company_id()
         query = SystemModule.query.join(
             CompanyModule, CompanyModule.system_module_id == SystemModule.id
         ).filter(
             CompanyModule.company_id == company_id,
+            CompanyModule.status.in_(allowed),
             CompanyModule.status != STATUS_DEACTIVATED,
+            SystemModule.status.in_(allowed),
             SystemModule.status != STATUS_DEACTIVATED
         )
         
@@ -91,9 +109,20 @@ def create_module():
         return error
         
     # Duplicate check on module_name
+    inactive_module = SystemModule.query.filter(
+        SystemModule.module_name.ilike(cleaned_data['module_name']),
+        SystemModule.status == STATUS_INACTIVE
+    ).first()
+    if inactive_module:
+        return jsonify({
+            'error': 'An inactive module with this name already exists.',
+            'existing_id': inactive_module.id,
+            'can_reactivate': True
+        }), 409
+
     if SystemModule.query.filter(
         SystemModule.module_name.ilike(cleaned_data['module_name']),
-        SystemModule.status != STATUS_DEACTIVATED
+        SystemModule.status == STATUS_ACTIVE
     ).first():
         return jsonify({'error': 'Module name already exists'}), 400
         
@@ -142,6 +171,7 @@ def create_module():
     
     set_audit_fields(module, is_create=True)
     db.session.add(module)
+    db.session.flush()
         
     target_company_id = None
     if is_administrator():

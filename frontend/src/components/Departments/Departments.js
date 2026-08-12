@@ -15,6 +15,8 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import {
   DataGrid,
@@ -34,11 +36,12 @@ import {
 import { departmentsAPI, companiesAPI } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import { showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../utils/swal';
 import { validateNonNumericText, capitalizeError } from '../../utils/validators';
 import { useDeleteWithDependencies } from '../../hooks/useDeleteWithDependencies';
+import SearchableSelect from '../Common/SearchableSelect';
 
-const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
+const CustomToolbar = ({ onAdd, hasCreatePermission, showInactive, setShowInactive }) => (
   <GridToolbarContainer>
     <GridToolbarColumnsButton />
     <GridToolbarFilterButton />
@@ -48,6 +51,18 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
         Add Department
       </Button>
     )}
+    <FormControlLabel
+      control={
+        <Switch
+          checked={showInactive}
+          onChange={(e) => setShowInactive(e.target.checked)}
+          color="warning"
+          size="small"
+        />
+      }
+      label={<Typography variant="body2">Show Inactive</Typography>}
+      sx={{ ml: 'auto' }}
+    />
   </GridToolbarContainer>
 );
 
@@ -56,9 +71,6 @@ const Departments = () => {
   const { user } = useAuth();
   
   const isPlatformAdmin = user?.is_administrator === true;
-  const isCompanySuperAdmin = user?.roles?.some(
-    r => r.role_name?.toLowerCase() === 'super admin'
-  ) || false;
 
   const [departments, setDepartments] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -66,10 +78,12 @@ const Departments = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDepartment, setEditingDepartment] = useState(null);
   const [viewMode, setViewMode] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
   const [formData, setFormData] = useState({
     department_name: '',
     description: '',
     company_id: '',
+    status: 1,
   });
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
@@ -107,7 +121,7 @@ const Departments = () => {
     if (canView) {
       loadDepartments();
     }
-  }, [canView, debouncedSearch, filterCompany]);
+  }, [canView, debouncedSearch, filterCompany, showInactive]);
 
   const loadDepartments = async () => {
     try {
@@ -115,6 +129,7 @@ const Departments = () => {
       const params = {};
       if (debouncedSearch) params.search = debouncedSearch;
       if (isPlatformAdmin && filterCompany) params.company_id = filterCompany;
+      if (showInactive) params.show_inactive = 'true';
       const response = await departmentsAPI.getAll(params);
       setDepartments(response.data.data || []);
     } catch (error) {
@@ -142,6 +157,7 @@ const Departments = () => {
       department_name: '',
       description: '',
       company_id: '',
+      status: 1,
     });
     setDialogOpen(true);
   };
@@ -154,6 +170,7 @@ const Departments = () => {
       department_name: department.department_name,
       company_id: department.company_id || '',
       description: department.description || '',
+      status: department.status ?? 1,
     });
     setDialogOpen(true);
   };
@@ -166,6 +183,7 @@ const Departments = () => {
       department_name: department.department_name,
       company_id: department.company_id || '',
       description: department.description || '',
+      status: department.status ?? 1,
     });
     setDialogOpen(true);
   };
@@ -193,9 +211,53 @@ const Departments = () => {
     try {
       setIsSubmitting(true);
       if (editingDepartment) {
+        // Status cascade transition check
+        if (editingDepartment.status !== formData.status) {
+          if (formData.status === 0) {
+            try {
+              const depRes = await departmentsAPI.getStatusDependents(editingDepartment.id);
+              const depCount = depRes.data?.data?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Set Department Inactive?',
+                  text: `Setting this department inactive will also set ${depCount} related active roles and users to Inactive. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, set inactive',
+                  confirmButtonColor: '#ed6c02',
+                });
+                if (!confirmed) {
+                  setIsSubmitting(false);
+                  return;
+                }
+              }
+            } catch (err) {
+              console.warn('Could not inspect status dependents:', err);
+            }
+          } else if (formData.status === 1) {
+            try {
+              const depRes = await departmentsAPI.getStatusDependents(editingDepartment.id);
+              const depCount = depRes.data?.data?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Reactivate Department?',
+                  text: `Reactivating this department will also reactivate child records that were paused with it. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, reactivate',
+                  confirmButtonColor: '#2e7d32',
+                });
+                if (!confirmed) {
+                  setIsSubmitting(false);
+                  return;
+                }
+              }
+            } catch (err) {
+              console.warn('Could not inspect status dependents:', err);
+            }
+          }
+        }
+
         const updatePayload = {
           department_name: formData.department_name,
           description: formData.description,
+          status: formData.status,
         };
         if (isPlatformAdmin && formData.company_id) {
           updatePayload.company_id = formData.company_id;
@@ -207,6 +269,7 @@ const Departments = () => {
         const createPayload = {
           department_name: formData.department_name,
           description: formData.description,
+          status: formData.status,
         };
         if (isPlatformAdmin && formData.company_id) {
           createPayload.company_id = formData.company_id;
@@ -217,6 +280,27 @@ const Departments = () => {
       }
       loadDepartments();
     } catch (error) {
+      if (error.response && error.response.status === 409 && error.response.data?.can_reactivate) {
+        const existingId = error.response.data.existing_id;
+        const reactivateConfirmed = await showConfirmDialog({
+          title: 'Inactive Department Found',
+          text: error.response.data.error || 'An inactive department with this name already exists. Would you like to reactivate it?',
+          confirmButtonText: 'Reactivate Department',
+          confirmButtonColor: '#2e7d32',
+        });
+        if (reactivateConfirmed && existingId) {
+          try {
+            await departmentsAPI.update(existingId, { status: 1 });
+            setDialogOpen(false);
+            await showSuccessAlert('Department reactivated successfully');
+            loadDepartments();
+            return;
+          } catch (reactivateErr) {
+            setFormError(capitalizeError(reactivateErr.response?.data?.error || 'Failed to reactivate department'));
+            return;
+          }
+        }
+      }
       setFormError(capitalizeError((error.response && error.response.data && error.response.data.error) || 'Operation failed'));
     } finally {
       setIsSubmitting(false);
@@ -252,6 +336,18 @@ const Departments = () => {
       ),
     },
     { field: 'description', headerName: 'Description', width: 250 },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 120,
+      renderCell: (params) => (
+        <Chip
+          label={params.value === 1 ? 'Active' : params.value === 0 ? 'Inactive' : 'Deactivated'}
+          color={params.value === 1 ? 'success' : params.value === 0 ? 'warning' : 'default'}
+          size="small"
+        />
+      ),
+    },
     {
       field: 'created_at',
       headerName: 'Created',
@@ -346,21 +442,17 @@ const Departments = () => {
 
       {isPlatformAdmin && (
         <Box sx={{ mb: 2 }}>
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel>Filter by Company</InputLabel>
-            <Select
-              value={filterCompany}
-              label="Filter by Company"
-              onChange={(e) => setFilterCompany(e.target.value)}
-            >
-              <MenuItem value="">All Companies</MenuItem>
-              {companies.map(c => (
-                <MenuItem key={c.id} value={c.id}>
-                  {c.company_name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <SearchableSelect
+            options={companies}
+            getOptionLabel={(c) => c.company_name}
+            getOptionValue={(c) => c.id}
+            value={filterCompany}
+            onChange={(e) => setFilterCompany(e.target.value)}
+            label="Filter by Company"
+            allOptionLabel="All Companies"
+            allOptionValue=""
+            sx={{ minWidth: 200, maxWidth: 300 }}
+          />
         </Box>
       )}
 
@@ -369,11 +461,22 @@ const Departments = () => {
           rows={departments}
           columns={columns}
           loading={loading}
-          pageSize={10}
-          rowsPerPageOptions={[5, 10, 25]}
-          disableSelectionOnClick
-          components={{
-            Toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />,
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 10 },
+            },
+          }}
+          pageSizeOptions={[5, 10, 25, 50]}
+          disableRowSelectionOnClick
+          slots={{
+            toolbar: () => (
+              <CustomToolbar
+                onAdd={handleAdd}
+                hasCreatePermission={canCreate}
+                showInactive={showInactive}
+                setShowInactive={setShowInactive}
+              />
+            ),
           }}
         />
       </Paper>
@@ -402,27 +505,18 @@ const Departments = () => {
             {/* Company field — dropdown for Platform Admin, non-editable pre-selected box for Company Staff */}
             {!editingDepartment && !viewMode && (
               isPlatformAdmin ? (
-                <FormControl fullWidth variant="outlined" sx={{ mb: 2 }}>
-                  <InputLabel id="dept-company-select-label">Company *</InputLabel>
-                  <Select
-                    labelId="dept-company-select-label"
+                <Box sx={{ mb: 2 }}>
+                  <SearchableSelect
+                    options={companies}
+                    getOptionLabel={(c) => c.company_name}
+                    getOptionValue={(c) => c.id}
                     value={formData.company_id || ''}
-                    onChange={(e) => setFormData({
-                      ...formData, company_id: e.target.value
-                    })}
+                    onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}
                     label="Company *"
-                    required
-                  >
-                    <MenuItem value="" disabled hidden>
-                      Select Company
-                    </MenuItem>
-                    {companies.map(c => (
-                      <MenuItem key={c.id} value={c.id}>
-                        {c.company_name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                    placeholder="Select Company"
+                    margin="dense"
+                  />
+                </Box>
               ) : (
                 <TextField
                   margin="dense"
@@ -470,7 +564,27 @@ const Departments = () => {
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               disabled={viewMode}
+              sx={{ mb: 2 }}
             />
+
+            {/* Status Select Field */}
+            {(editingDepartment || viewMode) && (
+              <Box sx={{ mb: 2 }}>
+                <SearchableSelect
+                  options={[
+                    { id: 1, name: 'Active' },
+                    { id: 0, name: 'Inactive' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: Number(e.target.value) })}
+                  label="Status"
+                  margin="dense"
+                  disabled={viewMode}
+                />
+              </Box>
+            )}
           </DialogContent>
           <DialogActions>
             <Button onClick={handleCloseDialog}>

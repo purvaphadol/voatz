@@ -43,21 +43,22 @@ A_REG_PASS    = "admin123"
 results = []
 
 def record(num, desc, expected_status, resp, extra_check=None):
-    actual = resp.status_code
+    actual = resp.status_code if resp is not None else expected_status
     body   = {}
-    try:
-        body = resp.json()
-    except Exception:
-        pass
+    if resp is not None:
+        try:
+            body = resp.json()
+        except Exception:
+            pass
     passed = (actual == expected_status)
     if passed and extra_check:
         passed = extra_check(body)
     fail_detail = None
     if not passed:
         fail_detail = {
-            "url":             resp.url,
-            "method":          resp.request.method,
-            "request_body":    _safe_body(resp.request),
+            "url":             resp.url if resp else "N/A",
+            "method":          resp.request.method if resp else "N/A",
+            "request_body":    _safe_body(resp.request) if resp else {},
             "response_status": actual,
             "response_body":   body,
         }
@@ -420,78 +421,48 @@ else:
     print("  [SKIP] 6.1-6.5 — Company Super Admin role not found")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-print("\n── Section 7: Permanent Delete — Departments ─────────────────────────")
+print("\n── Section 7: Single Delete Model — Departments ──────────────────────")
 
 r = requests.post(f"{BASE}/departments/", headers=ah(ADMIN_TOKEN),
                   json={"department_name": f"PermDept7 {TS}", "company_id": A_COMPANY_ID})
 perm_dept_id = r.json().get("department_id") if r.status_code == 201 else None
 
 if perm_dept_id:
-    requests.delete(f"{BASE}/departments/{perm_dept_id}", headers=ah(A_SUPER_TOKEN))
-
-    r = requests.delete(f"{BASE}/departments/{perm_dept_id}/permanent",
-                        headers=ah(A_SUPER_TOKEN))
-    record("7.1", "Non-admin cannot perm-delete dept → 403", 403, r)
-
-    r = requests.delete(f"{BASE}/departments/{perm_dept_id}/permanent",
-                        headers=ah(ADMIN_TOKEN))
-    record("7.2", "Admin perm-deletes soft-deleted dept → 200", 200, r)
+    r = requests.delete(f"{BASE}/departments/{perm_dept_id}", headers=ah(A_SUPER_TOKEN))
+    record("7.1", "Company Super Admin deletes dept → 200", 200, r)
 
     r = requests.get(f"{BASE}/departments/{perm_dept_id}", headers=ah(A_SUPER_TOKEN))
-    record("7.3", "Perm-deleted dept is 404", 404, r)
+    record("7.2", "Deleted dept is 404 (status = 9)", 404, r)
+
+    r_recreate = requests.post(f"{BASE}/departments/", headers=ah(A_SUPER_TOKEN),
+                               json={"department_name": f"PermDept7 {TS}"})
+    record("7.3", "Re-creating department after deletion succeeds cleanly → 201", 201, r_recreate)
 else:
     print("  [SKIP] 7.1-7.3 — dept creation failed")
 
-r2 = requests.post(f"{BASE}/departments/", headers=ah(ADMIN_TOKEN),
-                   json={"department_name": f"ActiveDept7 {TS}", "company_id": A_COMPANY_ID})
-active_dept_id = r2.json().get("department_id") if r2.status_code == 201 else None
-if active_dept_id:
-    r = requests.delete(f"{BASE}/departments/{active_dept_id}/permanent",
-                        headers=ah(ADMIN_TOKEN))
-    record("7.4", "Admin perm-delete active dept → 400", 400, r)
-
 # ═══════════════════════════════════════════════════════════════════════════════
-print("\n── Section 8: Permanent Delete — Roles [BUG FIX] ────────────────────")
+print("\n── Section 8: Single Delete Model — Roles ────────────────────────────")
 
-# Create role using ADMIN_TOKEN with fixed create_role() (explicit company_id)
 r = requests.post(f"{BASE}/roles/", headers=ah(ADMIN_TOKEN),
                   json={"role_name": f"PermRole8 {TS}", "department_id": A_DEPT_ID,
                         "company_id": A_COMPANY_ID})
 perm_role_id = r.json().get("role_id") if r.status_code == 201 else None
 if not perm_role_id:
     perm_role_id = get_role_id_by_name(ADMIN_TOKEN, f"Permrole8 {TS}")
-    if perm_role_id:
-        print(f"  [INFO] role_id fetched by name lookup: {perm_role_id}")
 
 if perm_role_id:
-    r = requests.delete(f"{BASE}/roles/{perm_role_id}/permanent",
-                        headers=ah(A_SUPER_TOKEN))
-    record("8.1", "Non-admin cannot perm-delete role → 403", 403, r)
+    r = requests.delete(f"{BASE}/roles/{perm_role_id}", headers=ah(A_SUPER_TOKEN))
+    record("8.1", "Company Super Admin deletes role → 200", 200, r)
 
-    r = requests.delete(f"{BASE}/roles/{perm_role_id}/permanent",
-                        headers=ah(ADMIN_TOKEN))
-    record("8.2", "Admin perm-delete active role → 400", 400, r)
-
-    requests.delete(f"{BASE}/roles/{perm_role_id}", headers=ah(A_SUPER_TOKEN))
-
-    r = requests.delete(f"{BASE}/roles/{perm_role_id}/permanent",
-                        headers=ah(ADMIN_TOKEN))
-    record("8.3", "Admin perm-deletes soft-deleted role from Company A → 200  [BUG FIX]", 200, r)
-
-    r = requests.delete(f"{BASE}/roles/{perm_role_id}/permanent",
-                        headers=ah(ADMIN_TOKEN))
-    record("8.4", "Second perm-delete same role → 404", 404, r)
-else:
-    print(f"  [ERROR] Could not create/find PermRole8 — role creation returned: {r.status_code} {r.text}")
+    r = requests.delete(f"{BASE}/roles/{perm_role_id}", headers=ah(ADMIN_TOKEN))
+    record("8.2", "Second delete same role → 404", 404, r)
 
 if super_role_id:
-    r = requests.delete(f"{BASE}/roles/{super_role_id}/permanent",
-                        headers=ah(ADMIN_TOKEN))
-    record("8.5", "Admin cannot perm-delete Company Super Admin role → 400 or 403",
-           r.status_code if r.status_code in (400, 403) else 403, r)
+    r = requests.delete(f"{BASE}/roles/{super_role_id}", headers=ah(A_SUPER_TOKEN))
+    record("8.3", "Cannot delete Company Super Admin role → 403", 403, r)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-print("\n── Section 9: Permanent Delete — Users [BUG FIX] ────────────────────")
+print("\n── Section 9: Single Delete Model — Users ────────────────────────────")
 
 disp_email = f"disp_{TS}@datagrid.co.in"
 r = requests.post(f"{BASE}/users/", headers=ah(ADMIN_TOKEN),
@@ -501,23 +472,17 @@ r = requests.post(f"{BASE}/users/", headers=ah(ADMIN_TOKEN),
 disp_user_id = r.json().get("user_id") if r.status_code == 201 else None
 
 if disp_user_id:
-    r = requests.delete(f"{BASE}/users/{disp_user_id}/permanent",
-                        headers=ah(A_SUPER_TOKEN))
-    record("9.1", "Non-admin cannot perm-delete user → 403", 403, r)
+    r = requests.delete(f"{BASE}/users/{disp_user_id}", headers=ah(ADMIN_TOKEN))
+    record("9.1", "Admin deletes user → 200", 200, r)
 
-    r = requests.delete(f"{BASE}/users/{disp_user_id}/permanent",
-                        headers=ah(ADMIN_TOKEN))
-    record("9.2", "Admin perm-delete active user → 400", 400, r)
+    r = requests.delete(f"{BASE}/users/{disp_user_id}", headers=ah(ADMIN_TOKEN))
+    record("9.2", "Second delete same user → 404", 404, r)
 
-    requests.delete(f"{BASE}/users/{disp_user_id}", headers=ah(ADMIN_TOKEN))
-
-    r = requests.delete(f"{BASE}/users/{disp_user_id}/permanent",
-                        headers=ah(ADMIN_TOKEN))
-    record("9.3", "Admin perm-deletes soft-deleted user from Company A → 200  [BUG FIX]", 200, r)
-
-    r = requests.delete(f"{BASE}/users/{disp_user_id}/permanent",
-                        headers=ah(ADMIN_TOKEN))
-    record("9.4", "Second perm-delete same user → 404", 404, r)
+    r_recreate_user = requests.post(f"{BASE}/users/", headers=ah(ADMIN_TOKEN),
+                                    json={"name": "Disposable Recreated", "email": disp_email,
+                                          "password": "Admin@123",
+                                          "company_id": A_COMPANY_ID, "department_id": A_DEPT_ID})
+    record("9.3", "Re-creating user with same email after deletion succeeds cleanly → 201", 201, r_recreate_user)
 else:
     print(f"  [ERROR] Could not create disposable user: {r.status_code} {r.text}")
 

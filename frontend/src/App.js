@@ -50,6 +50,28 @@ const theme = createTheme({
   typography: {
     fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
   },
+  components: {
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          minHeight: '56px',
+          '&:not(.MuiInputBase-multiline)': {
+            height: '56px',
+          },
+          '&.MuiInputBase-multiline': {
+            minHeight: 'auto',
+            height: 'auto',
+          },
+        },
+        input: {
+          '&:not(.MuiInputBase-inputMultiline)': {
+            padding: '16.5px 14px',
+            boxSizing: 'border-box',
+          },
+        },
+      },
+    },
+  },
 });
 
 function App() {

@@ -10,6 +10,7 @@ from app.utils.validators import parse_pagination, validate_ballot_input
 from app.utils.query_helpers import get_active_ballots_query
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
+from app.utils.cascade import count_dependents, count_reactivatable_dependents, cascade_set_inactive, cascade_reactivate
 from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE, STATUS_DEACTIVATED
 from sqlalchemy import or_
 from datetime import datetime, timezone
@@ -19,26 +20,53 @@ import string
 
 ballots_bp = Blueprint('ballots', __name__)
 
+@ballots_bp.route('/<int:ballot_id>/status_dependents', methods=['GET'])
+@require_permission('Ballots', 'view')
+def get_ballot_status_dependents(ballot_id):
+    """Retrieve dependent counts for status transitions (Inactive or Reactivate)."""
+    if is_administrator():
+        ballot = Ballot.query.filter(Ballot.id == ballot_id, Ballot.status != STATUS_DEACTIVATED).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        ballot = Ballot.query.filter(Ballot.id == ballot_id, Ballot.company_id == company_id, Ballot.status != STATUS_DEACTIVATED).first_or_404()
+
+    if ballot.status == STATUS_ACTIVE:
+        result = count_dependents('Ballot', ballot_id)
+        return jsonify({'current_status': STATUS_ACTIVE, 'target_status': STATUS_INACTIVE, 'dependents': result})
+    else:
+        result = count_reactivatable_dependents('Ballot', ballot_id)
+        return jsonify({'current_status': STATUS_INACTIVE, 'target_status': STATUS_ACTIVE, 'dependents': result})
+
+
 @ballots_bp.route('/', methods=['GET'])
 @require_permission('Ballots', 'view')
 def list_ballots():
     """List all ballots with filtering and pagination"""
+    show_inactive_raw = request.args.get('show_inactive')
+    status_param = request.args.get('status', '').lower()
+    if status_param == 'all':
+        allowed = [STATUS_ACTIVE, STATUS_INACTIVE]
+    elif show_inactive_raw is not None and show_inactive_raw.lower() == 'true':
+        allowed = [STATUS_INACTIVE]
+    elif status_param == 'inactive':
+        allowed = [STATUS_INACTIVE]
+    else:
+        allowed = [STATUS_ACTIVE]
+    
     if is_administrator():
         req_company_id = request.args.get('company_id', type=int)
+        query = Ballot.query.join(Election)
         if req_company_id:
-            query = get_active_ballots_query(req_company_id).join(Election)
-            base = get_active_ballots_query(req_company_id)
-        else:
-            query = Ballot.query.filter(Ballot.is_active == True).join(Election)
-            base = Ballot.query.filter(Ballot.is_active == True)
+            query = query.filter(Ballot.company_id == req_company_id)
     else:
         company_id = get_current_company_id()
-        query = get_active_ballots_query(company_id).join(Election)
-        base = get_active_ballots_query(company_id)
+        query = Ballot.query.filter(Ballot.company_id == company_id).join(Election)
+
+    query = query.filter(Ballot.status.in_(allowed), Ballot.status != STATUS_DEACTIVATED)
+
     search = request.args.get('search')
     election_id = request.args.get('election_id')
     ballot_type = request.args.get('ballot_type')
-    is_active = request.args.get('is_active')
     is_published = request.args.get('is_published')
     page, per_page, error = parse_pagination(request)
     if error:
@@ -57,9 +85,6 @@ def list_ballots():
     
     if ballot_type:
         query = query.filter(Ballot.ballot_type == ballot_type)
-    
-    if is_active is not None:
-        query = query.filter(Ballot.is_active == (is_active.lower() == 'true'))
     
     if is_published is not None:
         query = query.filter(Ballot.is_published == (is_published.lower() == 'true'))
@@ -88,7 +113,8 @@ def list_ballots():
             'question_text': b.question_text,
             'jurisdiction_restriction': b.jurisdiction_restriction,
             'voter_type_restriction': b.voter_type_restriction,
-            'is_active': b.is_active,
+            'is_active': b.status == STATUS_ACTIVE,
+            'status': b.status,
             'is_published': b.is_published,
             'is_test_ballot': b.is_test_ballot,
             'total_votes_cast': b.total_votes_cast,
@@ -103,9 +129,9 @@ def list_ballots():
         'pages': pagination.pages,
         'summary': {
             'total_ballots': pagination.total,
-            'active_ballots': base.filter_by(is_active=True).count(),
-            'published_ballots': base.filter_by(is_published=True).count(),
-            'draft_ballots': base.filter_by(is_published=False).count()
+            'active_ballots': sum(1 for b in ballots if b.status == STATUS_ACTIVE),
+            'published_ballots': sum(1 for b in ballots if b.is_published),
+            'draft_ballots': sum(1 for b in ballots if not b.is_published)
         }
     })
 
@@ -141,6 +167,19 @@ def create_ballot():
     if election.status in ['active', 'cancelled', 'completed']:
         return jsonify({'error': 'Cannot create ballots for active, completed, or cancelled elections'}), 400
     
+    # Check for inactive collision (409 Conflict)
+    existing_inactive = Ballot.query.filter(
+        Ballot.election_id == election_id,
+        Ballot.title == data['title'],
+        Ballot.status == STATUS_INACTIVE
+    ).first()
+    if existing_inactive:
+        return jsonify({
+            'error': 'A ballot with this title already exists in this election but is currently Inactive.',
+            'existing_id': existing_inactive.id,
+            'can_reactivate': True
+        }), 409
+
     # Generate unique ballot code
     ballot_code = generate_ballot_code()
     while Ballot.query.filter_by(ballot_code=ballot_code, election_id=election_id).first():
@@ -174,7 +213,8 @@ def create_ballot():
     ballot.voter_type_restriction = data.get('voter_type_restriction')
     
     # Status
-    ballot.is_active = data.get('is_active', True)
+    ballot.status = data.get('status', STATUS_ACTIVE)
+    ballot.is_active = (ballot.status == STATUS_ACTIVE)
     ballot.is_published = data.get('is_published', False)
     ballot.is_test_ballot = data.get('is_test_ballot', False)
     
@@ -198,18 +238,18 @@ def get_ballot(ballot_id):
     if is_administrator():
         ballot = Ballot.query.join(Election).filter(
             Ballot.id == ballot_id,
-            Ballot.is_active == True
+            Ballot.status != STATUS_DEACTIVATED
         ).first_or_404()
     else:
         company_id = get_current_company_id()
         ballot = Ballot.query.join(Election).filter(
             Ballot.id == ballot_id,
             Ballot.company_id == company_id,
-            Ballot.is_active == True
+            Ballot.status != STATUS_DEACTIVATED
         ).first_or_404()
     
     # Get candidates
-    candidates = Candidate.query.filter_by(ballot_id=ballot_id, is_active=True).order_by(Candidate.order_index).all()
+    candidates = Candidate.query.filter_by(ballot_id=ballot_id).filter(Candidate.status != STATUS_DEACTIVATED).order_by(Candidate.order_index).all()
     
     # Get vote count
     vote_count = Vote.query.filter_by(ballot_id=ballot_id).count()
@@ -235,7 +275,8 @@ def get_ballot(ballot_id):
         'question_text': ballot.question_text,
         'jurisdiction_restriction': ballot.jurisdiction_restriction,
         'voter_type_restriction': ballot.voter_type_restriction,
-        'is_active': ballot.is_active,
+        'is_active': ballot.status == STATUS_ACTIVE,
+        'status': ballot.status,
         'is_published': ballot.is_published,
         'is_test_ballot': ballot.is_test_ballot,
         'total_votes_cast': ballot.total_votes_cast,
@@ -252,14 +293,15 @@ def get_ballot(ballot_id):
             'order_index': c.order_index,
             'is_write_in': c.is_write_in,
             'is_incumbent': c.is_incumbent,
-            'is_active': c.is_active,
+            'is_active': c.status == STATUS_ACTIVE,
+            'status': c.status,
             'total_votes_received': c.total_votes_received,
             'vote_percentage': c.vote_percentage
         } for c in candidates],
         'statistics': {
             'candidate_count': len(candidates),
             'vote_count': vote_count,
-            'active_candidates': sum(1 for c in candidates if c.is_active)
+            'active_candidates': sum(1 for c in candidates if c.status == STATUS_ACTIVE)
         },
         'created_at': ballot.created_at.isoformat() if ballot.created_at else None,
         'updated_at': ballot.updated_at.isoformat() if ballot.updated_at else None
@@ -271,10 +313,10 @@ def get_ballot(ballot_id):
 def update_ballot(ballot_id):
     """Update ballot information"""
     if is_administrator():
-        ballot = Ballot.query.filter_by(id=ballot_id, is_active=True).first_or_404()
+        ballot = Ballot.query.filter_by(id=ballot_id).filter(Ballot.status != STATUS_DEACTIVATED).first_or_404()
     else:
         company_id = get_current_company_id()
-        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
+        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).filter(Ballot.status != STATUS_DEACTIVATED).first_or_404()
     current_user = get_current_user()
     data = request.get_json()
     
@@ -320,9 +362,20 @@ def update_ballot(ballot_id):
     if 'voter_type_restriction' in data:
         ballot.voter_type_restriction = data['voter_type_restriction']
     
-    # Update status
-    if 'is_active' in data:
-        ballot.is_active = data['is_active']
+    # Handle status transition and cascade
+    new_status = data.get('status')
+    if new_status is None and 'is_active' in data:
+        new_status = STATUS_ACTIVE if data['is_active'] else STATUS_INACTIVE
+
+    if new_status is not None and new_status != ballot.status:
+        old_status = ballot.status
+        ballot.status = new_status
+        ballot.is_active = (new_status == STATUS_ACTIVE)
+        if old_status == STATUS_ACTIVE and new_status == STATUS_INACTIVE:
+            cascade_set_inactive('Ballot', ballot.id)
+        elif old_status == STATUS_INACTIVE and new_status == STATUS_ACTIVE:
+            cascade_reactivate('Ballot', ballot.id)
+
     if 'is_published' in data:
         ballot.is_published = data['is_published']
     
@@ -339,10 +392,10 @@ def update_ballot(ballot_id):
 def delete_ballot(ballot_id):
     """Delete ballot (soft delete)"""
     if is_administrator():
-        ballot = Ballot.query.filter_by(id=ballot_id, is_active=True).first_or_404()
+        ballot = Ballot.query.filter_by(id=ballot_id).filter(Ballot.status != STATUS_DEACTIVATED).first_or_404()
     else:
         company_id = get_current_company_id()
-        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id, is_active=True).first_or_404()
+        ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).filter(Ballot.status != STATUS_DEACTIVATED).first_or_404()
     
     # Check if election is active
     if ballot.election.status == 'active':
@@ -356,7 +409,7 @@ def delete_ballot(ballot_id):
     force = request.args.get('force', 'false').lower() == 'true'
 
     from app.models.candidate import Candidate
-    active_candidates = Candidate.query.filter_by(ballot_id=ballot_id).filter(Candidate.status != STATUS_INACTIVE).count()
+    active_candidates = Candidate.query.filter_by(ballot_id=ballot_id).filter(Candidate.status != STATUS_DEACTIVATED).count()
 
     if active_candidates > 0 and not force:
         user_friendly_error = f"Cannot delete ballot: It currently has {active_candidates} active candidate(s). Please remove or deactivate these candidates first."
@@ -369,15 +422,25 @@ def delete_ballot(ballot_id):
             'message': 'Are you sure you want to delete this ballot (and deactivate all related candidate assignments)?'
         }), 400
 
+    import time
+    ts = int(time.time())
+
     # Deactivate active candidates on this ballot
     if active_candidates > 0:
-        candidates = Candidate.query.filter_by(ballot_id=ballot_id).filter(Candidate.status != STATUS_INACTIVE).all()
+        candidates = Candidate.query.filter_by(ballot_id=ballot_id).filter(Candidate.status != STATUS_DEACTIVATED).all()
         for c in candidates:
-            c.status = STATUS_INACTIVE
+            c.status = STATUS_DEACTIVATED
+            if "_deleted_" not in c.name:
+                c.name = f"{c.name}_deleted_{c.id}_{ts}"
             set_audit_fields(c, is_create=False)
 
     # Soft delete by updating status
+    ballot.status = STATUS_DEACTIVATED
     ballot.is_active = False
+    if "_deleted_" not in ballot.title:
+        ballot.title = f"{ballot.title}_deleted_{ballot.id}_{ts}"
+    if ballot.ballot_code and "_deleted_" not in ballot.ballot_code:
+        ballot.ballot_code = f"{ballot.ballot_code}_deleted_{ballot.id}_{ts}"
     set_audit_fields(ballot, is_create=False)
 
     return safe_commit(

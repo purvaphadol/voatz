@@ -10,8 +10,10 @@ import {
   DialogContent,
   DialogActions,
   Alert,
- Chip,
+  Chip,
   CircularProgress,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import {
   DataGrid,
@@ -25,24 +27,38 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
+  Visibility as ViewIcon,
 } from '@mui/icons-material';
 import { usersAPI, departmentsAPI, companiesAPI, handleApiError } from '../../services/api';
 import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
-import { validateNonNumericText, validateEmail, capitalizeError } from '../../utils/validators';
+import { showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../utils/swal';
+import { validateNonNumericText, validateEmail, validatePhone, capitalizeError } from '../../utils/validators';
 import { useDeleteWithDependencies } from '../../hooks/useDeleteWithDependencies';
+import SearchableSelect from '../Common/SearchableSelect';
 
-const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
+const CustomToolbar = ({ onAdd, hasCreatePermission, showInactive, setShowInactive }) => (
   <GridToolbarContainer>
     <GridToolbarColumnsButton />
     <GridToolbarFilterButton />
     <GridToolbarExport />
     {hasCreatePermission && (
-      <Button startIcon={<AddIcon />} onClick={onAdd} sx={{ ml: 2 }}>
+      <Button startIcon={<AddIcon />} onClick={onAdd}>
         Add User
       </Button>
     )}
+    <FormControlLabel
+      control={
+        <Switch
+          checked={showInactive}
+          onChange={(e) => setShowInactive(e.target.checked)}
+          color="warning"
+          size="small"
+        />
+      }
+      label={<Typography variant="body2">Show Inactive</Typography>}
+      sx={{ ml: 'auto' }}
+    />
   </GridToolbarContainer>
 );
 
@@ -61,12 +77,15 @@ const Users = () => {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [viewMode, setViewMode] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
     department_id: '',
     company_id: '',
+    status: 1,
   });
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
@@ -105,9 +124,14 @@ const Users = () => {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearch, selectedCompanyFilter, selectedDepartmentFilter, showInactive]);
+
   useEffect(() => {
     loadUsers();
-  }, [page, pageSize, debouncedSearch, selectedCompanyFilter, selectedDepartmentFilter]);
+  }, [page, pageSize, debouncedSearch, selectedCompanyFilter, selectedDepartmentFilter, showInactive]);
 
   useEffect(() => {
     if (isPlatformAdmin) {
@@ -126,6 +150,7 @@ const Users = () => {
       };
       if (selectedDepartmentFilter) params.department_id = selectedDepartmentFilter;
       if (isPlatformAdmin && selectedCompanyFilter) params.company_id = selectedCompanyFilter;
+      if (showInactive) params.show_inactive = 'true';
 
       const response = await usersAPI.getAll(params);
       setUsers(response.data.data || []);
@@ -142,7 +167,7 @@ const Users = () => {
     try {
       const params = companyId ? { company_id: companyId } : {};
       const response = await departmentsAPI.getAll(params);
-      setDepartments(response.data.data || []);
+      setDepartments((response.data.data || []).filter(d => d.status === 1));
     } catch (error) {
       console.error('Error loading departments:', error);
     }
@@ -161,10 +186,12 @@ const Users = () => {
     setDialogOpen(false);
     setFormError('');
     setEditingUser(null);
+    setViewMode(false);
   };
 
   const handleAdd = () => {
     setEditingUser(null);
+    setViewMode(false);
     setFormError('');
     setFormData({
       name: '',
@@ -172,6 +199,7 @@ const Users = () => {
       password: '',
       department_id: '',
       company_id: '',
+      status: 1,
     });
     setDialogOpen(true);
   };
@@ -182,6 +210,7 @@ const Users = () => {
       return;
     }
     setEditingUser(user);
+    setViewMode(false);
     setFormError('');
     const compId = user.company_id || '';
     setFormData({
@@ -190,6 +219,27 @@ const Users = () => {
       password: '',
       company_id: compId,
       department_id: user.department_id || '',
+      status: user.status ?? 1,
+    });
+    if (isPlatformAdmin && compId) {
+      loadDepartments(compId);
+    }
+    setDialogOpen(true);
+  };
+
+  const handleView = (userRecord) => {
+    if (!userRecord || !userRecord.id) return;
+    setEditingUser(userRecord);
+    setViewMode(true);
+    setFormError('');
+    const compId = userRecord.company_id || '';
+    setFormData({
+      name: userRecord.name,
+      email: userRecord.email,
+      password: '',
+      company_id: compId,
+      department_id: userRecord.department_id || '',
+      status: userRecord.status ?? 1,
     });
     if (isPlatformAdmin && compId) {
       loadDepartments(compId);
@@ -269,6 +319,48 @@ const Users = () => {
       }
       
       if (editingUser) {
+        if (editingUser.status !== formData.status) {
+          if (formData.status === 0) {
+            try {
+              const depRes = await usersAPI.getStatusDependents(editingUser.id);
+              const depCount = depRes.data?.data?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Set User Inactive?',
+                  text: `Setting this user inactive will also pause ${depCount} user role mappings and voter registrations to Inactive. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, set inactive',
+                  confirmButtonColor: '#ed6c02',
+                });
+                if (!confirmed) {
+                  setIsSubmitting(false);
+                  return;
+                }
+              }
+            } catch (err) {
+              console.warn('Could not inspect status dependents:', err);
+            }
+          } else if (formData.status === 1) {
+            try {
+              const depRes = await usersAPI.getStatusDependents(editingUser.id);
+              const depCount = depRes.data?.data?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Reactivate User?',
+                  text: `Reactivating this user will reactivate child records paused with them. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, reactivate',
+                  confirmButtonColor: '#2e7d32',
+                });
+                if (!confirmed) {
+                  setIsSubmitting(false);
+                  return;
+                }
+              }
+            } catch (err) {
+              console.warn('Could not inspect status dependents:', err);
+            }
+          }
+        }
+        payload.status = formData.status;
         await usersAPI.update(editingUser.id, payload);
         setDialogOpen(false);
         await showSuccessAlert('User updated successfully');
@@ -279,6 +371,27 @@ const Users = () => {
       }
       loadUsers();
     } catch (error) {
+      if (error.response && error.response.status === 409 && error.response.data?.can_reactivate) {
+        const existingId = error.response.data.existing_id;
+        const reactivateConfirmed = await showConfirmDialog({
+          title: 'Inactive User Found',
+          text: error.response.data.error || 'An inactive user with this email already exists. Would you like to reactivate them?',
+          confirmButtonText: 'Reactivate User',
+          confirmButtonColor: '#2e7d32',
+        });
+        if (reactivateConfirmed && existingId) {
+          try {
+            await usersAPI.update(existingId, { status: 1 });
+            setDialogOpen(false);
+            await showSuccessAlert('User reactivated successfully');
+            loadUsers();
+            return;
+          } catch (reactivateErr) {
+            setFormError(capitalizeError(reactivateErr.response?.data?.error || 'Failed to reactivate user'));
+            return;
+          }
+        }
+      }
       setFormError(capitalizeError(handleApiError(error)));
     } finally {
       setIsSubmitting(false);
@@ -310,12 +423,24 @@ const Users = () => {
     {
       field: 'department_id',
       headerName: 'Department',
-      width: 180,
+      width: 170,
       renderCell: (params) => (
         <Chip
           label={params.row.department_name || getDepartmentName(params.value)}
           size="small"
           variant="outlined"
+        />
+      ),
+    },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 120,
+      renderCell: (params) => (
+        <Chip
+          label={params.value === 1 ? 'Active' : params.value === 0 ? 'Inactive' : 'Deactivated'}
+          color={params.value === 1 ? 'success' : params.value === 0 ? 'warning' : 'default'}
+          size="small"
         />
       ),
     },
@@ -333,10 +458,20 @@ const Users = () => {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
-      width: 130,
+      width: 150,
       getActions: (params) => {
         const actions = [];
         
+        if (canView) {
+          actions.push(
+            <GridActionsCellItem
+              icon={<ViewIcon />}
+              label="View"
+              onClick={() => handleView(params.row)}
+            />
+          );
+        }
+
         if (canUpdate) {
           actions.push(
             <GridActionsCellItem
@@ -393,10 +528,10 @@ const Users = () => {
         />
 
         {isPlatformAdmin && (
-          <TextField
-            label="Filter by Company"
-            select
-            size="small"
+          <SearchableSelect
+            options={companies}
+            getOptionLabel={(comp) => comp.company_name}
+            getOptionValue={(comp) => comp.id}
             value={selectedCompanyFilter}
             onChange={(e) => {
               const compId = e.target.value;
@@ -404,36 +539,24 @@ const Users = () => {
               setSelectedDepartmentFilter('');
               loadDepartments(compId);
             }}
-            SelectProps={{ native: true }}
-            InputLabelProps={{ shrink: true }}
-            sx={{ minWidth: 200 }}
-          >
-            <option value="">All Companies</option>
-            {companies.map((comp) => (
-              <option key={comp.id} value={comp.id}>
-                {comp.company_name}
-              </option>
-            ))}
-          </TextField>
+            label="Filter by Company"
+            allOptionLabel="All Companies"
+            allOptionValue=""
+            sx={{ minWidth: 200, maxWidth: 300 }}
+          />
         )}
 
-        <TextField
-          label="Filter by Department"
-          select
-          size="small"
+        <SearchableSelect
+          options={departments}
+          getOptionLabel={(dept) => dept.department_name}
+          getOptionValue={(dept) => dept.id}
           value={selectedDepartmentFilter}
           onChange={(e) => setSelectedDepartmentFilter(e.target.value)}
-          SelectProps={{ native: true }}
-          InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 200 }}
-        >
-          <option value="">All Departments</option>
-          {departments.map((dept) => (
-            <option key={dept.id} value={dept.id}>
-              {dept.department_name}
-            </option>
-          ))}
-        </TextField>
+          label="Filter by Department"
+          allOptionLabel="All Departments"
+          allOptionValue=""
+          sx={{ minWidth: 200, maxWidth: 300 }}
+        />
       </Box>
 
       <Paper sx={{ height: 600, width: '100%' }}>
@@ -442,15 +565,23 @@ const Users = () => {
           columns={columns}
           paginationMode="server"
           rowCount={totalRows}
-          page={page}
-          onPageChange={(newPage) => setPage(newPage)}
-          pageSize={pageSize}
-          onPageSizeChange={(newPageSize) => setPageSize(newPageSize)}
-          rowsPerPageOptions={[5, 10, 25, 50, 100]}
-          disableSelectionOnClick
+          paginationModel={{ page, pageSize }}
+          onPaginationModelChange={(model) => {
+            setPage(model.page);
+            setPageSize(model.pageSize);
+          }}
+          pageSizeOptions={[5, 10, 25, 50, 100]}
+          disableRowSelectionOnClick
           loading={loading}
-          components={{
-            Toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />
+          slots={{
+            toolbar: () => (
+              <CustomToolbar
+                onAdd={handleAdd}
+                hasCreatePermission={canCreate}
+                showInactive={showInactive}
+                setShowInactive={setShowInactive}
+              />
+            ),
           }}
         />
       </Paper>
@@ -458,7 +589,7 @@ const Users = () => {
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <form onSubmit={handleSubmit}>
           <DialogTitle>
-            {editingUser ? 'Edit User' : 'Add New User'}
+            {viewMode ? 'View User' : editingUser ? 'Edit User' : 'Add New User'}
           </DialogTitle>
           <DialogContent ref={dialogContentRef}>
             {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
@@ -473,6 +604,7 @@ const Users = () => {
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               required
+              disabled={viewMode}
               sx={{ mb: 2 }}
             />
             <TextField
@@ -484,50 +616,45 @@ const Users = () => {
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               required
+              disabled={viewMode}
               sx={{ mb: 2 }}
             />
-            <TextField
-              margin="dense"
-              label={editingUser ? "New Password (leave blank to keep current)" : "Password"}
-              type="password"
-              fullWidth
-              variant="outlined"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              required={!editingUser}
-              sx={{ mb: 2 }}
-            />
+            {!viewMode && (
+              <TextField
+                margin="dense"
+                label={editingUser ? "New Password (leave blank to keep current)" : "Password"}
+                type="password"
+                fullWidth
+                variant="outlined"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                required={!editingUser}
+                sx={{ mb: 2 }}
+              />
+            )}
 
-            {/* 1. Company Field FIRST */}
+            {/* 1. Company Field */}
             {!editingUser ? (
               isPlatformAdmin ? (
-                <TextField
-                  margin="dense"
-                  label="Company *"
-                  select
-                  fullWidth
-                  variant="outlined"
-                  value={formData.company_id}
-                  onChange={(e) => {
-                    const selectedCompanyId = e.target.value;
-                    setFormData({ ...formData, company_id: selectedCompanyId, department_id: '' });
-                    if (selectedCompanyId) {
-                      loadDepartments(selectedCompanyId);
-                    }
-                  }}
-                  SelectProps={{
-                    native: true,
-                  }}
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ mb: 2 }}
-                >
-                  <option value="" disabled hidden>Select Company</option>
-                  {companies.map((comp) => (
-                    <option key={comp.id} value={comp.id}>
-                      {comp.company_name}
-                    </option>
-                  ))}
-                </TextField>
+                <Box sx={{ mb: 2 }}>
+                  <SearchableSelect
+                    options={companies}
+                    getOptionLabel={(comp) => comp.company_name}
+                    getOptionValue={(comp) => comp.id}
+                    value={formData.company_id || ''}
+                    onChange={(e) => {
+                      const selectedCompanyId = e.target.value;
+                      setFormData({ ...formData, company_id: selectedCompanyId, department_id: '' });
+                      if (selectedCompanyId) {
+                        loadDepartments(selectedCompanyId);
+                      }
+                    }}
+                    label="Company *"
+                    placeholder="Select Company"
+                    margin="dense"
+                    disabled={viewMode}
+                  />
+                </Box>
               ) : (
                 <TextField
                   margin="dense"
@@ -541,7 +668,7 @@ const Users = () => {
                     'Your Company'
                   }
                   disabled
-                  helperText="Users are automatically assigned to your company."
+                  helperText={!viewMode ? "Users are automatically assigned to your company." : ""}
                   sx={{ mb: 2 }}
                 />
               )
@@ -553,42 +680,54 @@ const Users = () => {
                 variant="outlined"
                 value={editingUser.company_name || 'N/A'}
                 disabled
-                helperText="Company cannot be modified after creation."
+                helperText={!viewMode ? "Company cannot be modified after creation." : ""}
                 sx={{ mb: 2 }}
               />
             )}
 
-            {/* 2. Department Field SECOND (Dynamic dependent dropdown) */}
-            <TextField
-              margin="dense"
-              label="Department"
-              select
-              fullWidth
-              variant="outlined"
-              value={formData.department_id}
-              onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-              disabled={isPlatformAdmin && !formData.company_id && !editingUser}
-              SelectProps={{
-                native: true,
-              }}
-              InputLabelProps={{ shrink: true }}
-              sx={{ mb: 2 }}
-            >
-              <option value="" disabled hidden>
-                {isPlatformAdmin && !formData.company_id && !editingUser ? 'Select Company First' : 'Select Department'}
-              </option>
-              {departments.map((dept) => (
-                <option key={dept.id} value={dept.id}>
-                  {dept.department_name}
-                </option>
-              ))}
-            </TextField>
+            {/* 2. Department Field */}
+            <Box sx={{ mb: 2 }}>
+              <SearchableSelect
+                options={departments}
+                getOptionLabel={(dept) => dept.department_name}
+                getOptionValue={(dept) => dept.id}
+                value={formData.department_id || ''}
+                onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
+                label="Department"
+                margin="dense"
+                placeholder={isPlatformAdmin && !formData.company_id && !editingUser ? 'Select Company First' : 'Select Department'}
+                disabled={viewMode || (isPlatformAdmin && !formData.company_id && !editingUser)}
+              />
+            </Box>
+
+            {/* 3. Status Field LAST */}
+            {(editingUser || viewMode) && (
+              <Box sx={{ mb: 2 }}>
+                <SearchableSelect
+                  options={[
+                    { id: 1, name: 'Active' },
+                    { id: 0, name: 'Inactive' }
+                  ]}
+                  getOptionLabel={(opt) => opt.name}
+                  getOptionValue={(opt) => opt.id}
+                  value={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: Number(e.target.value) })}
+                  label="Status"
+                  margin="dense"
+                  disabled={viewMode}
+                />
+              </Box>
+            )}
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
-            <Button type="submit" variant="contained" disabled={isSubmitting}>
-              {isSubmitting ? <CircularProgress size={24} /> : (editingUser ? 'Update' : 'Create')}
+            <Button onClick={handleCloseDialog} disabled={isSubmitting}>
+              {viewMode ? 'Close' : 'Cancel'}
             </Button>
+            {!viewMode && (
+              <Button type="submit" variant="contained" disabled={isSubmitting}>
+                {isSubmitting ? <CircularProgress size={24} /> : (editingUser ? 'Update' : 'Create')}
+              </Button>
+            )}
           </DialogActions>
         </form>
       </Dialog>

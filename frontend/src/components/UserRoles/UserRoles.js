@@ -45,6 +45,7 @@ import { usePermissions } from '../../contexts/PermissionContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { showConfirmDialog } from '../../utils/swal';
 import { capitalizeError } from '../../utils/validators';
+import SearchableSelect from '../Common/SearchableSelect';
 
 const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
   <GridToolbarContainer>
@@ -454,38 +455,30 @@ const UserRoles = () => {
         />
 
         {isPlatformAdmin && (
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel>Filter by Company</InputLabel>
-            <Select
-              value={filterCompany}
-              label="Filter by Company"
-              onChange={(e) => handleFilterCompanyChange(e.target.value)}
-            >
-              <MenuItem value="">All Companies</MenuItem>
-              {companies.map((c) => (
-                <MenuItem key={c.id} value={c.id}>
-                  {c.company_name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <SearchableSelect
+            options={companies}
+            getOptionLabel={(c) => c.company_name}
+            getOptionValue={(c) => c.id}
+            value={filterCompany}
+            onChange={(e) => handleFilterCompanyChange(e.target.value)}
+            label="Filter by Company"
+            allOptionLabel="All Companies"
+            allOptionValue=""
+            sx={{ minWidth: 200, maxWidth: 300 }}
+          />
         )}
 
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel>Filter by Department</InputLabel>
-          <Select
-            value={filterDepartment}
-            label="Filter by Department"
-            onChange={(e) => setFilterDepartment(e.target.value)}
-          >
-            <MenuItem value="">All Departments</MenuItem>
-            {departments.map((d) => (
-              <MenuItem key={d.id} value={d.id}>
-                {d.department_name}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <SearchableSelect
+          options={departments}
+          getOptionLabel={(d) => d.department_name}
+          getOptionValue={(d) => d.id}
+          value={filterDepartment}
+          onChange={(e) => setFilterDepartment(e.target.value)}
+          label="Filter by Department"
+          allOptionLabel="All Departments"
+          allOptionValue=""
+          sx={{ minWidth: 200, maxWidth: 300 }}
+        />
       </Box>
 
       <Grid container spacing={3}>
@@ -495,11 +488,15 @@ const UserRoles = () => {
               rows={userRoles}
               columns={columns}
               loading={loading}
-              pageSize={10}
-              rowsPerPageOptions={[5, 10, 25]}
-              disableSelectionOnClick
-              components={{
-                Toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />
+              initialState={{
+                pagination: {
+                  paginationModel: { pageSize: 10 },
+                },
+              }}
+              pageSizeOptions={[5, 10, 25, 50]}
+              disableRowSelectionOnClick
+              slots={{
+                toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />
               }}
             />
           </Paper>
@@ -512,24 +509,18 @@ const UserRoles = () => {
                 User Role Details
               </Typography>
               
-              <FormControl fullWidth sx={{ mb: 2 }} disabled={isPlatformAdmin && !filterCompany}>
-                <InputLabel id="ur-select-user-label">Select User</InputLabel>
-                <Select
-                  labelId="ur-select-user-label"
+              <Box sx={{ mb: 2 }}>
+                <SearchableSelect
+                  options={users}
+                  getOptionLabel={(u) => `${u.name} (${u.email})`}
+                  getOptionValue={(u) => u.id}
                   value={selectedUser}
                   onChange={(e) => handleUserSelect(e.target.value)}
                   label="Select User"
-                >
-                  <MenuItem value="" disabled hidden>
-                    {isPlatformAdmin && !filterCompany ? 'Select Company Filter First' : 'Select User'}
-                  </MenuItem>
-                  {users.map((user) => (
-                    <MenuItem key={user.id} value={user.id}>
-                      {user.name} ({user.email})
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+                  placeholder={isPlatformAdmin && !filterCompany ? 'Select Company Filter First' : 'Select User'}
+                  disabled={isPlatformAdmin && !filterCompany}
+                />
+              </Box>
 
               {selectedUser && (
                 <Paper variant="outlined" sx={{ p: 2 }}>
@@ -588,28 +579,22 @@ const UserRoles = () => {
             
             {/* 1. Company Field FIRST */}
             {isPlatformAdmin ? (
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel id="ur-form-company-label">Company *</InputLabel>
-                <Select
-                  labelId="ur-form-company-label"
-                  value={formData.company_id}
+              <Box sx={{ mb: 2 }}>
+                <SearchableSelect
+                  options={companies}
+                  getOptionLabel={(c) => c.company_name}
+                  getOptionValue={(c) => c.id}
+                  value={formData.company_id || ''}
                   onChange={(e) => handleFormCompanyChange(e.target.value)}
                   label="Company *"
-                  required
-                >
-                  <MenuItem value="" disabled hidden>
-                    Select Company
-                  </MenuItem>
-                  {companies.map((company) => (
-                    <MenuItem key={company.id} value={company.id}>
-                      {company.company_name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+                  placeholder="Select Company"
+                  margin="dense"
+                />
+              </Box>
             ) : (
               <TextField
                 fullWidth
+                margin="dense"
                 label="Company"
                 value={currentUser?.company_name || 'Your Company'}
                 disabled
@@ -618,66 +603,50 @@ const UserRoles = () => {
             )}
 
             {/* 2. User Field (Scoped to selected Company) */}
-            <FormControl fullWidth sx={{ mb: 2 }} disabled={!formData.company_id}>
-              <InputLabel id="ur-form-user-label">User *</InputLabel>
-              <Select
-                labelId="ur-form-user-label"
-                value={formData.user_id}
+            <Box sx={{ mb: 2 }}>
+              <SearchableSelect
+                options={formUsers}
+                getOptionLabel={(u) => `${u.name} (${u.email})`}
+                getOptionValue={(u) => u.id}
+                value={formData.user_id || ''}
                 onChange={(e) => setFormData({ ...formData, user_id: e.target.value })}
                 label="User *"
-                required
-              >
-                <MenuItem value="" disabled hidden>
-                  {formData.company_id ? 'Select User' : 'Select Company First'}
-                </MenuItem>
-                {formUsers.map((u) => (
-                  <MenuItem key={u.id} value={u.id}>
-                    {u.name} ({u.email})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                margin="dense"
+                placeholder={formData.company_id ? 'Select User' : 'Select Company First'}
+                disabled={!formData.company_id}
+              />
+            </Box>
 
             {/* 3. Department Field (Optional for Company-Wide Roles) */}
-            <FormControl fullWidth sx={{ mb: 2 }} disabled={!formData.company_id}>
-              <InputLabel id="ur-form-dept-label">Department (Optional)</InputLabel>
-              <Select
-                labelId="ur-form-dept-label"
-                value={formData.department_id}
+            <Box sx={{ mb: 2 }}>
+              <SearchableSelect
+                options={formDepartments}
+                getOptionLabel={(d) => d.department_name}
+                getOptionValue={(d) => d.id}
+                value={formData.department_id || ''}
                 onChange={(e) => handleFormDepartmentChange(e.target.value)}
                 label="Department (Optional)"
-              >
-                <MenuItem value="">
-                  <em>None (Company-Wide Role)</em>
-                </MenuItem>
-                {formDepartments.map((department) => (
-                  <MenuItem key={department.id} value={department.id}>
-                    {department.department_name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                margin="dense"
+                allOptionLabel="None (Company-Wide Role)"
+                allOptionValue=""
+                disabled={!formData.company_id}
+              />
+            </Box>
 
             {/* 4. Role Field (Scoped to selected Company / Department) */}
-            <FormControl fullWidth disabled={!formData.company_id}>
-              <InputLabel id="ur-form-role-label">Role *</InputLabel>
-              <Select
-                labelId="ur-form-role-label"
-                value={formData.role_id}
+            <Box sx={{ mb: 2 }}>
+              <SearchableSelect
+                options={formRoles}
+                getOptionLabel={(r) => `${r.role_name} ${r.department_name ? `(${r.department_name})` : '(Company-Wide)'}`}
+                getOptionValue={(r) => r.id}
+                value={formData.role_id || ''}
                 onChange={(e) => setFormData({ ...formData, role_id: e.target.value })}
                 label="Role *"
-                required
-              >
-                <MenuItem value="" disabled hidden>
-                  {formData.company_id ? 'Select Role' : 'Select Company First'}
-                </MenuItem>
-                {formRoles.map((role) => (
-                  <MenuItem key={role.id} value={role.id}>
-                    {role.role_name} {role.department_name ? `(${role.department_name})` : '(Company-Wide)'}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                margin="dense"
+                placeholder={formData.company_id ? 'Select Role' : 'Select Company First'}
+                disabled={!formData.company_id}
+              />
+            </Box>
           </DialogContent>
           <DialogActions>
             <Button onClick={handleCloseDialog}>Cancel</Button>

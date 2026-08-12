@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from enum import IntEnum
-from sqlalchemy import Column, Integer, DateTime, event
+from sqlalchemy import Column, Integer, String, DateTime, event
 from sqlalchemy.orm import Session, with_loader_criteria
 from flask_sqlalchemy.query import Query
 
@@ -31,6 +31,8 @@ class TimestampAuditMixin:
     created_by  = Column(Integer, nullable=True)
     updated_by  = Column(Integer, nullable=True)
     status      = Column(Integer, default=StatusEnum.ACTIVE, nullable=False)
+    deactivated_by_cascade_from_type = Column(String(50), nullable=True)
+    deactivated_by_cascade_from_id   = Column(Integer, nullable=True)
 
     def __init__(self, **kwargs):
         for key, value in kwargs.items():

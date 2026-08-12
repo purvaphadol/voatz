@@ -71,14 +71,15 @@ import {
   FaceRetouchingNatural as FaceIcon,
   TouchApp as TouchIcon,
 } from '@mui/icons-material';
-import { votersAPI, usersAPI, companiesAPI } from '../../../services/api';
+import { votersAPI, companiesAPI, usersAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import { useAuth } from '../../../contexts/AuthContext';
-import { showSuccessAlert, showErrorAlert } from '../../../utils/swal';
+import SearchableSelect from '../../Common/SearchableSelect';
+import { showSuccessAlert, showErrorAlert, showConfirmDialog } from '../../../utils/swal';
 import { validateNonNumericText, validateEmail, validatePhone, capitalizeError } from '../../../utils/validators';
 import { useDeleteWithDependencies } from '../../../hooks/useDeleteWithDependencies';
 
-const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
+const CustomToolbar = ({ onAdd, hasCreatePermission, showInactive, setShowInactive }) => (
   <GridToolbarContainer>
     <GridToolbarColumnsButton />
     <GridToolbarFilterButton />
@@ -90,6 +91,18 @@ const CustomToolbar = ({ onAdd, hasCreatePermission }) => (
         </Button>
       </Tooltip>
     )}
+    <FormControlLabel
+      control={
+        <Switch
+          checked={showInactive}
+          onChange={(e) => setShowInactive(e.target.checked)}
+          color="warning"
+          size="small"
+        />
+      }
+      label={<Typography variant="body2">Show Inactive</Typography>}
+      sx={{ ml: 'auto' }}
+    />
   </GridToolbarContainer>
 );
 
@@ -115,6 +128,7 @@ const Voters = () => {
   const [verificationVoter, setVerificationVoter] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
   const [stats, setStats] = useState({});
+  const [showInactive, setShowInactive] = useState(false);
   const [formData, setFormData] = useState({
     company_id: '',
     user_id: '',
@@ -127,6 +141,7 @@ const Voters = () => {
     jurisdiction: '',
     voter_type: 'standard',
     two_factor_enabled: false,
+    status: 1,
     // Enhanced verification fields
     verification_level: 'none',
     is_verified: false,
@@ -195,7 +210,7 @@ const Voters = () => {
       loadUsers(isPlatformAdmin ? selectedCompanyFilter : undefined);
       loadStats();
     }
-  }, [canView, isPlatformAdmin, selectedCompanyFilter]);
+  }, [canView, isPlatformAdmin, selectedCompanyFilter, showInactive]);
 
   const loadCompanies = async () => {
     try {
@@ -209,7 +224,7 @@ const Voters = () => {
   const loadVoters = async () => {
     try {
       setLoading(true);
-      const params = {};
+      const params = { show_inactive: showInactive };
       if (isPlatformAdmin && selectedCompanyFilter) params.company_id = selectedCompanyFilter;
       const response = await votersAPI.getAll(params);
       setVoters(response.data.data || []);
@@ -265,6 +280,7 @@ const Voters = () => {
       jurisdiction: '',
       voter_type: 'standard',
       two_factor_enabled: false,
+      status: 1,
       // Enhanced verification fields
       verification_level: 'none',
       is_verified: false,
@@ -297,6 +313,7 @@ const Voters = () => {
       jurisdiction: voter.jurisdiction || '',
       voter_type: voter.voter_type || 'standard',
       two_factor_enabled: voter.two_factor_enabled || false,
+      status: voter.status ?? 1,
       // Enhanced verification fields
       verification_level: voter.verification_level || 'none',
       is_verified: voter.is_verified || false,
@@ -425,6 +442,41 @@ const Voters = () => {
 
     try {
       if (editingVoter) {
+        if (editingVoter.status !== formData.status) {
+          if (formData.status === 0) {
+            try {
+              const depRes = await votersAPI.getStatusDependents(editingVoter.id);
+              const depCount = depRes.data?.dependents?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Set Voter Inactive?',
+                  text: `Setting this voter inactive will cascade-pause ${depCount} related voter registrations. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, set inactive',
+                  confirmButtonColor: '#ed6c02',
+                });
+                if (!confirmed) return;
+              }
+            } catch (err) {
+              console.warn('Could not check status dependents:', err);
+            }
+          } else if (formData.status === 1) {
+            try {
+              const depRes = await votersAPI.getStatusDependents(editingVoter.id);
+              const depCount = depRes.data?.dependents?.total_count || 0;
+              if (depCount > 0) {
+                const confirmed = await showConfirmDialog({
+                  title: 'Reactivate Voter?',
+                  text: `Reactivating this voter will reactivate registrations that were paused with it. Do you wish to proceed?`,
+                  confirmButtonText: 'Yes, reactivate',
+                  confirmButtonColor: '#2e7d32',
+                });
+                if (!confirmed) return;
+              }
+            } catch (err) {
+              console.warn('Could not check status dependents:', err);
+            }
+          }
+        }
         await votersAPI.update(editingVoter.id, formData);
         setSuccess('Voter updated successfully');
       } else {
@@ -435,6 +487,27 @@ const Voters = () => {
       loadVoters();
       loadStats();
     } catch (error) {
+      if (error.response?.status === 409 && error.response?.data?.can_reactivate) {
+        const reactivate = await showConfirmDialog({
+          title: 'Voter Already Exists (Inactive)',
+          text: error.response.data.error + ' Would you like to reactivate this voter profile instead?',
+          confirmButtonText: 'Yes, Reactivate',
+          confirmButtonColor: '#2e7d32',
+        });
+        if (reactivate && error.response.data.existing_id) {
+          try {
+            await votersAPI.update(error.response.data.existing_id, { status: 1 });
+            setDialogOpen(false);
+            loadVoters();
+            loadStats();
+            showSuccessAlert('Voter reactivated successfully');
+            return;
+          } catch (reactivateErr) {
+            setFormError(capitalizeError(reactivateErr.response?.data?.error || 'Failed to reactivate voter'));
+            return;
+          }
+        }
+      }
       setFormError(capitalizeError((error.response?.data?.error) || 'Operation failed'));
     }
   };
@@ -488,6 +561,18 @@ const Voters = () => {
     { field: 'name', headerName: 'Name', width: 200 },
     { field: 'email', headerName: 'Email', width: 250 },
     { field: 'phone_number', headerName: 'Phone', width: 150 },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 120,
+      renderCell: (params) => {
+        const val = params.value;
+        if (val === 1) return <Chip label="Active" color="success" size="small" />;
+        if (val === 0) return <Chip label="Inactive" color="warning" size="small" />;
+        if (val === 9) return <Chip label="Deactivated" color="error" size="small" />;
+        return <Chip label="Active" color="success" size="small" />;
+      },
+    },
     {
       field: 'is_verified',
       headerName: 'Verified',
@@ -699,27 +784,21 @@ const Voters = () => {
       {/* Platform Admin Filter Bar */}
       {isPlatformAdmin && (
         <Box sx={{ mb: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
-          <TextField
-            label="Filter by Company"
-            select
-            size="small"
+          <SearchableSelect
+            options={companies}
+            getOptionLabel={(c) => c.company_name}
+            getOptionValue={(c) => c.id}
             value={selectedCompanyFilter}
             onChange={(e) => {
               const compId = e.target.value;
               setSelectedCompanyFilter(compId);
               loadUsers(compId);
             }}
-            SelectProps={{ native: true }}
-            InputLabelProps={{ shrink: true }}
-            sx={{ minWidth: 220 }}
-          >
-            <option value="">All Companies</option>
-            {companies.map((comp) => (
-              <option key={comp.id} value={comp.id}>
-                {comp.company_name}
-              </option>
-            ))}
-          </TextField>
+            label="Filter by Company"
+            allOptionLabel="All Companies"
+            allOptionValue=""
+            sx={{ minWidth: 220, maxWidth: 300 }}
+          />
         </Box>
       )}
 
@@ -727,13 +806,17 @@ const Voters = () => {
         <DataGrid
           rows={voters}
           columns={columns}
-          pageSize={25}
-          rowsPerPageOptions={[25, 50, 100]}
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 25 },
+            },
+          }}
+          pageSizeOptions={[10, 25, 50, 100]}
           checkboxSelection
-          disableSelectionOnClick
+          disableRowSelectionOnClick
           loading={loading}
-          components={{
-            Toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} />,
+          slots={{
+            toolbar: () => <CustomToolbar onAdd={handleAdd} hasCreatePermission={canCreate} showInactive={showInactive} setShowInactive={setShowInactive} />,
           }}
         />
       </Paper>
@@ -755,28 +838,19 @@ const Voters = () => {
               <Grid item xs={12} sm={6}>
                 {!editingVoter ? (
                   isPlatformAdmin ? (
-                    <TextField
-                      fullWidth
-                      label="Company *"
-                      select
-                      variant="outlined"
+                    <SearchableSelect
+                      options={companies}
+                      getOptionLabel={(c) => c.company_name}
+                      getOptionValue={(c) => c.id}
                       value={formData.company_id || ''}
                       onChange={(e) => {
                         const compId = e.target.value;
                         setFormData({ ...formData, company_id: compId, user_id: '' });
                         loadUsers(compId);
                       }}
-                      SelectProps={{ native: true }}
-                      InputLabelProps={{ shrink: true }}
-                      required
-                    >
-                      <option value="" disabled hidden>Select Company</option>
-                      {companies.map((comp) => (
-                        <option key={comp.id} value={comp.id}>
-                          {comp.company_name}
-                        </option>
-                      ))}
-                    </TextField>
+                      label="Company *"
+                      placeholder="Select Company"
+                    />
                   ) : (
                     <TextField
                       fullWidth
@@ -799,26 +873,37 @@ const Voters = () => {
                 )}
               </Grid>
 
+              {editingVoter && (
+                <Grid item xs={12} sm={6}>
+                  <SearchableSelect
+                    options={[
+                      { id: 1, name: 'Active' },
+                      { id: 0, name: 'Inactive' }
+                    ]}
+                    getOptionLabel={(opt) => opt.name}
+                    getOptionValue={(opt) => opt.id}
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    label="Status"
+                    margin="dense"
+                  />
+                </Grid>
+              )}
+
               {!editingVoter && (
                 <>
                   <Grid item xs={12} sm={6}>
-                    <FormControl fullWidth>
-                      <InputLabel id="voter-user-link-label">Link to Existing User</InputLabel>
-                      <Select
-                        labelId="voter-user-link-label"
-                        label="Link to Existing User"
-                        value={formData.user_id}
-                        onChange={(e) => setFormData({...formData, user_id: e.target.value})}
-                        disabled={isPlatformAdmin && !formData.company_id}
-                      >
-                        <MenuItem value="">Create New User (Unlinked)</MenuItem>
-                        {users.map((u) => (
-                          <MenuItem key={u.id} value={u.id}>
-                            {u.name} ({u.email})
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
+                    <SearchableSelect
+                      options={users}
+                      getOptionLabel={(u) => `${u.name} (${u.email})`}
+                      getOptionValue={(u) => u.id}
+                      value={formData.user_id}
+                      onChange={(e) => setFormData({...formData, user_id: e.target.value})}
+                      label="Link to Existing User"
+                      disabled={isPlatformAdmin && !formData.company_id}
+                      allOptionLabel="Create New User (Unlinked)"
+                      allOptionValue=""
+                    />
                   </Grid>
                   <Grid item xs={12}>
                     <Typography variant="body2" color="textSecondary">
@@ -1110,6 +1195,23 @@ const Voters = () => {
                   helperText="Automatic logout after inactivity"
                 />
               </Grid>
+
+              {editingVoter && (
+                <Grid item xs={12}>
+                  <FormControl fullWidth variant="outlined" sx={{ mt: 1 }}>
+                    <InputLabel id="voter-status-select-label">Status</InputLabel>
+                    <Select
+                      labelId="voter-status-select-label"
+                      value={formData.status ?? 1}
+                      label="Status"
+                      onChange={(e) => setFormData({ ...formData, status: Number(e.target.value) })}
+                    >
+                      <MenuItem value={1}>Active</MenuItem>
+                      <MenuItem value={0}>Inactive</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
             </Grid>
           </DialogContent>
           <DialogActions>

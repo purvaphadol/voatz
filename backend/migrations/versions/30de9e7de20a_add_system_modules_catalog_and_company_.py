@@ -21,6 +21,7 @@ def upgrade():
     op.create_table('system_modules',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('module_name', sa.String(length=100), nullable=False),
+    sa.Column('code', sa.String(length=50), nullable=True),
     sa.Column('route_name', sa.String(length=100), nullable=True),
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('icon', sa.String(length=100), nullable=True),
@@ -31,7 +32,8 @@ def upgrade():
     sa.Column('updated_by', sa.Integer(), nullable=True),
     sa.Column('status', sa.Integer(), nullable=False),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('module_name')
+    sa.UniqueConstraint('module_name'),
+    sa.UniqueConstraint('code')
     )
     op.create_table('company_modules',
     sa.Column('id', sa.Integer(), nullable=False),

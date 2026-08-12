@@ -43,10 +43,18 @@ def list_departments():
         return error
 
     # --- status filter ---
-    status_param = request.args.get('status', 'active').lower()
-    if status_param not in _STATUS_FILTER_MAP:
-        return jsonify({'error': 'Invalid status filter'}), 400
-    allowed = _STATUS_FILTER_MAP[status_param]
+    show_inactive_raw = request.args.get('show_inactive')
+    status_param = request.args.get('status', '').lower()
+    if status_param == 'all':
+        allowed = [STATUS_ACTIVE, STATUS_INACTIVE]
+    elif show_inactive_raw is not None and show_inactive_raw.lower() == 'true':
+        allowed = [STATUS_INACTIVE]
+    elif status_param == 'inactive':
+        allowed = [STATUS_INACTIVE]
+    elif status_param in _STATUS_FILTER_MAP:
+        allowed = _STATUS_FILTER_MAP[status_param]
+    else:
+        allowed = [STATUS_ACTIVE]
 
     if is_administrator():
         # Super Admin: query across all companies, optionally filtered
@@ -135,11 +143,25 @@ def create_department():
 
     cleaned_name = cleaned_data['department_name']
 
-    # Duplicate check excluding soft-deleted records
+    # Case-insensitive check for active vs inactive collisions
+    inactive_existing = Department.query.filter(
+        Department.department_name.ilike(cleaned_name),
+        Department.company_id == company_id,
+        Department.status == STATUS_INACTIVE
+    ).first()
+
+    if inactive_existing:
+        return jsonify({
+            'error': 'An inactive department with this name already exists in this company.',
+            'existing_id': inactive_existing.id,
+            'can_reactivate': True
+        }), 409
+
     if Department.query.filter(
         Department.department_name.ilike(cleaned_name),
-        Department.company_id == company_id
-    ).filter(Department.status != STATUS_INACTIVE).first():
+        Department.company_id == company_id,
+        Department.status == STATUS_ACTIVE
+    ).first():
         return jsonify({'error': 'Department name already exists in this company'}), 400
 
     department = Department()
@@ -159,6 +181,33 @@ def create_department():
     )
 
 
+@departments_bp.route('/<int:department_id>/status_dependents', methods=['GET'])
+@require_permission('Departments', 'view')
+def get_department_status_dependents(department_id):
+    """Retrieve dependent counts for status transitions (Inactive or Reactivate)."""
+    if is_administrator():
+        department = Department.query.filter(
+            Department.id == department_id,
+            Department.status != STATUS_DEACTIVATED
+        ).first_or_404()
+    else:
+        company_id = get_current_company_id()
+        department = Department.query.filter_by(
+            id=department_id, company_id=company_id
+        ).filter(Department.status != STATUS_DEACTIVATED).first_or_404()
+
+    from app.utils.cascade import count_dependents, count_reactivatable_dependents
+    dep_data = count_dependents('Department', department_id)
+    react_data = count_reactivatable_dependents('Department', department_id)
+
+    return jsonify({
+        'department_id': department_id,
+        'current_status': department.status,
+        'deactivate_dependents': dep_data,
+        'reactivate_dependents': react_data
+    })
+
+
 @departments_bp.route('/<int:department_id>', methods=['GET'])
 @require_permission('Departments', 'view')
 def get_department(department_id):
@@ -166,7 +215,6 @@ def get_department(department_id):
     if is_administrator():
         department = Department.query.outerjoin(Company).filter(
             Department.id == department_id,
-            Department.status != STATUS_INACTIVE,
             Department.status != STATUS_DEACTIVATED,
         ).first_or_404()
     else:
@@ -174,7 +222,6 @@ def get_department(department_id):
         department = Department.query.outerjoin(Company).filter(
             Department.id == department_id,
             Department.company_id == company_id,
-            Department.status != STATUS_INACTIVE,
             Department.status != STATUS_DEACTIVATED,
         ).first_or_404()
     return jsonify({
@@ -198,18 +245,18 @@ def update_department(department_id):
     if is_administrator():
         department = Department.query.filter(
             Department.id == department_id,
-            Department.status != STATUS_INACTIVE
+            Department.status != STATUS_DEACTIVATED
         ).first_or_404()
     else:
         company_id = get_current_company_id()
         department = Department.query.filter_by(
             id=department_id, company_id=company_id
-        ).filter(Department.status != STATUS_INACTIVE).first_or_404()
+        ).filter(Department.status != STATUS_DEACTIVATED).first_or_404()
     
     # Needs to extract company_id from department for duplication checks
     company_id = department.company_id
     
-    data = request.get_json()
+    data = request.get_json() or {}
 
     cleaned_data, error = validate_department_input(data, is_create=False)
     if error:
@@ -229,14 +276,34 @@ def update_department(department_id):
     if 'description' in cleaned_data:
         department.description = cleaned_data['description']
 
+    # Status transition logic
+    old_status = department.status
+    new_status = data.get('status', old_status)
+
+    from app.utils.cascade import cascade_set_inactive, cascade_reactivate
+    reactivate_summary = None
+
+    if old_status != new_status:
+        if new_status == STATUS_INACTIVE:
+            department.status = STATUS_INACTIVE
+            cascade_set_inactive('Department', department_id)
+        elif new_status == STATUS_ACTIVE:
+            department.status = STATUS_ACTIVE
+            reactivate_summary = cascade_reactivate('Department', department_id)
+
     set_audit_fields(department, is_create=False)
     try:
         db.session.flush()
     except Exception:
         db.session.rollback()
-        return jsonify({'error': 'Department name already exists in this company'}), 400
+        return jsonify({'error': 'Department update failed'}), 400
+
+    response_data = {'message': 'Department updated'}
+    if reactivate_summary:
+        response_data['reactivate_summary'] = reactivate_summary
+
     return safe_commit(
-        (jsonify({'message': 'Department updated'}), 200),
+        (jsonify(response_data), 200),
         'Internal server error during department update'
     )
 
@@ -250,13 +317,13 @@ def delete_department(department_id):
     if is_administrator():
         department = Department.query.filter(
             Department.id == department_id,
-            Department.status != STATUS_INACTIVE
+            Department.status != STATUS_DEACTIVATED
         ).first_or_404()
     else:
         company_id = get_current_company_id()
         department = Department.query.filter_by(
             id=department_id, company_id=company_id
-        ).filter(Department.status != STATUS_INACTIVE).first_or_404()
+        ).filter(Department.status != STATUS_DEACTIVATED).first_or_404()
 
     force = request.args.get('force', 'false').lower() == 'true'
     dry_run = request.args.get('dry_run', 'false').lower() == 'true'
@@ -266,12 +333,12 @@ def delete_department(department_id):
 
     active_roles = Role.query.filter(
         Role.department_id == department_id,
-        Role.status != STATUS_INACTIVE
+        Role.status != STATUS_DEACTIVATED
     ).count()
 
     active_users = User.query.filter(
         User.department_id == department_id,
-        User.status != STATUS_INACTIVE
+        User.status != STATUS_DEACTIVATED
     ).count()
 
     if (active_roles > 0 or active_users > 0) and not force:
@@ -297,47 +364,24 @@ def delete_department(department_id):
     if dry_run:
         return jsonify({'message': 'Pre-flight check passed', 'can_delete': True}), 200
 
+    import time
+    ts = int(time.time())
+
     # If force=true, deactivate assigned department roles
     if active_roles > 0:
-        dept_roles = Role.query.filter(Role.department_id == department_id, Role.status != STATUS_INACTIVE).all()
+        dept_roles = Role.query.filter(Role.department_id == department_id, Role.status != STATUS_DEACTIVATED).all()
         for r in dept_roles:
-            r.status = STATUS_INACTIVE
+            r.status = STATUS_DEACTIVATED
+            r.role_name = f"{r.role_name}_deleted_{r.id}_{ts}"
             set_audit_fields(r, is_create=False)
 
     # Soft delete department and unassign any assigned users
-    department.status = STATUS_INACTIVE
+    department.status = STATUS_DEACTIVATED
+    if not "_deleted_" in department.department_name:
+        department.department_name = f"{department.department_name}_deleted_{department.id}_{ts}"
     User.query.filter_by(department_id=department_id).update({'department_id': None})
     set_audit_fields(department, is_create=False)
     return safe_commit(
         (jsonify({'message': 'Department deleted successfully'}), 200),
         'Internal server error during department deletion'
-    )
-
-
-@departments_bp.route('/<int:department_id>/permanent', methods=['DELETE'])
-@require_permission('Departments', 'delete')
-@audit_action('permanent_delete_department', module='Departments',
-              description='Permanently deleted a department',
-              get_target_id=lambda *a, **kw: kw.get('department_id'))
-def permanent_delete_department(department_id):
-    """Permanently delete a department (set status to STATUS_DEACTIVATED).
-
-    Platform Administrators only.  The department must already be soft-deleted
-    (STATUS_INACTIVE) before it can be permanently deleted.
-    """
-    if not is_administrator():
-        return jsonify({'error': 'Forbidden: Only platform Administrators can permanently delete departments'}), 403
-
-    department = Department.query.filter_by(id=department_id).first()
-    if not department or department.status == STATUS_DEACTIVATED:
-        return jsonify({'error': 'Department not found'}), 404
-
-    if department.status != STATUS_INACTIVE:
-        return jsonify({'error': 'Deactivate this record before permanently deleting it'}), 400
-
-    department.status = STATUS_DEACTIVATED
-    set_audit_fields(department, is_create=False)
-    return safe_commit(
-        (jsonify({'message': 'Department permanently deleted'}), 200),
-        'Internal server error during permanent department deletion'
     )
