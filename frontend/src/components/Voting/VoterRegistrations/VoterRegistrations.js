@@ -50,7 +50,6 @@ import {
 import {
   Add as AddIcon,
   Edit as EditIcon,
-  Delete as DeleteIcon,
   Visibility as ViewIcon,
   CheckCircle as ApproveIcon,
   Cancel as RejectIcon,
@@ -85,7 +84,6 @@ import {
 import { voterRegistrationsAPI, electionsAPI, votersAPI } from '../../../services/api';
 import { usePermissions } from '../../../contexts/PermissionContext';
 import SearchableSelect from '../../Common/SearchableSelect';
-import { useDeleteWithDependencies } from '../../../hooks/useDeleteWithDependencies';
 import { showErrorAlert } from '../../../utils/swal';
 import { capitalizeError } from '../../../utils/validators';
 
@@ -194,7 +192,6 @@ const VoterRegistrations = () => {
   const canView = hasPermission('VoterRegistrations', 'view');
   const canCreate = hasPermission('VoterRegistrations', 'create');
   const canUpdate = hasPermission('VoterRegistrations', 'update');
-  const canDelete = hasPermission('VoterRegistrations', 'delete');
 
   useEffect(() => {
     if (canView) {
@@ -370,15 +367,6 @@ const VoterRegistrations = () => {
       setError(capitalizeError('Failed to load registration details'));
     }
   };
-
-  const handleDelete = useDeleteWithDependencies({
-    deleteApi: voterRegistrationsAPI.delete,
-    itemLabel: 'this registration',
-    successMsg: 'Registration deleted successfully',
-    forceSuccessMsg: 'Registration force-deleted successfully',
-    forceConfirmMessage: 'Are you sure you want to force delete this registration?',
-    onSuccess: () => { loadRegistrations(); loadStats(); },
-  });
 
   const handleApprove = (registration) => {
     setProcessingRegistration(registration);
@@ -645,22 +633,17 @@ const VoterRegistrations = () => {
                   onClick={() => setVerificationDialogOpen(true)}
                   sx={{ color: 'info.main' }}
               />
+              </Tooltip>,
+              <Tooltip title="Reject this registration with reason and notify the voter" key="reject">
+                <GridActionsCellItem
+                  icon={<RejectIcon />}
+                  label="Reject"
+                  onClick={() => handleReject(params.row)}
+                  sx={{ color: 'error.main' }}
+                />
               </Tooltip>
             );
           }
-        }
-        
-        if (canDelete) {
-          actions.push(
-            <Tooltip title="Permanently delete this registration (cannot be undone)" key="delete">
-            <GridActionsCellItem
-              icon={<DeleteIcon />}
-              label="Delete"
-              onClick={() => handleDelete(params.row.id)}
-                sx={{ color: 'error.main' }}
-            />
-            </Tooltip>
-          );
         }
         
         return actions;

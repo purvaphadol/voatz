@@ -1180,5 +1180,5 @@ if failed:
         print(f"     Status  : {fd['response_status']}")
         print(f"     RespBody: {json.dumps(fd['response_body'], indent=6)}")
 
-print("\n" + "═"*70)
-sys.exit(0 if not failed else 1)
+if __name__ == '__main__':
+    sys.exit(0 if not failed else 1)

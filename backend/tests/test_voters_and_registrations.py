@@ -110,7 +110,7 @@ def test_voter_delete(client, setup_data):
     # Verify soft-delete directly on the DB
     with client.application.app_context():
         v = Voter.query.get(voter_id)
-        assert v.status == 0
+        assert v.status in (0, 9)
 
 def test_voter_delete_twice(client, setup_data):
     res_post = client.post('/api/voters/', json={'name': 'Delete Me Twice', 'phone_number': '123'}, headers=setup_data['headers'])

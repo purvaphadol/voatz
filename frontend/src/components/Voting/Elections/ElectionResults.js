@@ -101,7 +101,10 @@ const ElectionResults = ({ election, open, onClose }) => {
       return;
     }
 
+    const isWithheld = !election.results_published && candidatesData.some(c => c.total_votes_received === null || c.total_votes_received === undefined);
+
     const resultsData = {
+      isWithheld: isWithheld,
       totalVotes: election.total_votes_cast || 0,
       totalRegistered: election.total_registered_voters || 0,
       turnoutPercentage: election.turnout_percentage || 0,
@@ -110,16 +113,28 @@ const ElectionResults = ({ election, open, onClose }) => {
 
     ballotsData.forEach(ballot => {
       const ballotCandidates = candidatesData.filter(c => c.ballot_id === ballot.id);
-      const totalBallotVotes = ballotCandidates.reduce((sum, c) => sum + (c.total_votes_received || 0), 0);
+      const hasValidVotes = ballotCandidates.some(c => c.total_votes_received !== null && c.total_votes_received !== undefined);
+      const totalBallotVotes = hasValidVotes ? ballotCandidates.reduce((sum, c) => sum + (c.total_votes_received || 0), 0) : null;
 
-      const candidateResults = ballotCandidates.map(candidate => ({
-        id: candidate.id,
-        name: candidate.name,
-        party: candidate.party_affiliation || 'Independent',
-        votes: candidate.total_votes_received || 0,
-        percentage: totalBallotVotes > 0 ? ((candidate.total_votes_received || 0) / totalBallotVotes) * 100 : 0,
-        isWinner: candidate.rank_position === 1
-      })).sort((a, b) => b.votes - a.votes);
+      const maxVotes = hasValidVotes ? Math.max(...ballotCandidates.map(c => c.total_votes_received || 0)) : 0;
+
+      const candidateResults = ballotCandidates.map(candidate => {
+        const votes = candidate.total_votes_received;
+        const percentage = (votes !== null && votes !== undefined && totalBallotVotes > 0)
+          ? ((votes) / totalBallotVotes) * 100
+          : null;
+        
+        const isWinner = candidate.rank_position === 1 || (hasValidVotes && votes > 0 && votes === maxVotes);
+
+        return {
+          id: candidate.id,
+          name: candidate.name,
+          party: candidate.party_display || candidate.party || candidate.party_affiliation || 'Independent',
+          votes: votes,
+          percentage: percentage,
+          isWinner: isWinner
+        };
+      }).sort((a, b) => (b.votes || 0) - (a.votes || 0));
 
       resultsData.ballotResults.push({
         ballotId: ballot.id,
@@ -256,6 +271,11 @@ const ElectionResults = ({ election, open, onClose }) => {
           </Alert>
         ) : results ? (
           <Box>
+            {results.isWithheld && (
+              <Alert severity="warning" sx={{ mb: 3 }}>
+                Results not yet published. Detailed candidate vote counts are withheld until the election results are officially published by an administrator.
+              </Alert>
+            )}
             {/* Overview Statistics */}
             <Grid container spacing={2} sx={{ mb: 3 }}>
               <Grid item xs={12} sm={6} md={3}>
@@ -322,7 +342,7 @@ const ElectionResults = ({ election, open, onClose }) => {
                   </Typography>
                   
                   <Typography variant="body2" color="textSecondary" gutterBottom>
-                    Total Votes: {ballot.totalVotes.toLocaleString()} • Type: {ballot.ballotType}
+                    Total Votes: {ballot.totalVotes !== null && ballot.totalVotes !== undefined ? ballot.totalVotes.toLocaleString() : 'Withheld'} • Type: {ballot.ballotType}
                   </Typography>
 
                   <Grid container spacing={2}>
@@ -356,8 +376,12 @@ const ElectionResults = ({ election, open, onClose }) => {
                                   </Box>
                                 </TableCell>
                                 <TableCell>{candidate.party}</TableCell>
-                                <TableCell align="right">{candidate.votes.toLocaleString()}</TableCell>
-                                <TableCell align="right">{candidate.percentage.toFixed(1)}%</TableCell>
+                                <TableCell align="right">
+                                  {candidate.votes !== null && candidate.votes !== undefined ? candidate.votes.toLocaleString() : 'N/A'}
+                                </TableCell>
+                                <TableCell align="right">
+                                  {candidate.percentage !== null && candidate.percentage !== undefined ? `${candidate.percentage.toFixed(1)}%` : 'N/A'}
+                                </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>

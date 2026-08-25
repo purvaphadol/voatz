@@ -130,10 +130,19 @@ class Vote(db.Model, TimestampAuditMixin):
         self.tracking_code = ''.join(secrets.choice(alphabet) for _ in range(12))
         return self.tracking_code
     
+    def _format_cast_time(self):
+        """Format vote_cast_time consistently regardless of tzinfo presence (naive vs aware UTC)"""
+        if not self.vote_cast_time:
+            return ""
+        if isinstance(self.vote_cast_time, datetime):
+            return self.vote_cast_time.replace(tzinfo=None).isoformat()
+        return str(self.vote_cast_time)
+
     def generate_vote_hash(self):
         """Generate integrity hash for vote data"""
         vote_string = json.dumps(self.vote_data, sort_keys=True)
-        hash_input = f"{self.voter_id}{self.ballot_id}{vote_string}{self.vote_cast_time.isoformat()}"
+        cast_time_str = self._format_cast_time()
+        hash_input = f"{self.voter_id}{self.ballot_id}{vote_string}{cast_time_str}"
         self.vote_hash = hashlib.sha256(hash_input.encode()).hexdigest()
         return self.vote_hash
     
@@ -142,6 +151,46 @@ class Vote(db.Model, TimestampAuditMixin):
         verification_string = f"{self.vote_hash}{self.voter_id}{self.device_id or ''}"
         self.verification_hash = hashlib.sha256(verification_string.encode()).hexdigest()
         return self.verification_hash
+
+    def compute_vote_hash(self):
+        """Recompute expected vote hash from current fields without mutating self.vote_hash"""
+        vote_string = json.dumps(self.vote_data, sort_keys=True) if self.vote_data is not None else ""
+        cast_time_str = self._format_cast_time()
+        hash_input = f"{self.voter_id}{self.ballot_id}{vote_string}{cast_time_str}"
+        return hashlib.sha256(hash_input.encode()).hexdigest()
+
+    def compute_verification_hash(self, current_vote_hash=None):
+        """Recompute expected verification hash without mutating self.verification_hash"""
+        v_hash = current_vote_hash or self.vote_hash or ""
+        verification_string = f"{v_hash}{self.voter_id}{self.device_id or ''}"
+        return hashlib.sha256(verification_string.encode()).hexdigest()
+
+    def verify_integrity(self):
+        """
+        Verify vote integrity by recomputing hashes from current stored fields and comparing to stored hashes.
+
+        NOTE ON SECURITY SCOPE & LIMITATIONS:
+        This hash verification can catch accidental data corruption or an unintended application bug
+        that mutates a vote row after casting, but it cannot catch deliberate tampering by anyone with DB write access,
+        since they could recompute a matching hash.
+        """
+        expected_vote_hash = self.compute_vote_hash()
+        vote_hash_valid = (self.vote_hash == expected_vote_hash)
+
+        expected_ver_hash = self.compute_verification_hash(expected_vote_hash)
+        ver_hash_valid = (self.verification_hash == expected_ver_hash)
+
+        is_valid = vote_hash_valid and ver_hash_valid
+        return {
+            'is_valid': is_valid,
+            'integrity_verified': is_valid,
+            'vote_hash_match': vote_hash_valid,
+            'verification_hash_match': ver_hash_valid,
+            'stored_vote_hash': self.vote_hash,
+            'computed_vote_hash': expected_vote_hash,
+            'stored_verification_hash': self.verification_hash,
+            'computed_verification_hash': expected_ver_hash
+        }
     
     def add_audit_event(self, event_type, description, additional_data=None):
         """Add an event to the audit trail"""
@@ -160,27 +209,37 @@ class Vote(db.Model, TimestampAuditMixin):
         """Get list of selected candidate IDs"""
         if not self.vote_data:
             return []
-        
-        # Support both 'candidate_selections' (mobile app) and 'selections' (backward compatibility)
-        if 'candidate_selections' in self.vote_data:
-            return self.vote_data['candidate_selections']
-        elif 'selections' in self.vote_data:
-            return self.vote_data['selections']
-        else:
-            return []
+        data = self.vote_data
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except Exception:
+                return []
+        if isinstance(data, dict):
+            if 'candidate_selections' in data:
+                return data['candidate_selections']
+            elif 'selections' in data:
+                return data['selections']
+            elif 'selected_candidates' in data:
+                return data['selected_candidates']
+        return []
     
     def get_write_in_candidates(self):
         """Get list of write-in candidate names"""
         if not self.vote_data:
             return []
-            
-        # Support both 'write_in_candidates' (mobile app) and 'write_ins' (backward compatibility)
-        if 'write_in_candidates' in self.vote_data:
-            return self.vote_data['write_in_candidates']
-        elif 'write_ins' in self.vote_data:
-            return self.vote_data['write_ins']
-        else:
-            return []
+        data = self.vote_data
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except Exception:
+                return []
+        if isinstance(data, dict):
+            if 'write_in_candidates' in data:
+                return data['write_in_candidates']
+            elif 'write_ins' in data:
+                return data['write_ins']
+        return []
     
     def validate_vote_data(self):
         """Validate vote data against ballot rules"""
@@ -200,7 +259,8 @@ class Vote(db.Model, TimestampAuditMixin):
         
         # Validate candidate IDs exist
         from app.models.candidate import Candidate
-        valid_candidate_ids = [c.id for c in self.ballot.candidates if c.is_active]
+        from app.utils.constants import STATUS_ACTIVE
+        valid_candidate_ids = [c.id for c in self.ballot.candidates if c.is_active and c.status == STATUS_ACTIVE]
         
         for candidate_id in selections:
             if candidate_id not in valid_candidate_ids:

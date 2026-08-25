@@ -117,27 +117,46 @@ const ElectionWorkflow = ({ election, onStatusChange, open, onClose }) => {
   };
 
   const getNextPossibleStatuses = (currentStatus) => {
+    // Note: Backend status transitions strictly produce 'draft', 'active', 'completed', 'cancelled'.
+    // Aliases/legacy statuses like 'published', 'voting', 'auditing' map to their corresponding lifecycle phase for UI safety.
     switch (currentStatus) {
-      case 'draft': return ['active', 'cancelled'];
-      case 'active': return ['completed', 'cancelled'];
-      case 'completed': return [];
-      case 'cancelled': return ['draft'];
-      default: return [];
+      case 'draft':
+      case 'published':
+        return ['active', 'cancelled'];
+      case 'active':
+      case 'voting':
+        return ['completed', 'cancelled'];
+      case 'completed':
+      case 'auditing':
+        return [];
+      case 'cancelled':
+        return ['draft'];
+      default:
+        return [];
     }
   };
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'draft': return 'default';
-      case 'active': return 'info';
-      case 'completed': return 'success';
-      case 'cancelled': return 'error';
-      default: return 'default';
+      case 'draft':
+      case 'published':
+        return 'default';
+      case 'active':
+      case 'voting':
+        return 'info';
+      case 'completed':
+      case 'auditing':
+        return 'success';
+      case 'cancelled':
+        return 'error';
+      default:
+        return 'default';
     }
   };
 
   const getCurrentStep = () => {
-    return workflowSteps.findIndex(step => step.key === election?.status) || 0;
+    const idx = workflowSteps.findIndex(step => step.key === election?.status);
+    return idx === -1 ? 0 : idx;
   };
 
   const nextStatuses = getNextPossibleStatuses(election?.status);

@@ -12,6 +12,7 @@ from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
 from app.utils.constants import STATUS_INACTIVE, STATUS_ACTIVE, STATUS_DEACTIVATED
 from app.utils.query_helpers import get_active_elections_query, get_election_registrations_query
+from app.utils.cascade import count_dependents, count_reactivatable_dependents, cascade_set_inactive, cascade_reactivate
 from sqlalchemy import or_, and_
 from datetime import datetime, timedelta, timezone
 import secrets
@@ -25,6 +26,33 @@ def _safe_prop(obj, prop, default=None):
         return getattr(obj, prop)
     except TypeError:
         return default
+
+@elections_bp.route('/<int:election_id>/status_dependents', methods=['GET'])
+@require_permission('Elections', 'view')
+def get_election_status_dependents(election_id):
+    """Retrieve active dependent counts for an election."""
+    if is_administrator():
+        election = Election.query.filter(Election.id == election_id, Election.status != 'cancelled').first_or_404()
+    else:
+        company_id = get_current_company_id()
+        election = Election.query.filter(Election.id == election_id, Election.company_id == company_id, Election.status != 'cancelled').first_or_404()
+
+    from app.models.voter_registration import VoterRegistration
+    from app.models.candidate import Candidate
+    active_regs = VoterRegistration.query.filter_by(election_id=election_id).filter(VoterRegistration.status.notin_(['inactive', 'cancelled', 'deleted'])).count()
+    active_ballots = Ballot.query.filter_by(election_id=election_id, is_active=True).count()
+    active_candidates = Candidate.query.join(Ballot).filter(Ballot.election_id == election_id).filter(Candidate.status == STATUS_ACTIVE, Candidate.is_active == True).count()
+
+    deps = {
+        'voter_registrations': active_regs,
+        'ballots': active_ballots,
+        'candidates': active_candidates
+    }
+    return jsonify({
+        'current_status': election.status,
+        'dependents': deps
+    })
+
 
 @elections_bp.route('/', methods=['GET'])
 @require_permission('Elections', 'view')
@@ -350,8 +378,13 @@ def update_election(election_id):
         election.paper_trail_required = data['paper_trail_required']
     
     # Update status
-    if data.get('status'):
-        election.status = data['status']
+    if 'status' in data:
+        new_status = data['status']
+        if new_status in [STATUS_INACTIVE, 'inactive', 'deactivated', STATUS_DEACTIVATED] and election.status != new_status:
+            cascade_set_inactive('Election', election.id)
+        elif new_status in [STATUS_ACTIVE, 'active'] and election.status != new_status:
+            cascade_reactivate('Election', election.id)
+        election.status = new_status
     
     set_audit_fields(election, is_create=False)
     
@@ -388,7 +421,7 @@ def delete_election(election_id):
 
     active_regs = VoterRegistration.query.filter_by(election_id=election_id).filter(VoterRegistration.status.notin_(['inactive', 'cancelled', 'deleted'])).count()
     active_ballots = Ballot.query.filter_by(election_id=election_id, is_active=True).count()
-    active_candidates = Candidate.query.join(Ballot).filter(Ballot.election_id == election_id).filter(Candidate.status != STATUS_INACTIVE).count()
+    active_candidates = Candidate.query.join(Ballot).filter(Ballot.election_id == election_id).filter(Candidate.status != STATUS_DEACTIVATED).count()
 
     total_active_deps = active_regs + active_ballots + active_candidates
 
@@ -454,6 +487,31 @@ def delete_election(election_id):
         'Failed to delete election'
     )
 
+def validate_election_activation(election_id):
+    """
+    Validates that an election can be activated:
+    1. Must have at least one active ballot.
+    2. Every active ballot must have at least one active candidate.
+    """
+    from app.models.candidate import Candidate
+    from app.utils.constants import STATUS_ACTIVE, STATUS_DEACTIVATED
+
+    active_ballots = Ballot.query.filter_by(election_id=election_id, is_active=True).filter(Ballot.status != STATUS_DEACTIVATED).all()
+    if not active_ballots:
+        return 'Election must have at least one active ballot'
+
+    empty_ballots = []
+    for ballot in active_ballots:
+        active_candidate_count = Candidate.query.filter_by(ballot_id=ballot.id, is_active=True).filter(Candidate.status == STATUS_ACTIVE).count()
+        if active_candidate_count == 0:
+            empty_ballots.append(ballot.title or f"Ballot #{ballot.id}")
+
+    if empty_ballots:
+        names_str = ", ".join(f"'{name}'" for name in empty_ballots)
+        return f"Cannot activate election: the following ballot(s) have no active candidates: {names_str}"
+
+    return None
+
 @elections_bp.route('/<int:election_id>/activate', methods=['POST'])
 @require_permission('Elections', 'update')
 @audit_action('activate_election', module='Elections')
@@ -470,14 +528,15 @@ def activate_election(election_id):
     if election.status != 'draft':
         return jsonify({'error': 'Only draft elections can be activated'}), 400
     
-    # Check if election has ballots
-    ballot_count = Ballot.query.filter_by(election_id=election_id, is_active=True).count()
-    if ballot_count == 0:
-        return jsonify({'error': 'Election must have at least one active ballot'}), 400
+    validation_error = validate_election_activation(election_id)
+    if validation_error:
+        return jsonify({'error': validation_error}), 400
     
-    # Check dates
+    # Check dates safely handling tz-naive vs tz-aware datetimes
     now = datetime.now(timezone.utc)
-    if election.start_date <= now and election.end_date <= now:
+    start_dt = election.start_date.replace(tzinfo=timezone.utc) if election.start_date and election.start_date.tzinfo is None else election.start_date
+    end_dt = election.end_date.replace(tzinfo=timezone.utc) if election.end_date and election.end_date.tzinfo is None else election.end_date
+    if start_dt and end_dt and start_dt <= now and end_dt <= now:
         return jsonify({'error': 'Election dates are in the past'}), 400
     
     election.status = 'active'
@@ -554,10 +613,9 @@ def change_election_status(election_id):
     
     # Business logic validation
     if new_status == 'active':
-        # Check if election has ballots
-        ballot_count = Ballot.query.filter_by(election_id=election_id, is_active=True).count()
-        if ballot_count == 0:
-            return jsonify({'error': 'Election must have at least one active ballot to activate'}), 400
+        validation_error = validate_election_activation(election_id)
+        if validation_error:
+            return jsonify({'error': validation_error}), 400
     
     # Allow status change (this bypasses the normal update restrictions)
     election.status = new_status

@@ -254,7 +254,7 @@ def get_voter_registration(registration_id):
         VoterRegistration.company_id == company_id,
         VoterRegistration.status != 'deleted',
         Voter.status != STATUS_INACTIVE,
-        Election.status != str(STATUS_INACTIVE)
+        Election.status != 'cancelled'
     ).first_or_404()
     
     return jsonify({

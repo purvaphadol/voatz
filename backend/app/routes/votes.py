@@ -18,6 +18,7 @@ import logging
 from app.utils.validators import parse_pagination
 from app.utils.db_utils import safe_commit
 from app.utils.audit import set_audit_fields, audit_action
+from app.utils.constants import STATUS_ACTIVE, STATUS_INACTIVE, STATUS_DEACTIVATED
 
 logger = logging.getLogger(__name__)
 
@@ -131,12 +132,15 @@ def cast_vote():
     if not voter:
         return jsonify({'error': 'Voter not found'}), 404
 
+    if voter.status != STATUS_ACTIVE or (hasattr(voter, 'is_active') and not voter.is_active):
+        return jsonify({'error': 'Voter is not active'}), 400
+
     # Validate ballot exists and belongs to company
     ballot = Ballot.query.filter_by(id=ballot_id, company_id=company_id).first()
     if not ballot:
         return jsonify({'error': 'Ballot not found'}), 404
 
-    if not ballot.is_active:
+    if not ballot.is_active or ballot.status != STATUS_ACTIVE:
         return jsonify({'error': 'Ballot is not available'}), 400
     if not ballot.is_published:
         return jsonify({'error': 'Ballot is not published'}), 400
@@ -156,7 +160,7 @@ def cast_vote():
         election_id=ballot.election_id,
         status='approved'
     ).first()
-    if not registration:
+    if not registration or getattr(registration, 'status', None) in [STATUS_INACTIVE, STATUS_DEACTIVATED, 0, '0', 'cancelled', 'expired']:
         return jsonify({'error': 'Voter is not registered for this election'}), 400
 
     # Enforce ballot jurisdiction restriction
@@ -193,7 +197,7 @@ def cast_vote():
 
     # Set timestamps FIRST (needed for hash generation)
     vote.vote_start_time = datetime.fromisoformat(data['vote_start_time'].replace('Z', '+00:00')) if data.get('vote_start_time') else None
-    vote.vote_cast_time = datetime.now(timezone.utc)
+    vote.vote_cast_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Set verification status
     vote.biometric_verified = data.get('biometric_verified', False)
@@ -270,6 +274,8 @@ def get_vote(vote_id):
                 'party_abbreviation': candidate.party_abbreviation
             })
     
+    integrity_result = vote.verify_integrity()
+
     return jsonify({
         'id': vote.id,
         'vote_id': vote.vote_id,
@@ -303,6 +309,8 @@ def get_vote(vote_id):
         'timezone': vote.timezone,
         'vote_hash': vote.vote_hash,
         'verification_hash': vote.verification_hash,
+        'integrity_verified': integrity_result['integrity_verified'],
+        'integrity_check': integrity_result,
         'selected_candidates': selected_candidates,
         'write_in_candidates': vote.get_write_in_candidates(),
         'audit_trail': vote.audit_trail,
@@ -312,6 +320,30 @@ def get_vote(vote_id):
         'updated_at': vote.updated_at.isoformat() if vote.updated_at else None
     })
 
+@votes_bp.route('/<int:vote_id>/verify-integrity', methods=['GET', 'POST'])
+@require_permission('Votes', 'view')
+def verify_vote_integrity(vote_id):
+    """
+    Recompute and verify vote hash integrity against stored values.
+    Returns HTTP 200 with integrity details, or HTTP 400 if hash mismatch detected.
+    """
+    company_id = get_current_company_id()
+    vote = Vote.query.filter_by(id=vote_id, company_id=company_id).first_or_404()
+    integrity_result = vote.verify_integrity()
+    
+    if not integrity_result['is_valid']:
+        vote.add_audit_event('integrity_check_failed', 'Vote hash mismatch detected', integrity_result)
+        db.session.commit()
+        return jsonify({
+            'error': 'Vote integrity verification failed: stored hash does not match computed hash',
+            'integrity_check': integrity_result
+        }), 400
+
+    return jsonify({
+        'message': 'Vote hash integrity verified successfully',
+        'integrity_check': integrity_result
+    }), 200
+
 @votes_bp.route('/<int:vote_id>/verify', methods=['POST'])
 @require_permission('Votes', 'update')
 @audit_action('verify_vote', module='Votes')
@@ -320,9 +352,20 @@ def verify_vote(vote_id):
     company_id = get_current_company_id()
     current_user = get_current_user()
     vote = Vote.query.filter_by(id=vote_id, company_id=company_id).first_or_404()
-    data = request.get_json()
     
-    verification_type = data.get('verification_type')  # biometric, device, identity, all
+    integrity_result = vote.verify_integrity()
+    if not integrity_result['is_valid']:
+        vote.add_audit_event('integrity_check_failed', 'Attempted verification on vote with hash mismatch', integrity_result)
+        set_audit_fields(vote, is_create=False)
+        db.session.commit()
+        return jsonify({
+            'error': 'Cannot verify vote: cryptographic hash mismatch detected (possible data tampering or corruption)',
+            'integrity_check': integrity_result
+        }), 400
+
+    data = request.get_json() or {}
+    
+    verification_type = data.get('verification_type')  # biometric, device, identity, all, integrity
     
     if verification_type == 'biometric':
         vote.biometric_verified = True
@@ -333,16 +376,17 @@ def verify_vote(vote_id):
     elif verification_type == 'identity':
         vote.identity_verified = True
         vote.add_audit_event('identity_verified', 'Identity verification completed')
-    elif verification_type == 'all':
+    elif verification_type in ['all', 'integrity']:
         vote.biometric_verified = True
         vote.device_verified = True
         vote.identity_verified = True
-        vote.add_audit_event('full_verification', 'All verification types completed')
+        vote.add_audit_event('full_verification', 'All verification types and integrity check completed')
     
-    # Update vote status if fully verified
+    # Update vote status if fully verified and integrity valid
     is_fully_verified = (vote.biometric_verified and 
                          vote.device_verified and 
-                         vote.identity_verified)
+                         vote.identity_verified and
+                         integrity_result['is_valid'])
     if is_fully_verified:
         vote.vote_status = 'verified'
         vote.processing_status = 'processed'
@@ -352,7 +396,7 @@ def verify_vote(vote_id):
     set_audit_fields(vote, is_create=False)
     
     return safe_commit(
-        (jsonify({'message': f'Vote {verification_type} verification updated successfully'}), 200),
+        (jsonify({'message': f'Vote {verification_type} verification updated successfully', 'integrity_check': integrity_result}), 200),
         'Failed to verify vote'
     )
 
@@ -560,7 +604,7 @@ def tally_election_votes(election_id):
     # Ensure election exists and belongs to company
     election = Election.query.filter_by(id=election_id, company_id=company_id).first_or_404()
     
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     auto_verify = data.get('auto_verify', True)
     
     # Fetch all uncounted votes for this election
@@ -596,21 +640,33 @@ def tally_election_votes(election_id):
             vote.vote_processing_time = datetime.now(timezone.utc)
             
             # Tally selected candidates
-            for candidate_id in vote.get_selected_candidates():
+            sel_cands = vote.get_selected_candidates()
+            for candidate_id in sel_cands:
                 candidate = db.session.get(Candidate, candidate_id)
                 if candidate:
-                    candidate.total_votes_received += 1
+                    candidate.total_votes_received = (candidate.total_votes_received or 0) + 1
             
             # Tally ballot
             ballot = db.session.get(Ballot, vote.ballot_id)
             if ballot:
-                ballot.total_votes_cast += 1
+                ballot.total_votes_cast = (ballot.total_votes_cast or 0) + 1
                 
-            election.total_votes_cast += 1
+            election.total_votes_cast = (election.total_votes_cast or 0) + 1
             vote.add_audit_event('vote_counted', 'Vote included in automated election tally')
             set_audit_fields(vote, is_create=False)
             counted_count += 1
             
+    # Update candidate rankings and vote percentages across all ballots in this election
+    ballots = Ballot.query.filter_by(election_id=election_id, company_id=company_id).all()
+    for ballot in ballots:
+        ballot_candidates = Candidate.query.filter_by(ballot_id=ballot.id).filter(Candidate.status != STATUS_DEACTIVATED).all()
+        total_ballot_votes = sum(c.total_votes_received or 0 for c in ballot_candidates)
+        sorted_candidates = sorted(ballot_candidates, key=lambda c: c.total_votes_received or 0, reverse=True)
+        for rank, c in enumerate(sorted_candidates, start=1):
+            c.rank_position = rank if (c.total_votes_received and c.total_votes_received > 0) else None
+            c.vote_percentage = (c.total_votes_received / total_ballot_votes * 100.0) if total_ballot_votes > 0 else 0.0
+            set_audit_fields(c, is_create=False)
+
     set_audit_fields(election, is_create=False)
     
     return safe_commit(

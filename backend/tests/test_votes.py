@@ -238,6 +238,52 @@ def test_cast_vote_duplicate(client, setup_data):
     res2 = cast_vote(client, headers, voter_id, ballot_id, candidate_id)
     assert res2.status_code == 400
 
+def test_cast_vote_duplicate_concurrent_integrity_error(client, setup_data):
+    """Test safe_commit catches unique_vote_per_ballot IntegrityError and returns 409 Conflict"""
+    from datetime import datetime, timezone
+    from app import db
+    from app.models.vote import Vote
+    from app.models.voter import Voter
+    from app.utils.db_utils import safe_commit
+    import uuid
+
+    headers = setup_data['headers']
+    election_id = create_election(client, headers)
+    ballot_id = create_ballot(client, headers, election_id)
+    candidate_id = create_candidate(client, headers, ballot_id)
+    voter_id_str = create_voter(client, headers)
+    register_voter(client, headers, voter_id_str, election_id)
+    publish_ballot(client, headers, ballot_id)
+    set_election_active(election_id)
+
+    # Cast first vote
+    res1 = cast_vote(client, headers, voter_id_str, ballot_id, candidate_id)
+    assert res1.status_code == 201
+
+    voter = Voter.query.get(voter_id_str)
+
+    # Manually stage a second vote for the same voter & ballot to trigger unique_vote_per_ballot constraint on commit
+    now = datetime.now(timezone.utc)
+    race_vote = Vote(
+        company_id=setup_data['company_id'],
+        voter_id=voter.id,
+        ballot_id=ballot_id,
+        election_id=election_id,
+        vote_data={'selections': [candidate_id]},
+        vote_cast_time=now,
+        vote_status='verified'
+    )
+    race_vote.vote_id = f"VOTE-{uuid.uuid4().hex[:12].upper()}"
+    race_vote.generate_tracking_code()
+    race_vote.generate_vote_hash()
+    race_vote.generate_verification_hash()
+
+    db.session.add(race_vote)
+    res_tuple = safe_commit(({'message': 'Vote cast successfully'}, 201), 'Failed to cast vote')
+    response_obj, status_code = res_tuple
+    assert status_code == 409
+    assert response_obj.get_json()['error'] == 'You have already voted on this ballot'
+
 def test_cast_vote_inactive_election(client, setup_data):
     """Use a draft (non-active) election — expect 400"""
     headers = setup_data['headers']

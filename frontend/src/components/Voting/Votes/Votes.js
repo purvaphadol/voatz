@@ -727,6 +727,16 @@ const Votes = () => {
                 </Typography>
               </Grid>
               
+              <Grid item xs={12} sm={6}>
+                <Typography variant="subtitle2">Hash Integrity Status</Typography>
+                <Chip
+                  label={selectedVote.integrity_verified ? "Integrity Verified (Match)" : "Hash Mismatch / Corrupted"}
+                  color={selectedVote.integrity_verified ? "success" : "error"}
+                  icon={selectedVote.integrity_verified ? <VerifiedIcon /> : <ErrorIcon />}
+                  sx={{ mt: 0.5 }}
+                />
+              </Grid>
+
               <Grid item xs={12}>
                 <Typography variant="subtitle2">Verification Hash</Typography>
                 <Typography variant="body1" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>

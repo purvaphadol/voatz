@@ -138,10 +138,10 @@ class VoterRegistration(db.Model, TimestampAuditMixin):
         """Get percentage of verification requirements completed"""
         total_checks = 4  # eligibility, identity, address, age
         completed_checks = sum([
-            self.eligibility_verified,
-            self.identity_verified,
-            self.address_verified,
-            self.age_verified
+            1 if self.eligibility_verified else 0,
+            1 if self.identity_verified else 0,
+            1 if self.address_verified else 0,
+            1 if self.age_verified else 0
         ])
         return (completed_checks / total_checks) * 100
     

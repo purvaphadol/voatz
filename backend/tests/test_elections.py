@@ -187,6 +187,35 @@ def test_election_activate_no_ballots(client, setup_data):
     assert 'ballot' in res.get_json()['error'].lower()
 
 
+def test_election_activate_empty_ballot(client, setup_data):
+    """POST activate on draft election with ballot having zero candidates — 400 with ballot name"""
+    from app.models.ballot import Ballot
+    from app.utils.constants import STATUS_ACTIVE
+
+    create_res = create_election(client, setup_data['headers'], title='Empty Ballot Election')
+    election_id = create_res.get_json()['election_id']
+    
+    with client.application.app_context():
+        ballot = Ballot(
+            company_id=setup_data['company_id'],
+            election_id=election_id,
+            title='Unpopulated Ballot',
+            ballot_code='BAL-EMPTY-1',
+            ballot_type='single_choice',
+            status=STATUS_ACTIVE,
+            is_active=True
+        )
+        db.session.add(ballot)
+        db.session.commit()
+
+    res = client.post(f'/api/elections/{election_id}/activate', headers=setup_data['headers'])
+    assert res.status_code == 400
+    err_msg = res.get_json()['error']
+    assert 'Unpopulated Ballot' in err_msg
+    assert 'no active candidates' in err_msg.lower()
+
+
+
 # --- Delete ---
 
 def test_election_delete(client, setup_data):

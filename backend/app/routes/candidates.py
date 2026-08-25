@@ -5,7 +5,7 @@ from app.models.candidate import Candidate
 from app.models.ballot import Ballot
 from app.models.election import Election
 from app.models.vote import Vote
-from app.utils import get_current_company_id, require_permission, get_current_user
+from app.utils import get_current_company_id, require_permission, get_current_user, is_administrator, check_user_permission
 from sqlalchemy import or_
 from datetime import datetime, timezone
 from werkzeug.utils import secure_filename
@@ -107,9 +107,15 @@ def list_candidates():
         'incumbent_candidates': sum(1 for c in candidates if c.is_incumbent),
         'withdrawn_candidates': sum(1 for c in candidates if c.is_withdrawn)
     }
-    
-    return jsonify({
-        'data': [{
+
+    out_data = []
+    has_admin = is_administrator()
+    has_results_perm = check_user_permission('Votes', 'view_unpublished_results')
+    for c in candidates:
+        c_election = c.ballot.election if (c.ballot and c.ballot.election) else None
+        res_pub = bool(c_election.results_published) if c_election else False
+        can_view_results = res_pub or has_admin or has_results_perm
+        out_data.append({
             'id': c.id,
             'name': c.name,
             'candidate_code': c.candidate_code,
@@ -118,9 +124,9 @@ def list_candidates():
             'title': c.title,
             'image_url': c.image_url,
             'ballot_id': c.ballot_id,
-            'ballot_title': c.ballot.title,
-            'election_id': c.ballot.election_id,
-            'election_title': c.ballot.election.title,
+            'ballot_title': c.ballot.title if c.ballot else None,
+            'election_id': c.ballot.election_id if c.ballot else None,
+            'election_title': c.ballot.election.title if (c.ballot and c.ballot.election) else None,
             'order_index': c.order_index,
             'is_write_in': c.is_write_in,
             'is_incumbent': c.is_incumbent,
@@ -128,14 +134,18 @@ def list_candidates():
             'status': c.status,
             'is_qualified': c.is_qualified,
             'is_withdrawn': c.is_withdrawn,
-            'total_votes_received': c.total_votes_received,
-            'vote_percentage': c.vote_percentage,
-            'rank_position': c.rank_position,
+            'results_published': res_pub,
+            'total_votes_received': c.total_votes_received if can_view_results else None,
+            'vote_percentage': c.vote_percentage if can_view_results else None,
+            'rank_position': c.rank_position if can_view_results else None,
             'full_display_name': c.full_display_name,
             'party_display': c.party_display,
             'created_at': c.created_at.isoformat() if c.created_at else None,
             'updated_at': c.updated_at.isoformat() if c.updated_at else None
-        } for c in candidates],
+        })
+    
+    return jsonify({
+        'data': out_data,
         'total': pagination.total,
         'page': pagination.page,
         'pages': pagination.pages,
@@ -190,28 +200,46 @@ def create_candidate():
     while Candidate.query.filter_by(candidate_code=candidate_code, ballot_id=ballot_id).first():
         candidate_code = generate_candidate_code()
     
+    # Helper: convert empty strings to None (prevents PostgreSQL integer
+    # column errors when the frontend sends '' for unfilled optional fields).
+    def _str_or_none(val):
+        """Return None for falsy/whitespace-only strings, otherwise stripped str."""
+        if val is None:
+            return None
+        s = str(val).strip()
+        return s if s else None
+
+    def _int_or_none(val):
+        """Safely coerce to int; return None for empty/invalid values."""
+        if val is None or val == '':
+            return None
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return None
+
     # Create candidate
     candidate = Candidate()
     candidate.company_id = company_id
     candidate.ballot_id = ballot_id
     candidate.name = data['name']
     candidate.candidate_code = candidate_code
-    candidate.party = data.get('party')
-    candidate.party_abbreviation = data.get('party_abbreviation')
-    candidate.title = data.get('title')
-    candidate.description = data.get('description')
-    candidate.biography = data.get('biography')
-    candidate.platform_summary = data.get('platform_summary')
+    candidate.party = _str_or_none(data.get('party'))
+    candidate.party_abbreviation = _str_or_none(data.get('party_abbreviation'))
+    candidate.title = _str_or_none(data.get('title'))
+    candidate.description = _str_or_none(data.get('description'))
+    candidate.biography = _str_or_none(data.get('biography'))
+    candidate.platform_summary = _str_or_none(data.get('platform_summary'))
     
     # Media and presentation
-    candidate.image_url = data.get('image_url')
-    candidate.profile_image_path = data.get('profile_image_path')
-    candidate.campaign_website = data.get('campaign_website')
-    candidate.social_media_links = data.get('social_media_links')
-    candidate.display_name = data.get('display_name')
+    candidate.image_url = _str_or_none(data.get('image_url'))
+    candidate.profile_image_path = _str_or_none(data.get('profile_image_path'))
+    candidate.campaign_website = _str_or_none(data.get('campaign_website'))
+    candidate.social_media_links = data.get('social_media_links') or None
+    candidate.display_name = _str_or_none(data.get('display_name'))
     
     # Position and status
-    candidate.order_index = data.get('order_index', 0)
+    candidate.order_index = _int_or_none(data.get('order_index')) or 0
     candidate.is_write_in = data.get('is_write_in', False)
     candidate.is_incumbent = data.get('is_incumbent', False)
     candidate.is_endorsed = data.get('is_endorsed', False)
@@ -220,20 +248,20 @@ def create_candidate():
     candidate.is_qualified = data.get('is_qualified', True)
     
     # Contact information
-    candidate.email = data.get('email')
-    candidate.phone = data.get('phone')
-    candidate.address = data.get('address')
+    candidate.email = _str_or_none(data.get('email'))
+    candidate.phone = _str_or_none(data.get('phone'))
+    candidate.address = _str_or_none(data.get('address'))
     
     # Background information
-    candidate.age = data.get('age')
-    candidate.years_in_office = data.get('years_in_office')
-    candidate.education = data.get('education')
-    candidate.occupation = data.get('occupation')
+    candidate.age = _int_or_none(data.get('age'))
+    candidate.years_in_office = _int_or_none(data.get('years_in_office'))
+    candidate.education = _str_or_none(data.get('education'))
+    candidate.occupation = _str_or_none(data.get('occupation'))
     
     # Campaign information
-    candidate.campaign_finance_id = data.get('campaign_finance_id')
-    candidate.endorsements = data.get('endorsements')
-    candidate.key_issues = data.get('key_issues')
+    candidate.campaign_finance_id = _str_or_none(data.get('campaign_finance_id'))
+    candidate.endorsements = _str_or_none(data.get('endorsements'))
+    candidate.key_issues = data.get('key_issues') or None
     
     set_audit_fields(candidate, is_create=True)
     
@@ -259,6 +287,10 @@ def get_candidate(candidate_id):
         Candidate.company_id == company_id,
         Candidate.status != STATUS_DEACTIVATED
     ).first_or_404()
+
+    c_election = candidate.ballot.election if (candidate.ballot and candidate.ballot.election) else None
+    res_pub = bool(c_election.results_published) if c_election else False
+    can_view_results = res_pub or is_administrator() or check_user_permission('Votes', 'view_unpublished_results')
     
     return jsonify({
         'id': candidate.id,
@@ -300,13 +332,14 @@ def get_candidate(candidate_id):
         'is_withdrawn': candidate.is_withdrawn,
         'withdrawal_date': candidate.withdrawal_date.isoformat() if candidate.withdrawal_date else None,
         'withdrawal_reason': candidate.withdrawal_reason,
-        'total_votes_received': candidate.total_votes_received,
-        'vote_percentage': candidate.vote_percentage,
-        'rank_position': candidate.rank_position,
+        'results_published': res_pub,
+        'total_votes_received': candidate.total_votes_received if can_view_results else None,
+        'vote_percentage': candidate.vote_percentage if can_view_results else None,
+        'rank_position': candidate.rank_position if can_view_results else None,
         'full_display_name': candidate.full_display_name,
         'party_display': candidate.party_display,
         'is_special_option': candidate.is_special_option,
-        'vote_summary': candidate.get_vote_summary(),
+        'vote_summary': candidate.get_vote_summary() if can_view_results else None,
         'created_at': candidate.created_at.isoformat() if candidate.created_at else None,
         'updated_at': candidate.updated_at.isoformat() if candidate.updated_at else None
     })
@@ -330,37 +363,53 @@ def update_candidate(candidate_id):
     if candidate.ballot.election.status == 'active':
         return jsonify({'error': 'Cannot modify candidates for active elections'}), 400
     
+    # Helper: convert empty strings to None (prevents PostgreSQL integer
+    # column errors when the frontend sends '' for unfilled optional fields).
+    def _str_or_none(val):
+        if val is None:
+            return None
+        s = str(val).strip()
+        return s if s else None
+
+    def _int_or_none(val):
+        if val is None or val == '':
+            return None
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return None
+
     # Update basic information
-    if data.get('name'):
+    if 'name' in data and data.get('name'):
         candidate.name = data['name']
-    if data.get('party'):
-        candidate.party = data['party']
-    if data.get('party_abbreviation'):
-        candidate.party_abbreviation = data['party_abbreviation']
-    if data.get('title'):
-        candidate.title = data['title']
-    if data.get('description'):
-        candidate.description = data['description']
-    if data.get('biography'):
-        candidate.biography = data['biography']
-    if data.get('platform_summary'):
-        candidate.platform_summary = data['platform_summary']
+    if 'party' in data:
+        candidate.party = _str_or_none(data['party'])
+    if 'party_abbreviation' in data:
+        candidate.party_abbreviation = _str_or_none(data['party_abbreviation'])
+    if 'title' in data:
+        candidate.title = _str_or_none(data['title'])
+    if 'description' in data:
+        candidate.description = _str_or_none(data['description'])
+    if 'biography' in data:
+        candidate.biography = _str_or_none(data['biography'])
+    if 'platform_summary' in data:
+        candidate.platform_summary = _str_or_none(data['platform_summary'])
     
     # Update media and presentation
-    if data.get('image_url'):
-        candidate.image_url = data['image_url']
-    if data.get('profile_image_path'):
-        candidate.profile_image_path = data['profile_image_path']
-    if data.get('campaign_website'):
-        candidate.campaign_website = data['campaign_website']
-    if data.get('social_media_links'):
-        candidate.social_media_links = data['social_media_links']
-    if data.get('display_name'):
-        candidate.display_name = data['display_name']
+    if 'image_url' in data:
+        candidate.image_url = _str_or_none(data['image_url'])
+    if 'profile_image_path' in data:
+        candidate.profile_image_path = _str_or_none(data['profile_image_path'])
+    if 'campaign_website' in data:
+        candidate.campaign_website = _str_or_none(data['campaign_website'])
+    if 'social_media_links' in data:
+        candidate.social_media_links = data['social_media_links'] or None
+    if 'display_name' in data:
+        candidate.display_name = _str_or_none(data['display_name'])
     
     # Update position and status
     if 'order_index' in data:
-        candidate.order_index = data['order_index']
+        candidate.order_index = _int_or_none(data['order_index']) or 0
     if 'is_incumbent' in data:
         candidate.is_incumbent = data['is_incumbent']
     if 'is_endorsed' in data:
@@ -384,30 +433,30 @@ def update_candidate(candidate_id):
         candidate.is_qualified = data['is_qualified']
     
     # Update contact information
-    if data.get('email'):
-        candidate.email = data['email']
-    if data.get('phone'):
-        candidate.phone = data['phone']
-    if data.get('address'):
-        candidate.address = data['address']
+    if 'email' in data:
+        candidate.email = _str_or_none(data['email'])
+    if 'phone' in data:
+        candidate.phone = _str_or_none(data['phone'])
+    if 'address' in data:
+        candidate.address = _str_or_none(data['address'])
     
     # Update background information
-    if data.get('age'):
-        candidate.age = data['age']
-    if data.get('years_in_office'):
-        candidate.years_in_office = data['years_in_office']
-    if data.get('education'):
-        candidate.education = data['education']
-    if data.get('occupation'):
-        candidate.occupation = data['occupation']
+    if 'age' in data:
+        candidate.age = _int_or_none(data['age'])
+    if 'years_in_office' in data:
+        candidate.years_in_office = _int_or_none(data['years_in_office'])
+    if 'education' in data:
+        candidate.education = _str_or_none(data['education'])
+    if 'occupation' in data:
+        candidate.occupation = _str_or_none(data['occupation'])
     
     # Update campaign information
-    if data.get('campaign_finance_id'):
-        candidate.campaign_finance_id = data['campaign_finance_id']
-    if data.get('endorsements'):
-        candidate.endorsements = data['endorsements']
-    if data.get('key_issues'):
-        candidate.key_issues = data['key_issues']
+    if 'campaign_finance_id' in data:
+        candidate.campaign_finance_id = _str_or_none(data['campaign_finance_id'])
+    if 'endorsements' in data:
+        candidate.endorsements = _str_or_none(data['endorsements'])
+    if 'key_issues' in data:
+        candidate.key_issues = data['key_issues'] or None
     
     set_audit_fields(candidate, is_create=False)
     

@@ -5,7 +5,7 @@ from app.models.ballot import Ballot
 from app.models.election import Election
 from app.models.candidate import Candidate
 from app.models.vote import Vote
-from app.utils import get_current_company_id, require_permission, get_current_user, is_administrator
+from app.utils import get_current_company_id, require_permission, get_current_user, is_administrator, check_user_permission
 from app.utils.validators import parse_pagination, validate_ballot_input
 from app.utils.query_helpers import get_active_ballots_query
 from app.utils.db_utils import safe_commit
@@ -92,8 +92,13 @@ def list_ballots():
     pagination = query.order_by(Ballot.election_id, Ballot.order_index).paginate(page=page, per_page=per_page, error_out=False)
     ballots = pagination.items
     
-    return jsonify({
-        'data': [{
+    out_ballots = []
+    has_admin = is_administrator()
+    has_results_perm = check_user_permission('Votes', 'view_unpublished_results')
+    for b in ballots:
+        res_pub = bool(b.election.results_published) if b.election else False
+        can_view_results = res_pub or has_admin or has_results_perm
+        out_ballots.append({
             'id': b.id,
             'title': b.title,
             'description': b.description,
@@ -101,7 +106,7 @@ def list_ballots():
             'ballot_type': b.ballot_type,
             'position_title': b.position_title,
             'election_id': b.election_id,
-            'election_title': b.election.title,
+            'election_title': b.election.title if b.election else None,
             'order_index': b.order_index,
             'min_selections': b.min_selections,
             'max_selections': b.max_selections,
@@ -117,13 +122,17 @@ def list_ballots():
             'status': b.status,
             'is_published': b.is_published,
             'is_test_ballot': b.is_test_ballot,
-            'total_votes_cast': b.total_votes_cast,
+            'results_published': res_pub,
+            'total_votes_cast': b.total_votes_cast if can_view_results else None,
             'total_eligible_voters': b.total_eligible_voters,
             'candidate_count': len(b.candidates),
             'selection_rules_text': b.get_selection_rules_text(),
             'created_at': b.created_at.isoformat() if b.created_at else None,
             'updated_at': b.updated_at.isoformat() if b.updated_at else None
-        } for b in ballots],
+        })
+
+    return jsonify({
+        'data': out_ballots,
         'total': pagination.total,
         'page': pagination.page,
         'pages': pagination.pages,
@@ -253,6 +262,10 @@ def get_ballot(ballot_id):
     
     # Get vote count
     vote_count = Vote.query.filter_by(ballot_id=ballot_id).count()
+
+    c_election = ballot.election if ballot else None
+    res_pub = bool(c_election.results_published) if c_election else False
+    can_view_results = res_pub or is_administrator() or check_user_permission('Votes', 'view_unpublished_results')
     
     return jsonify({
         'id': ballot.id,
@@ -279,9 +292,10 @@ def get_ballot(ballot_id):
         'status': ballot.status,
         'is_published': ballot.is_published,
         'is_test_ballot': ballot.is_test_ballot,
-        'total_votes_cast': ballot.total_votes_cast,
+        'total_votes_cast': ballot.total_votes_cast if can_view_results else None,
         'total_eligible_voters': ballot.total_eligible_voters,
         'selection_rules_text': ballot.get_selection_rules_text(),
+        'results_published': res_pub,
         'candidates': [{
             'id': c.id,
             'name': c.name,
@@ -295,12 +309,13 @@ def get_ballot(ballot_id):
             'is_incumbent': c.is_incumbent,
             'is_active': c.status == STATUS_ACTIVE,
             'status': c.status,
-            'total_votes_received': c.total_votes_received,
-            'vote_percentage': c.vote_percentage
+            'results_published': res_pub,
+            'total_votes_received': c.total_votes_received if can_view_results else None,
+            'vote_percentage': c.vote_percentage if can_view_results else None
         } for c in candidates],
         'statistics': {
             'candidate_count': len(candidates),
-            'vote_count': vote_count,
+            'vote_count': vote_count if can_view_results else None,
             'active_candidates': sum(1 for c in candidates if c.status == STATUS_ACTIVE)
         },
         'created_at': ballot.created_at.isoformat() if ballot.created_at else None,
@@ -513,9 +528,14 @@ def get_ballot_candidates(ballot_id):
     
     candidates = Candidate.query.filter_by(ballot_id=ballot_id, is_active=True).order_by(Candidate.order_index).all()
     
+    c_election = ballot.election if ballot else None
+    res_pub = bool(c_election.results_published) if c_election else False
+    can_view_results = res_pub or is_administrator() or check_user_permission('Votes', 'view_unpublished_results')
+
     return jsonify({
         'ballot_id': ballot_id,
         'ballot_title': ballot.title,
+        'results_published': res_pub,
         'candidates': [{
             'id': c.id,
             'name': c.name,
@@ -530,8 +550,9 @@ def get_ballot_candidates(ballot_id):
             'is_incumbent': c.is_incumbent,
             'is_active': c.is_active,
             'is_qualified': c.is_qualified,
-            'total_votes_received': c.total_votes_received,
-            'vote_percentage': c.vote_percentage,
+            'results_published': res_pub,
+            'total_votes_received': c.total_votes_received if can_view_results else None,
+            'vote_percentage': c.vote_percentage if can_view_results else None,
             'full_display_name': c.full_display_name
         } for c in candidates]
     })

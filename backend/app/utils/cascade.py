@@ -197,6 +197,12 @@ def cascade_set_inactive(entity_type, entity_id, top_parent_type=None, top_paren
                 else:
                     child.status = STATUS_INACTIVE
 
+            if hasattr(child, 'is_active'):
+                try:
+                    child.is_active = False
+                except AttributeError:
+                    pass
+
             if hasattr(child, 'deactivated_by_cascade_from_type'):
                 child.deactivated_by_cascade_from_type = root_type
             if hasattr(child, 'deactivated_by_cascade_from_id'):
@@ -272,6 +278,13 @@ def cascade_reactivate(entity_type, entity_id, top_parent_type=None, top_parent_
                         child.status = 'draft'
                     else:
                         child.status = STATUS_ACTIVE
+
+                if hasattr(child, 'is_active'):
+                    try:
+                        child.is_active = True
+                    except AttributeError:
+                        pass
+
                 child.deactivated_by_cascade_from_type = None
                 child.deactivated_by_cascade_from_id = None
 

@@ -46,6 +46,7 @@ def get_active_ballots_query(company_id):
     from app.models.ballot import Ballot
     return Ballot.query.filter(
         Ballot.company_id == company_id,
+        Ballot.status == STATUS_ACTIVE,
         Ballot.is_active == True
     )
 
@@ -53,6 +54,7 @@ def get_active_candidates_query(company_id):
     from app.models.candidate import Candidate
     return Candidate.query.filter(
         Candidate.company_id == company_id,
+        Candidate.status == STATUS_ACTIVE,
         Candidate.is_active == True
     )
 
